@@ -1,0 +1,695 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		FD4A0A232F5C50E700E9D16E /* AIChat Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FD4A0A242F5C50E700E9D16E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD4A0A162F5C50E700E9D16E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD4A0A212F5C50E700E9D16E;
+			remoteInfo = "AIChat Watch App";
+		};
+		FD4A0A322F5C50E800E9D16E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD4A0A162F5C50E700E9D16E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD4A0A212F5C50E700E9D16E;
+			remoteInfo = "AIChat Watch App";
+		};
+		FD4A0A3C2F5C50E800E9D16E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD4A0A162F5C50E700E9D16E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD4A0A212F5C50E700E9D16E;
+			remoteInfo = "AIChat Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		FD4A0A482F5C50E800E9D16E /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				FD4A0A232F5C50E700E9D16E /* AIChat Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		FD4A0A1C2F5C50E700E9D16E /* AIChat.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIChat.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AIChat Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD4A0A312F5C50E800E9D16E /* AIChat Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		FD4A0A262F5C50E700E9D16E /* AIChat Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "AIChat Watch App";
+			sourceTree = "<group>";
+		};
+		FD4A0A342F5C50E800E9D16E /* AIChat Watch AppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "AIChat Watch AppTests";
+			sourceTree = "<group>";
+		};
+		FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "AIChat Watch AppUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FD4A0A1F2F5C50E700E9D16E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A2E2F5C50E800E9D16E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A382F5C50E800E9D16E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		FD4A0A152F5C50E700E9D16E = {
+			isa = PBXGroup;
+			children = (
+				FD4A0A262F5C50E700E9D16E /* AIChat Watch App */,
+				FD4A0A342F5C50E800E9D16E /* AIChat Watch AppTests */,
+				FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */,
+				FD4A0A1D2F5C50E700E9D16E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		FD4A0A1D2F5C50E700E9D16E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				FD4A0A1C2F5C50E700E9D16E /* AIChat.app */,
+				FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */,
+				FD4A0A312F5C50E800E9D16E /* AIChat Watch AppTests.xctest */,
+				FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		FD4A0A1B2F5C50E700E9D16E /* AIChat */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD4A0A492F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat" */;
+			buildPhases = (
+				FD4A0A1A2F5C50E700E9D16E /* Resources */,
+				FD4A0A482F5C50E800E9D16E /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FD4A0A252F5C50E700E9D16E /* PBXTargetDependency */,
+			);
+			name = AIChat;
+			packageProductDependencies = (
+			);
+			productName = AIChat;
+			productReference = FD4A0A1C2F5C50E700E9D16E /* AIChat.app */;
+			productType = "com.apple.product-type.application.watchapp2-container";
+		};
+		FD4A0A212F5C50E700E9D16E /* AIChat Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD4A0A452F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch App" */;
+			buildPhases = (
+				FD4A0A1E2F5C50E700E9D16E /* Sources */,
+				FD4A0A1F2F5C50E700E9D16E /* Frameworks */,
+				FD4A0A202F5C50E700E9D16E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				FD4A0A262F5C50E700E9D16E /* AIChat Watch App */,
+			);
+			name = "AIChat Watch App";
+			packageProductDependencies = (
+			);
+			productName = "AIChat Watch App";
+			productReference = FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FD4A0A302F5C50E800E9D16E /* AIChat Watch AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD4A0A4C2F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch AppTests" */;
+			buildPhases = (
+				FD4A0A2D2F5C50E800E9D16E /* Sources */,
+				FD4A0A2E2F5C50E800E9D16E /* Frameworks */,
+				FD4A0A2F2F5C50E800E9D16E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FD4A0A332F5C50E800E9D16E /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FD4A0A342F5C50E800E9D16E /* AIChat Watch AppTests */,
+			);
+			name = "AIChat Watch AppTests";
+			packageProductDependencies = (
+			);
+			productName = "AIChat Watch AppTests";
+			productReference = FD4A0A312F5C50E800E9D16E /* AIChat Watch AppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FD4A0A3A2F5C50E800E9D16E /* AIChat Watch AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FD4A0A4F2F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch AppUITests" */;
+			buildPhases = (
+				FD4A0A372F5C50E800E9D16E /* Sources */,
+				FD4A0A382F5C50E800E9D16E /* Frameworks */,
+				FD4A0A392F5C50E800E9D16E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FD4A0A3D2F5C50E800E9D16E /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */,
+			);
+			name = "AIChat Watch AppUITests";
+			packageProductDependencies = (
+			);
+			productName = "AIChat Watch AppUITests";
+			productReference = FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FD4A0A162F5C50E700E9D16E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					FD4A0A1B2F5C50E700E9D16E = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					FD4A0A212F5C50E700E9D16E = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					FD4A0A302F5C50E800E9D16E = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = FD4A0A212F5C50E700E9D16E;
+					};
+					FD4A0A3A2F5C50E800E9D16E = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = FD4A0A212F5C50E700E9D16E;
+					};
+				};
+			};
+			buildConfigurationList = FD4A0A192F5C50E700E9D16E /* Build configuration list for PBXProject "AIChat" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = FD4A0A152F5C50E700E9D16E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = FD4A0A1D2F5C50E700E9D16E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FD4A0A1B2F5C50E700E9D16E /* AIChat */,
+				FD4A0A212F5C50E700E9D16E /* AIChat Watch App */,
+				FD4A0A302F5C50E800E9D16E /* AIChat Watch AppTests */,
+				FD4A0A3A2F5C50E800E9D16E /* AIChat Watch AppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FD4A0A1A2F5C50E700E9D16E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A202F5C50E700E9D16E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A2F2F5C50E800E9D16E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A392F5C50E800E9D16E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		FD4A0A1E2F5C50E700E9D16E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A2D2F5C50E800E9D16E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD4A0A372F5C50E800E9D16E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FD4A0A252F5C50E700E9D16E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD4A0A212F5C50E700E9D16E /* AIChat Watch App */;
+			targetProxy = FD4A0A242F5C50E700E9D16E /* PBXContainerItemProxy */;
+		};
+		FD4A0A332F5C50E800E9D16E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD4A0A212F5C50E700E9D16E /* AIChat Watch App */;
+			targetProxy = FD4A0A322F5C50E800E9D16E /* PBXContainerItemProxy */;
+		};
+		FD4A0A3D2F5C50E800E9D16E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD4A0A212F5C50E700E9D16E /* AIChat Watch App */;
+			targetProxy = FD4A0A3C2F5C50E800E9D16E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		FD4A0A432F5C50E800E9D16E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		FD4A0A442F5C50E800E9D16E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		FD4A0A462F5C50E800E9D16E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		FD4A0A472F5C50E800E9D16E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		FD4A0A4A2F5C50E800E9D16E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		FD4A0A4B2F5C50E800E9D16E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		FD4A0A4D2F5C50E800E9D16E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AIChat Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AIChat Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		FD4A0A4E2F5C50E800E9D16E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AIChat Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AIChat Watch App";
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		FD4A0A502F5C50E800E9D16E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "AIChat Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		FD4A0A512F5C50E800E9D16E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "AIChat Watch App";
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		FD4A0A192F5C50E700E9D16E /* Build configuration list for PBXProject "AIChat" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD4A0A432F5C50E800E9D16E /* Debug */,
+				FD4A0A442F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD4A0A452F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD4A0A462F5C50E800E9D16E /* Debug */,
+				FD4A0A472F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD4A0A492F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD4A0A4A2F5C50E800E9D16E /* Debug */,
+				FD4A0A4B2F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD4A0A4C2F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch AppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD4A0A4D2F5C50E800E9D16E /* Debug */,
+				FD4A0A4E2F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FD4A0A4F2F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Watch AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FD4A0A502F5C50E800E9D16E /* Debug */,
+				FD4A0A512F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = FD4A0A162F5C50E700E9D16E /* Project object */;
+}
