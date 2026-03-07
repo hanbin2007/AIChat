@@ -8,17 +8,18 @@
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
+    @EnvironmentObject private var chatStore: ChatStore
+    @State private var navigationPath: [UUID] = []
 
-#Preview {
-    ContentView()
+    var body: some View {
+        NavigationStack(path: $navigationPath) {
+            ConversationListView(navigationPath: $navigationPath)
+                .navigationDestination(for: UUID.self) { conversationID in
+                    ConversationDetailView(conversationID: conversationID)
+                }
+        }
+        .task {
+            await chatStore.loadConversationsIfNeeded()
+        }
+    }
 }
