@@ -27,26 +27,14 @@ nonisolated struct AIModelOption: Identifiable, Hashable {
 }
 
 enum AIModelCatalog {
-    static let builtInOptions: [AIModelOption] = [
+    static let builtInOptions: [AIModelOption] = LicensedModelCatalog.supportedModels.map { definition in
         AIModelOption(
-            id: "gemini-3-flash-preview",
-            title: "Gemini 3 Flash",
-            shortTitle: "Flash",
-            subtitle: "Fast multimodal"
-        ),
-        AIModelOption(
-            id: "gemini-3.1-pro-preview",
-            title: "Gemini 3.1 Pro",
-            shortTitle: "Pro",
-            subtitle: "Deeper reasoning"
-        ),
-        AIModelOption(
-            id: "gemini-2.5-flash",
-            title: "Gemini 2.5 Flash",
-            shortTitle: "2.5",
-            subtitle: "Stable fallback"
+            id: definition.id,
+            title: definition.title,
+            shortTitle: compactShortLabel(for: definition.id),
+            subtitle: definition.subtitle
         )
-    ]
+    }
 
     static func quickOptions(defaultModel: String) -> [AIModelOption] {
         var options = builtInOptions
@@ -56,6 +44,16 @@ enum AIModelCatalog {
         }
 
         return options
+    }
+
+    static func quickOptions(defaultModel: String, allowedModelIDs: Set<String>?) -> [AIModelOption] {
+        let options = quickOptions(defaultModel: defaultModel)
+        guard let allowedModelIDs else {
+            return options
+        }
+
+        let filtered = options.filter { allowedModelIDs.contains($0.id) }
+        return filtered.isEmpty ? options : filtered
     }
 
     static func option(for model: String) -> AIModelOption? {

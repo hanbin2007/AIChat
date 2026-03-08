@@ -34,6 +34,7 @@ struct ConversationDetailView: View {
     @State private var isShowingModelPicker = false
     @State private var isShowingThinkingPicker = false
     @State private var isComposerExpanded = true
+    @State private var isShowingActivationCenter = false
 
     var body: some View {
         ZStack {
@@ -45,8 +46,14 @@ struct ConversationDetailView: View {
                         messagesView(conversation: conversation)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                        if isComposerExpanded {
-                            composerView(conversation: conversation)
+                        if chatStore.isReadOnlyMode || isComposerExpanded {
+                            Group {
+                                if chatStore.isReadOnlyMode {
+                                    lockedComposerView
+                                } else {
+                                    composerView(conversation: conversation)
+                                }
+                            }
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -54,7 +61,7 @@ struct ConversationDetailView: View {
                     .padding(.horizontal, 6)
                     .padding(.bottom, ComposerLayout.containerBottomPadding)
 
-                    if isComposerExpanded == false {
+                    if isComposerExpanded == false, chatStore.isReadOnlyMode == false {
                         collapsedComposerButton
                             .padding(.trailing, 10)
                             .padding(.bottom, ComposerLayout.collapsedButtonBottomPadding)
@@ -88,8 +95,11 @@ struct ConversationDetailView: View {
         .sheet(isPresented: $isShowingSettings) {
             ConversationSettingsView(conversationID: conversationID)
         }
+        .sheet(isPresented: $isShowingActivationCenter) {
+            ActivationCenterView()
+        }
         .confirmationDialog("Choose Model", isPresented: $isShowingModelPicker) {
-            ForEach(AIModelCatalog.quickOptions(defaultModel: chatStore.configuration.geminiModel)) { option in
+            ForEach(chatStore.availableModelOptions()) { option in
                 Button(option.title) {
                     Task {
                         await chatStore.updateModel(option.id, for: conversationID)
@@ -159,16 +169,28 @@ struct ConversationDetailView: View {
 
     private var starterCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Start with anything")
+            Text(chatStore.isReadOnlyMode ? "只读模式" : "Start with anything")
                 .font(.headline)
 
-            Text("Ask a question, dictate a prompt, or attach a photo for visual analysis.")
+            Text(
+                chatStore.isReadOnlyMode ?
+                "你现在可以查看历史消息。完成离线激活后，才能在手表上发新消息和传图。" :
+                "Ask a question, dictate a prompt, or attach a photo for visual analysis."
+            )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 6) {
-                starterChip("Summarize notes")
-                starterChip("Explain this photo")
+            if chatStore.isReadOnlyMode {
+                Button("Activate on Watch") {
+                    isShowingActivationCenter = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    starterChip("Summarize notes")
+                    starterChip("Explain this photo")
+                }
             }
         }
         .padding(12)
@@ -193,7 +215,7 @@ struct ConversationDetailView: View {
     }
 
     private func composerView(conversation: ConversationThread) -> some View {
-        let aiConfiguration = conversation.resolvedAIConfiguration(defaultModel: chatStore.configuration.geminiModel)
+        let aiConfiguration = chatStore.aiConfiguration(for: conversationID)
         let attachments = chatStore.draftAttachments(for: conversationID)
         let hasAttachments = attachments.isEmpty == false
 
@@ -313,6 +335,18 @@ struct ConversationDetailView: View {
         )
     }
 
+    private var lockedComposerView: some View {
+        ActivationStatusCard(
+            title: "发送已锁定",
+            message: chatStore.activationStatusMessage,
+            iconName: "lock.fill",
+            accentColor: .orange,
+            actionTitle: "输入激活码"
+        ) {
+            isShowingActivationCenter = true
+        }
+    }
+
     private var collapsedComposerButton: some View {
         Button {
             expandComposer()
@@ -405,6 +439,11 @@ struct ConversationDetailView: View {
     }
 
     private func sendCurrentDraft() {
+        guard chatStore.isReadOnlyMode == false else {
+            isShowingActivationCenter = true
+            return
+        }
+
         guard chatStore.isSending(conversationID: conversationID) == false else {
             return
         }
@@ -430,6 +469,10 @@ struct ConversationDetailView: View {
     }
 
     private func collapseComposer() {
+        guard chatStore.isReadOnlyMode == false else {
+            return
+        }
+
         guard isComposerExpanded else {
             return
         }
