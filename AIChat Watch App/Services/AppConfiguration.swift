@@ -109,11 +109,20 @@ struct AppConfiguration: Equatable {
     }
 
     var voiceInputConfigurationMessage: String? {
-        guard geminiAPIKey == nil else {
+        switch backendMode {
+        case .direct:
+            guard geminiAPIKey == nil else {
+                return nil
+            }
+
+            return "Voice transcription needs GEMINI_API_KEY because audio is transcribed with Gemini before sending."
+        case .relay:
+            if relayBaseURL == nil || relayBearerToken == nil {
+                return "Voice transcription needs AI_RELAY_BASE_URL and AI_RELAY_BEARER_TOKEN in relay mode."
+            }
+
             return nil
         }
-
-        return "Voice transcription needs GEMINI_API_KEY because audio is transcribed with Gemini before sending."
     }
 
     var relayStreamURL: URL? {
@@ -122,6 +131,14 @@ struct AppConfiguration: Equatable {
         }
 
         return relayBaseURL.appending(path: relayStreamPath)
+    }
+
+    var relayTranscriptionURL: URL? {
+        guard let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/audio/transcribe")
     }
 
     private static func value(

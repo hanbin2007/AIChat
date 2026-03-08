@@ -245,6 +245,60 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(request.systemPrompt, AIContextBuilder.conciseSystemPrompt)
     }
 
+    func testRelayModeProvidesRelayTranscriptionService() {
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "token",
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+
+        let service = AIServiceFactory.makeTranscriptionService(configuration: configuration)
+
+        XCTAssertNotNil(service)
+        XCTAssertTrue(service is RelayTranscriptionService)
+    }
+
+    func testRelayTranscriptionRequestUsesPromptAndAudio() throws {
+        let audioData = Data([0xAA, 0xBB, 0xCC])
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: audioData,
+            suggestedFilename: "voice.wav",
+            durationSeconds: 4.5
+        )
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .assistant, text: "Do you want the Tokyo or Osaka plan?"),
+                ChatMessage(role: .user, text: "Use the Tokyo one and keep it short.")
+            ]
+        )
+        let service = RelayTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = service.makeRelayRequest(for: audioAttachment, in: conversation)
+
+        XCTAssertEqual(request.model, "gemini-3-flash-preview")
+        XCTAssertEqual(request.systemPrompt, VoiceTranscriptionPromptBuilder.systemPrompt)
+        XCTAssertTrue(request.prompt.contains("Assistant: Do you want the Tokyo or Osaka plan?"))
+        XCTAssertTrue(request.prompt.contains("User: Use the Tokyo one and keep it short."))
+        XCTAssertEqual(request.audio.mimeType, "audio/wav")
+        XCTAssertEqual(request.audio.base64Data, audioData.base64EncodedString())
+    }
+
     func testModelCatalogUsesDesktopScaleOutputBudgetForSupportedGeminiModels() {
         XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-3-flash-preview"), 65_536)
         XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-3.1-pro-preview"), 65_536)
@@ -373,6 +427,161 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(store.draftText(for: conversationID), "Book me a train to Hangzhou tomorrow morning")
         XCTAssertNil(store.errorMessage(for: conversationID))
     }
+
+    @MainActor
+    func testRecordedAudioRetriesBeforeFailing() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let transcriptionService = FailingThenSuccessTranscriptionService(
+            failuresBeforeSuccess: 2,
+            transcript: "Retry transcript succeeded"
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: transcriptionService,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            sendRetryDelayNanoseconds: { _ in 0 }
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x01, 0x02, 0x03]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.0
+        )
+
+        await store.sendRecordedAudio(audioAttachment, in: conversationID)
+
+        XCTAssertEqual(transcriptionService.callCount, 3)
+        XCTAssertEqual(store.draftText(for: conversationID), "Retry transcript succeeded")
+        XCTAssertNil(store.errorMessage(for: conversationID))
+    }
+
+    @MainActor
+    func testSendRetryLimitDefaultsToThreeAndClampsToSupportedBounds() async throws {
+        let suiteName = "AIChatTests.RetryLimit.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults
+        )
+
+        XCTAssertEqual(store.sendFailureRetryLimit, 3)
+
+        store.updateSendFailureRetryLimit(99)
+        XCTAssertEqual(store.sendFailureRetryLimit, 10)
+
+        store.updateSendFailureRetryLimit(-2)
+        XCTAssertEqual(store.sendFailureRetryLimit, 1)
+    }
+
+    @MainActor
+    func testSendMessageRetriesBeforeReportingFailure() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let suiteName = "AIChatTests.SendRetry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let aiService = FailingThenSuccessAIStreamingService(failuresBeforeSuccess: 2)
+        let store = ChatStore(
+            repository: repository,
+            aiService: aiService,
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults,
+            sendRetryDelayNanoseconds: { _ in 0 }
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Retry this send", for: conversationID)
+
+        await store.sendMessage(in: conversationID)
+
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(aiService.callCount, 3)
+        XCTAssertEqual(conversation.messages.count, 2)
+        XCTAssertEqual(conversation.messages.first?.role, .user)
+        XCTAssertEqual(conversation.messages.first?.text, "Retry this send")
+        XCTAssertEqual(conversation.messages.last?.role, .assistant)
+        XCTAssertEqual(conversation.messages.last?.text, "Echo: Retry this send")
+        XCTAssertEqual(conversation.messages.last?.status, .sent)
+        XCTAssertNil(store.errorMessage(for: conversationID))
+    }
 }
 
 private struct MockTranscriptionService: AITranscriptionService {
@@ -394,6 +603,77 @@ private struct EchoReplyAIStreamingService: AIStreamingService {
         let latestUserText = conversation.messages.last(where: { $0.role == .user })?.cleanedText ?? "missing"
 
         return AsyncThrowingStream { continuation in
+            continuation.yield(.answerDelta("Echo: \(latestUserText)"))
+            continuation.finish()
+        }
+    }
+}
+
+private final class FailingThenSuccessTranscriptionService: AITranscriptionService {
+    private let failuresBeforeSuccess: Int
+    private let transcript: String
+    private let lock = NSLock()
+
+    private(set) var callCount = 0
+
+    init(failuresBeforeSuccess: Int, transcript: String) {
+        self.failuresBeforeSuccess = failuresBeforeSuccess
+        self.transcript = transcript
+    }
+
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) async throws -> VoiceTranscriptionResult {
+        let attemptNumber: Int = {
+            lock.lock()
+            defer { lock.unlock() }
+            callCount += 1
+            return callCount
+        }()
+
+        if attemptNumber <= failuresBeforeSuccess {
+            throw URLError(.networkConnectionLost, userInfo: [
+                NSLocalizedDescriptionKey: "temporary transcription failure \(attemptNumber)"
+            ])
+        }
+
+        return VoiceTranscriptionResult(
+            text: transcript,
+            model: "gemini-3-flash-preview"
+        )
+    }
+}
+
+private final class FailingThenSuccessAIStreamingService: AIStreamingService {
+    private let failuresBeforeSuccess: Int
+    private let lock = NSLock()
+
+    private(set) var callCount = 0
+
+    init(failuresBeforeSuccess: Int) {
+        self.failuresBeforeSuccess = failuresBeforeSuccess
+    }
+
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let latestUserText = conversation.messages.last(where: { $0.role == .user })?.cleanedText ?? "missing"
+        let attemptNumber: Int = {
+            lock.lock()
+            defer { lock.unlock() }
+            callCount += 1
+            return callCount
+        }()
+
+        return AsyncThrowingStream { continuation in
+            if attemptNumber <= failuresBeforeSuccess {
+                continuation.finish(
+                    throwing: URLError(.networkConnectionLost, userInfo: [
+                        NSLocalizedDescriptionKey: "temporary failure \(attemptNumber)"
+                    ])
+                )
+                return
+            }
+
             continuation.yield(.answerDelta("Echo: \(latestUserText)"))
             continuation.finish()
         }

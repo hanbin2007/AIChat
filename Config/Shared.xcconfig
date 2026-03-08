@@ -1,9 +1,7 @@
 #include? "Secrets.xcconfig"
 
-AI_BACKEND_MODE = direct
+AI_BACKEND_MODE = relay
 GEMINI_MODEL = gemini-3-flash-preview
 GEMINI_TRANSCRIPTION_MODEL = gemini-3-flash-preview
 AI_RELAY_STREAM_PATH = v1/chat/stream
-AI_RELAY_BASE_URL =
-AI_RELAY_BEARER_TOKEN =
-APP_GROUP_IDENTIFIER =
+

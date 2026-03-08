@@ -130,7 +130,16 @@ actor LocalRelayServer {
                 return
             }
 
-            guard request.method == "POST", path == "/v1/chat/stream" else {
+            guard request.method == "POST" else {
+                try await sendJSON(
+                    statusCode: 404,
+                    payload: RelayErrorEnvelope(message: "Not found."),
+                    on: connection
+                )
+                return
+            }
+
+            guard path == "/v1/chat/stream" || path == "/v1/audio/transcribe" else {
                 try await sendJSON(
                     statusCode: 404,
                     payload: RelayErrorEnvelope(message: "Not found."),
@@ -171,53 +180,100 @@ actor LocalRelayServer {
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
 
-            let relayRequest: RelayChatRequest
-            do {
-                relayRequest = try decoder.decode(RelayChatRequest.self, from: request.body)
-            } catch {
-                try await sendJSON(
-                    statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
-                    payload: RelayErrorEnvelope(message: "Invalid JSON body."),
-                    on: connection
-                )
-                return
-            }
+            switch path {
+            case "/v1/chat/stream":
+                let relayRequest: RelayChatRequest
+                do {
+                    relayRequest = try decoder.decode(RelayChatRequest.self, from: request.body)
+                } catch {
+                    try await sendJSON(
+                        statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
+                        payload: RelayErrorEnvelope(message: "Invalid JSON body."),
+                        on: connection
+                    )
+                    return
+                }
 
-            let streamState = StreamOpenState()
+                let streamState = StreamOpenState()
 
-            do {
-                try await relayBridge.streamChat(
-                    relayRequest: relayRequest,
-                    apiKey: configuration.geminiAPIKey,
-                    onOpen: {
-                        streamState.didOpen = true
-                        try await self.sendSSEHeaders(on: connection)
-                    },
-                    onEvent: { event in
-                        try await self.send(event.data(), on: connection)
+                do {
+                    try await relayBridge.streamChat(
+                        relayRequest: relayRequest,
+                        apiKey: configuration.geminiAPIKey,
+                        onOpen: {
+                            streamState.didOpen = true
+                            try await self.sendSSEHeaders(on: connection)
+                        },
+                        onEvent: { event in
+                            try await self.send(event.data(), on: connection)
+                        }
+                    )
+                } catch let error as RelayHTTPError {
+                    if streamState.didOpen {
+                        try? await send(RelayOutboundEvent.error(error.message).data(), on: connection)
+                    } else {
+                        try await sendJSON(
+                            statusCode: error.statusCode,
+                            payload: RelayErrorEnvelope(message: error.message),
+                            on: connection
+                        )
                     }
-                )
-            } catch let error as RelayHTTPError {
-                if streamState.didOpen {
-                    try? await send(RelayOutboundEvent.error(error.message).data(), on: connection)
-                } else {
+                } catch {
+                    let relayError = RelayHTTPError.internalError(error.localizedDescription)
+                    if streamState.didOpen {
+                        try? await send(RelayOutboundEvent.error(relayError.message).data(), on: connection)
+                    } else {
+                        try await sendJSON(
+                            statusCode: relayError.statusCode,
+                            payload: RelayErrorEnvelope(message: relayError.message),
+                            on: connection
+                        )
+                    }
+                }
+            case "/v1/audio/transcribe":
+                let relayRequest: RelayTranscriptionRequest
+                do {
+                    relayRequest = try decoder.decode(RelayTranscriptionRequest.self, from: request.body)
+                } catch {
+                    try await sendJSON(
+                        statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
+                        payload: RelayErrorEnvelope(message: "Invalid JSON body."),
+                        on: connection
+                    )
+                    return
+                }
+
+                do {
+                    let relayResponse = try await relayBridge.transcribeAudio(
+                        relayRequest: relayRequest,
+                        apiKey: configuration.geminiAPIKey
+                    )
+
+                    try await sendJSON(
+                        statusCode: 200,
+                        payload: relayResponse,
+                        on: connection
+                    )
+                } catch let error as RelayHTTPError {
                     try await sendJSON(
                         statusCode: error.statusCode,
                         payload: RelayErrorEnvelope(message: error.message),
                         on: connection
                     )
-                }
-            } catch {
-                let relayError = RelayHTTPError.internalError(error.localizedDescription)
-                if streamState.didOpen {
-                    try? await send(RelayOutboundEvent.error(relayError.message).data(), on: connection)
-                } else {
+                } catch {
+                    let relayError = RelayHTTPError.internalError(error.localizedDescription)
                     try await sendJSON(
                         statusCode: relayError.statusCode,
                         payload: RelayErrorEnvelope(message: relayError.message),
                         on: connection
                     )
                 }
+            default:
+                try await sendJSON(
+                    statusCode: 404,
+                    payload: RelayErrorEnvelope(message: "Not found."),
+                    on: connection
+                )
             }
         } catch {
             await eventHandler(.log(level: .warning, message: "Connection closed: \(error.localizedDescription)"))

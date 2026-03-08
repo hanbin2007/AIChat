@@ -47,6 +47,20 @@ struct CompanionConversationSettingsView: View {
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
                 }
 
+                Section("请求") {
+                    Stepper(
+                        value: sendFailureRetryLimitBinding(),
+                        in: ChatStore.minimumSendFailureRetryLimit...ChatStore.maximumSendFailureRetryLimit
+                    ) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("请求失败自动重试")
+                            Text("发送和语音转录失败后最多重试 \(chatStore.sendFailureRetryLimit) 次，最高 10 次。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 if let conversation = chatStore.conversation(id: conversationID) {
                     let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
@@ -98,6 +112,17 @@ struct CompanionConversationSettingsView: View {
                 Task {
                     await chatStore.updateSystemPromptMode(newValue, for: conversationID)
                 }
+            }
+        )
+    }
+
+    private func sendFailureRetryLimitBinding() -> Binding<Int> {
+        Binding(
+            get: {
+                chatStore.sendFailureRetryLimit
+            },
+            set: { newValue in
+                chatStore.updateSendFailureRetryLimit(newValue)
             }
         )
     }

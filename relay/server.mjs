@@ -105,6 +105,35 @@ function toGeminiRequest(body) {
   };
 }
 
+function toGeminiTranscriptionRequest(body) {
+  return {
+    systemInstruction: body.systemPrompt
+      ? {
+          parts: [{ text: body.systemPrompt }]
+        }
+      : undefined,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: body.prompt || "" },
+          {
+            inlineData: {
+              mimeType: body.audio?.mimeType || "",
+              data: body.audio?.base64Data || ""
+            }
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      topP: 0.95,
+      maxOutputTokens: 1024
+    }
+  };
+}
+
 function extractChunkParts(chunk) {
   const candidate = chunk?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
@@ -148,6 +177,67 @@ function normalizedDelta(chunkText, emittedText) {
   return {
     delta: chunkText,
     emittedText: emittedText + chunkText
+  };
+}
+
+function makeRelayError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function extractTranscript(payload) {
+  const parts = payload?.candidates?.[0]?.content?.parts || [];
+
+  return parts
+    .filter((part) => part.thought !== true)
+    .map((part) => part.text || "")
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function transcribeGeminiResponse({ model, requestBody }) {
+  const geminiResponse = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey
+      },
+      body: JSON.stringify(requestBody)
+    }
+  );
+
+  if (!geminiResponse.ok) {
+    const errorText = await geminiResponse.text();
+    throw makeRelayError(geminiResponse.status, errorText || "Gemini relay failed.");
+  }
+
+  const payload = await geminiResponse.json();
+  const finishReason = String(payload?.candidates?.[0]?.finishReason || "").trim().toUpperCase();
+
+  if (!finishReason) {
+    throw makeRelayError(502, "Relay transcription ended before Gemini returned a terminal result.");
+  }
+
+  if (finishReason === "MAX_TOKENS") {
+    throw makeRelayError(502, "Transcript hit the output limit before completion.");
+  }
+
+  if (finishReason !== "STOP") {
+    throw makeRelayError(502, `Relay transcription reported an incomplete finish (${finishReason}).`);
+  }
+
+  const transcript = extractTranscript(payload);
+  if (!transcript) {
+    throw makeRelayError(502, "Gemini did not return a usable transcript.");
+  }
+
+  return {
+    text: transcript,
+    model
   };
 }
 
@@ -306,7 +396,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || req.url !== "/v1/chat/stream") {
+  if (req.method !== "POST") {
+    sendJson(res, 404, { message: "Not found." });
+    return;
+  }
+
+  if (req.url !== "/v1/chat/stream" && req.url !== "/v1/audio/transcribe") {
     sendJson(res, 404, { message: "Not found." });
     return;
   }
@@ -330,14 +425,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === "/v1/chat/stream") {
+    try {
+      await streamGeminiResponse({
+        model: body.model || "gemini-3-flash-preview",
+        requestBody: toGeminiRequest(body),
+        res
+      });
+    } catch (error) {
+      writeRelayStreamError(res, error instanceof Error ? error.message : "Relay error.");
+    }
+    return;
+  }
+
   try {
-    await streamGeminiResponse({
+    const response = await transcribeGeminiResponse({
       model: body.model || "gemini-3-flash-preview",
-      requestBody: toGeminiRequest(body),
-      res
+      requestBody: toGeminiTranscriptionRequest(body)
     });
+    sendJson(res, 200, response);
   } catch (error) {
-    writeRelayStreamError(res, error instanceof Error ? error.message : "Relay error.");
+    const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 502;
+    const message = error instanceof Error ? error.message : "Relay error.";
+    sendJson(res, statusCode, { message });
   }
 });
 

@@ -88,6 +88,56 @@ struct GeminiRelayBridge {
         try await onEvent(.done(finishReason))
     }
 
+    func transcribeAudio(
+        relayRequest: RelayTranscriptionRequest,
+        apiKey: String
+    ) async throws -> RelayTranscriptionResponse {
+        let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
+
+        var request = URLRequest(
+            url: URL(
+                string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+            )!
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        request.httpBody = try encoder.encode(makeGeminiTranscriptionRequest(from: relayRequest))
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RelayHTTPError.invalidUpstreamResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw upstreamError(statusCode: httpResponse.statusCode, data: data)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let responseEnvelope = try decoder.decode(GeminiStreamChunk.self, from: data)
+
+        if let completionError = transcriptionCompletionError(for: responseEnvelope.candidates?.first?.finishReason) {
+            throw completionError
+        }
+
+        let transcript = extractTranscript(from: responseEnvelope)
+            .collapsedWhitespace
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard transcript.isEmpty == false else {
+            throw RelayHTTPError.internalError("Gemini did not return a usable transcript.")
+        }
+
+        return RelayTranscriptionResponse(
+            text: transcript,
+            model: model
+        )
+    }
+
     private func makeGeminiRequest(from request: RelayChatRequest, model: String) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
@@ -126,6 +176,35 @@ struct GeminiRelayBridge {
                     intensity: request.thinkingIntensity ?? "balanced",
                     includeThoughts: request.includeThoughts != false
                 )
+            )
+        )
+    }
+
+    private func makeGeminiTranscriptionRequest(from request: RelayTranscriptionRequest) -> GeminiGenerateContentRequest {
+        GeminiGenerateContentRequest(
+            systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
+                GeminiContent(role: nil, parts: [GeminiPart(text: $0, inlineData: nil)])
+            },
+            contents: [
+                GeminiContent(
+                    role: "user",
+                    parts: [
+                        GeminiPart(text: request.prompt, inlineData: nil),
+                        GeminiPart(
+                            text: nil,
+                            inlineData: GeminiInlineData(
+                                mimeType: request.audio.mimeType,
+                                data: request.audio.base64Data
+                            )
+                        )
+                    ]
+                )
+            ],
+            generationConfig: GeminiGenerationConfig(
+                temperature: 0.1,
+                topP: 0.95,
+                maxOutputTokens: 1_024,
+                thinkingConfig: nil
             )
         )
     }
@@ -201,6 +280,30 @@ struct GeminiRelayBridge {
         return (answerText, thoughtText, candidate?.finishReason)
     }
 
+    private func extractTranscript(from response: GeminiStreamChunk) -> String {
+        let parts = response.candidates?.first?.content?.parts ?? []
+
+        return parts
+            .filter { $0.thought != true }
+            .compactMap(\.text)
+            .joined(separator: "\n")
+    }
+
+    private func transcriptionCompletionError(for finishReason: String?) -> RelayHTTPError? {
+        guard let normalizedReason = finishReason?.trimmedNonEmpty?.uppercased() else {
+            return .internalError("Relay transcription ended before Gemini returned a terminal result.")
+        }
+
+        switch normalizedReason {
+        case "STOP":
+            return nil
+        case "MAX_TOKENS":
+            return .internalError("Transcript hit the output limit before completion.")
+        default:
+            return .internalError("Relay transcription reported an incomplete finish (\(normalizedReason)).")
+        }
+    }
+
     private func normalizedDelta(chunkText: String, currentText: inout String) -> String? {
         guard chunkText.isEmpty == false else {
             return nil
@@ -248,5 +351,11 @@ private extension String {
     var trimmedNonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var collapsedWhitespace: String {
+        components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.isEmpty == false }
+            .joined(separator: " ")
     }
 }

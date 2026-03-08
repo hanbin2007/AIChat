@@ -7,6 +7,52 @@
 
 import Foundation
 
+enum VoiceTranscriptionPromptBuilder {
+    static let systemPrompt =
+        """
+        You transcribe short voice prompts for AIChat on Apple devices.
+        Return only the final transcript text.
+        Do not answer the user.
+        Use the provided conversation context only to disambiguate names, references, and homophones.
+        Preserve the user's language and intent.
+        Remove only obvious filler words or false starts when the intended wording is clear.
+        """
+
+    static func prompt(
+        for conversation: ConversationThread,
+        maxContextMessages: Int,
+        maxContextCharacters: Int
+    ) -> String {
+        prompt(
+            contextSummary: AIContextBuilder.transcriptionContextSummary(
+                from: conversation.messages,
+                maxContextMessages: maxContextMessages,
+                maxCharacterBudget: maxContextCharacters
+            )
+        )
+    }
+
+    static func prompt(contextSummary: String?) -> String {
+        var prompt =
+            """
+            Transcribe the attached audio as the user's next chat message.
+            Output only the transcript text.
+            """
+
+        if let contextSummary {
+            prompt.append(
+                """
+
+                Recent conversation context:
+                \(contextSummary)
+                """
+            )
+        }
+
+        return prompt
+    }
+}
+
 enum VoiceTranscriptionError: LocalizedError, Equatable {
     case unavailable
     case invalidAudio
@@ -96,18 +142,16 @@ struct GeminiTranscriptionService: AITranscriptionService {
         in conversation: ConversationThread
     ) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
-            systemInstruction: GeminiContent.systemPrompt(systemPrompt),
+            systemInstruction: GeminiContent.systemPrompt(VoiceTranscriptionPromptBuilder.systemPrompt),
             contents: [
                 GeminiContent(
                     role: "user",
                     parts: [
                         GeminiPart(
-                            text: transcriptionPrompt(
-                                contextSummary: AIContextBuilder.transcriptionContextSummary(
-                                    from: conversation.messages,
-                                    maxContextMessages: maxContextMessages,
-                                    maxCharacterBudget: maxContextCharacters
-                                )
+                            text: VoiceTranscriptionPromptBuilder.prompt(
+                                for: conversation,
+                                maxContextMessages: maxContextMessages,
+                                maxContextCharacters: maxContextCharacters
                             ),
                             inlineData: nil
                         ),
@@ -128,37 +172,6 @@ struct GeminiTranscriptionService: AITranscriptionService {
                 thinkingConfig: nil
             )
         )
-    }
-
-    private var systemPrompt: String {
-        """
-        You transcribe short voice prompts for AIChat on Apple devices.
-        Return only the final transcript text.
-        Do not answer the user.
-        Use the provided conversation context only to disambiguate names, references, and homophones.
-        Preserve the user's language and intent.
-        Remove only obvious filler words or false starts when the intended wording is clear.
-        """
-    }
-
-    private func transcriptionPrompt(contextSummary: String?) -> String {
-        var prompt =
-            """
-            Transcribe the attached audio as the user's next chat message.
-            Output only the transcript text.
-            """
-
-        if let contextSummary {
-            prompt.append(
-                """
-
-                Recent conversation context:
-                \(contextSummary)
-                """
-            )
-        }
-
-        return prompt
     }
 
     private func extractTranscript(from responseEnvelope: GeminiGenerateContentResponse) -> String {

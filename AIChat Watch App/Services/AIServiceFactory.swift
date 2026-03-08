@@ -39,10 +39,21 @@ enum AIServiceFactory {
     }
 
     static func makeTranscriptionService(configuration: AppConfiguration) -> AITranscriptionService? {
-        guard configuration.geminiAPIKey != nil else {
-            return nil
-        }
+        switch configuration.backendMode {
+        case .direct:
+            guard configuration.geminiAPIKey != nil else {
+                return nil
+            }
 
-        return GeminiTranscriptionService(configuration: configuration)
+            return GeminiTranscriptionService(configuration: configuration)
+        case .relay:
+            guard configuration.relayBaseURL != nil,
+                  configuration.relayBearerToken != nil
+            else {
+                return nil
+            }
+
+            return RelayTranscriptionService(configuration: configuration)
+        }
     }
 }

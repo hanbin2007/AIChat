@@ -64,6 +64,18 @@ struct RelayAttachment: Decodable, Sendable {
     var filename: String
 }
 
+struct RelayTranscriptionRequest: Decodable, Sendable {
+    var model: String?
+    var systemPrompt: String?
+    var prompt: String
+    var audio: RelayAttachment
+}
+
+struct RelayTranscriptionResponse: Encodable, Sendable {
+    var text: String
+    var model: String
+}
+
 enum RelayHTTPError: LocalizedError, Sendable {
     case badRequest(String)
     case unauthorized

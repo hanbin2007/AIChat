@@ -184,11 +184,86 @@ struct RelayAIClient: AIStreamingService {
     }
 
     private func relayError(from data: Data) -> Error {
-        if let envelope = try? JSONDecoder().decode(RelayErrorEnvelope.self, from: data) {
-            return RelayAPIError.remote(message: envelope.message)
+        relayClientError(from: data)
+    }
+}
+
+struct RelayTranscriptionService: AITranscriptionService {
+    let configuration: AppConfiguration
+    var session: URLSession = .shared
+    var maxContextMessages: Int = 8
+    var maxContextCharacters: Int = 2_400
+
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) async throws -> VoiceTranscriptionResult {
+        guard audioAttachment.isAudio else {
+            throw VoiceTranscriptionError.invalidAudio
         }
 
-        return RelayAPIError.invalidResponse
+        guard let url = configuration.relayTranscriptionURL,
+              let bearerToken = configuration.relayBearerToken
+        else {
+            throw RelayAPIError.missingConfiguration
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        request.httpBody = try encoder.encode(
+            makeRelayRequest(
+                for: audioAttachment,
+                in: conversation
+            )
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RelayAPIError.invalidResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw relayClientError(from: data)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let relayResponse = try decoder.decode(RelayTranscriptionResponse.self, from: data)
+        let transcript = relayResponse.text.collapseWhitespace().trimmed
+
+        guard transcript.isEmpty == false else {
+            throw VoiceTranscriptionError.emptyTranscript
+        }
+
+        return VoiceTranscriptionResult(
+            text: transcript,
+            model: relayResponse.model.nonEmptyTrimmed ?? configuration.geminiTranscriptionModel
+        )
+    }
+
+    func makeRelayRequest(
+        for audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) -> RelayTranscriptionRequest {
+        RelayTranscriptionRequest(
+            model: configuration.geminiTranscriptionModel,
+            systemPrompt: VoiceTranscriptionPromptBuilder.systemPrompt,
+            prompt: VoiceTranscriptionPromptBuilder.prompt(
+                for: conversation,
+                maxContextMessages: maxContextMessages,
+                maxContextCharacters: maxContextCharacters
+            ),
+            audio: RelayAttachment(
+                mimeType: audioAttachment.mimeType,
+                base64Data: audioAttachment.data.base64EncodedString(),
+                filename: audioAttachment.filename
+            )
+        )
     }
 }
 
@@ -224,6 +299,18 @@ struct RelayErrorEnvelope: Codable {
     var message: String
 }
 
+struct RelayTranscriptionRequest: Codable, Equatable {
+    var model: String
+    var systemPrompt: String
+    var prompt: String
+    var audio: RelayAttachment
+}
+
+struct RelayTranscriptionResponse: Codable, Equatable {
+    var text: String
+    var model: String
+}
+
 func relayCompletionError(
     didReceiveDoneEvent: Bool,
     finishReason: String?
@@ -244,4 +331,12 @@ func relayCompletionError(
     default:
         return .remote(message: "Relay reported an incomplete finish (\(normalizedReason)).")
     }
+}
+
+private func relayClientError(from data: Data) -> Error {
+    if let envelope = try? JSONDecoder().decode(RelayErrorEnvelope.self, from: data) {
+        return RelayAPIError.remote(message: envelope.message)
+    }
+
+    return RelayAPIError.invalidResponse
 }

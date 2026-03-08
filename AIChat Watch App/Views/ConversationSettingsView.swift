@@ -47,6 +47,54 @@ struct ConversationSettingsView: View {
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
                 }
 
+                Section("Requests") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Auto Retry")
+                                .font(.headline)
+                                .lineLimit(1)
+
+                            Text("Retry failed sends and voice transcriptions up to \(chatStore.sendFailureRetryLimit) times.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        HStack(spacing: 10) {
+                            retryAdjustmentButton(
+                                systemImage: "minus",
+                                action: {
+                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit - 1)
+                                }
+                            )
+                            .disabled(chatStore.sendFailureRetryLimit <= ChatStore.minimumSendFailureRetryLimit)
+
+                            Spacer(minLength: 0)
+
+                            Text("\(chatStore.sendFailureRetryLimit)")
+                                .font(.system(.title3, design: .rounded).weight(.semibold))
+                                .monospacedDigit()
+                                .frame(minWidth: 36)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color.white.opacity(0.08))
+                                )
+
+                            Spacer(minLength: 0)
+
+                            retryAdjustmentButton(
+                                systemImage: "plus",
+                                action: {
+                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit + 1)
+                                }
+                            )
+                            .disabled(chatStore.sendFailureRetryLimit >= ChatStore.maximumSendFailureRetryLimit)
+                        }
+                    }
+                }
+
                 if let conversation = chatStore.conversation(id: conversationID) {
                     let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
@@ -93,6 +141,18 @@ struct ConversationSettingsView: View {
                 }
             }
         )
+    }
+    private func retryAdjustmentButton(systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.10))
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 #endif
