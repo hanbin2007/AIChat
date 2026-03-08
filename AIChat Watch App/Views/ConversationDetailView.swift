@@ -14,7 +14,7 @@ private enum ComposerLayout {
     static let expandedBottomInset: CGFloat = 1
     static let collapsedBottomInset: CGFloat = 56
     static let containerBottomPadding: CGFloat = 0
-    static let composerInnerBottomPadding: CGFloat = 4
+    static let composerInnerBottomPadding: CGFloat = 0
     static let collapsedButtonBottomPadding: CGFloat = 8
     static let regularComposerSpacing: CGFloat = 9
     static let compactComposerSpacing: CGFloat = 8
@@ -27,6 +27,8 @@ private enum ComposerLayout {
     static let compactActionButtonSize: CGFloat = compactInputRowHeight + actionButtonSizeDelta
     static let regularInputRowSpacing: CGFloat = 8
     static let compactInputRowSpacing: CGFloat = 8
+    static let flatActionButtonHeight: CGFloat = 30
+    static let flatActionRowSpacing: CGFloat = 6
 }
 
 struct ConversationDetailView: View {
@@ -243,12 +245,13 @@ struct ConversationDetailView: View {
         let hasDraftContent = draftText.nonEmptyTrimmed != nil || hasAttachments
         let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
         let inputRowHeight = hasAttachments ? ComposerLayout.compactInputRowHeight : ComposerLayout.regularInputRowHeight
-        let actionButtonSize = hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
+        let sendButtonSize = hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
         let sendEnabled =
             chatStore.isSending(conversationID: conversationID) == false &&
             isTranscribing == false &&
             voiceRecorder.isInteractive &&
             hasDraftContent
+        let voiceButtonLabel = voiceRecorder.isRecording ? "Stop & Send" : "Voice"
 
         return VStack(alignment: .leading, spacing: hasAttachments ? ComposerLayout.compactComposerSpacing : ComposerLayout.regularComposerSpacing) {
             compactControlBar(
@@ -301,24 +304,36 @@ struct ConversationDetailView: View {
                 .disabled(voiceRecorder.isRecording || isTranscribing)
 
                 Button {
-                    toggleVoiceRecording()
+                    sendCurrentDraft()
                 } label: {
                     ComposerActionButtonLabel(
-                        systemName: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic",
-                        dimension: actionButtonSize,
-                        fillStyle: AnyShapeStyle(
-                            voiceRecorder.isRecording ?
-                            Color.red.opacity(0.94) :
-                            Color.white.opacity(0.11)
-                        ),
-                        strokeColor: Color.white.opacity(voiceRecorder.isRecording ? 0.14 : 0.08)
+                        systemName: "arrow.up.circle.fill",
+                        dimension: sendButtonSize,
+                        fillStyle: AnyShapeStyle(Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)),
+                        strokeColor: Color.white.opacity(sendEnabled ? 0.10 : 0.05)
                     )
                 }
                 .buttonStyle(.plain)
                 .frame(
-                    width: actionButtonSize,
-                    height: actionButtonSize
+                    width: sendButtonSize,
+                    height: sendButtonSize
                 )
+                .disabled(sendEnabled == false)
+                .accessibilityLabel("Send")
+            }
+
+            HStack(spacing: ComposerLayout.flatActionRowSpacing) {
+                Button {
+                    toggleVoiceRecording()
+                } label: {
+                    ComposerFlatActionButtonLabel(
+                        systemName: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic",
+                        title: voiceButtonLabel,
+                        tintColor: voiceRecorder.isRecording ? .red : .white
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
                 .disabled(
                     voiceRecorder.isRecording == false &&
                     (
@@ -335,43 +350,21 @@ struct ConversationDetailView: View {
                     maxSelectionCount: 3,
                     matching: .images
                 ) {
-                    ComposerActionButtonLabel(
+                    ComposerFlatActionButtonLabel(
                         systemName: "photo.on.rectangle",
-                        dimension: actionButtonSize,
-                        fillStyle: AnyShapeStyle(Color.white.opacity(0.11)),
-                        strokeColor: Color.white.opacity(0.08)
+                        title: "Photo",
+                        tintColor: .white
                     )
                 }
                 .buttonStyle(.plain)
-                .frame(
-                    width: actionButtonSize,
-                    height: actionButtonSize
-                )
+                .frame(maxWidth: .infinity)
                 .disabled(voiceRecorder.isRecording || isTranscribing)
                 .accessibilityLabel("Add photo")
-
-                Button {
-                    sendCurrentDraft()
-                } label: {
-                    ComposerActionButtonLabel(
-                        systemName: "arrow.up.circle.fill",
-                        dimension: actionButtonSize,
-                        fillStyle: AnyShapeStyle(Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)),
-                        strokeColor: Color.white.opacity(sendEnabled ? 0.10 : 0.05)
-                    )
-                }
-                .buttonStyle(.plain)
-                .frame(
-                    width: actionButtonSize,
-                    height: actionButtonSize
-                )
-                .disabled(sendEnabled == false)
-                .accessibilityLabel("Send")
             }
         }
         .padding(.top, hasAttachments ? 6 : 8)
         .padding(.horizontal, hasAttachments ? 6 : 8)
-        .padding(.bottom, (hasAttachments ? 6 : 8) + ComposerLayout.composerInnerBottomPadding)
+        .padding(.bottom, (hasAttachments ? 4 : 5) + ComposerLayout.composerInnerBottomPadding)
         .background(
             RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)
                 .fill(Color.black.opacity(0.5))
@@ -664,6 +657,34 @@ private struct ComposerActionButtonLabel: View {
                 Image(systemName: systemName)
                     .font(.system(size: dimension * 0.40, weight: .semibold))
                     .foregroundStyle(.white)
+            }
+    }
+}
+
+private struct ComposerFlatActionButtonLabel: View {
+    @Environment(\.isEnabled) private var isEnabled
+
+    let systemName: String
+    let title: String
+    let tintColor: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 15, style: .continuous)
+            .fill(Color.white.opacity(isEnabled ? 0.08 : 0.04))
+            .overlay(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(Color.white.opacity(isEnabled ? 0.08 : 0.05), lineWidth: 1)
+            )
+            .frame(height: ComposerLayout.flatActionButtonHeight)
+            .overlay {
+                HStack(spacing: 6) {
+                    Image(systemName: systemName)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(tintColor.opacity(isEnabled ? 1 : 0.42))
             }
     }
 }
