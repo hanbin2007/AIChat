@@ -68,7 +68,7 @@ struct AppConfiguration: Equatable {
         case .direct:
             return geminiAPIKey != nil
         case .relay:
-            return relayBaseURL != nil && relayBearerToken != nil
+            return relayConfigurationIssue == nil
         }
     }
 
@@ -77,7 +77,7 @@ struct AppConfiguration: Equatable {
         case .direct:
             return backendMode.displayName
         case .relay:
-            return "\(backendMode.displayName) • \(relayBaseURL?.host() ?? "URL missing")"
+            return "\(backendMode.displayName) • \(relayBaseURL?.host() ?? "URL invalid")"
         }
     }
 
@@ -101,8 +101,8 @@ struct AppConfiguration: Equatable {
             }
             return "Add GEMINI_API_KEY in Config/Secrets.xcconfig or the scheme environment before sending messages."
         case .relay:
-            if relayBaseURL == nil || relayBearerToken == nil {
-                return "Relay mode needs AI_RELAY_BASE_URL and AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+            if let relayConfigurationIssue {
+                return relayConfigurationIssue
             }
             return "Relay gateway is ready."
         }
@@ -117,8 +117,8 @@ struct AppConfiguration: Equatable {
 
             return "Voice transcription needs GEMINI_API_KEY because audio is transcribed with Gemini before sending."
         case .relay:
-            if relayBaseURL == nil || relayBearerToken == nil {
-                return "Voice transcription needs AI_RELAY_BASE_URL and AI_RELAY_BEARER_TOKEN in relay mode."
+            if let relayConfigurationIssue {
+                return relayConfigurationIssue
             }
 
             return nil
@@ -126,7 +126,7 @@ struct AppConfiguration: Equatable {
     }
 
     var relayStreamURL: URL? {
-        guard let relayBaseURL else {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
             return nil
         }
 
@@ -134,11 +134,35 @@ struct AppConfiguration: Equatable {
     }
 
     var relayTranscriptionURL: URL? {
-        guard let relayBaseURL else {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
             return nil
         }
 
         return relayBaseURL.appending(path: "v1/audio/transcribe")
+    }
+
+    private var hasValidRelayBaseURL: Bool {
+        guard let relayBaseURL else {
+            return false
+        }
+
+        return relayBaseURL.scheme?.isEmpty == false && relayBaseURL.host()?.isEmpty == false
+    }
+
+    private var relayConfigurationIssue: String? {
+        guard relayBaseURL != nil else {
+            return "Relay mode needs AI_RELAY_BASE_URL in Config/Secrets.xcconfig."
+        }
+
+        guard hasValidRelayBaseURL else {
+            return "AI_RELAY_BASE_URL is invalid. In xcconfig, write http:/$()/127.0.0.1:8787 instead of http://127.0.0.1:8787."
+        }
+
+        guard relayBearerToken != nil else {
+            return "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+        }
+
+        return nil
     }
 
     private static func value(

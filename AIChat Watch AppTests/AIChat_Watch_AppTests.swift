@@ -263,6 +263,42 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertTrue(service is RelayTranscriptionService)
     }
 
+    func testRelayModeRejectsHostlessBaseURLWithXcconfigHint() throws {
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: try XCTUnwrap(URL(string: "http:/127.0.0.1:8787")),
+            relayBearerToken: "token",
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+
+        XCTAssertFalse(configuration.isAIConfigured)
+        XCTAssertNil(configuration.relayStreamURL)
+        XCTAssertTrue(configuration.configurationMessage.contains("http:/$()/127.0.0.1:8787"))
+    }
+
+    func testRelayModeReportsMissingBearerTokenSeparately() {
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+
+        XCTAssertFalse(configuration.isAIConfigured)
+        XCTAssertEqual(
+            configuration.configurationMessage,
+            "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+        )
+    }
+
     func testRelayTranscriptionRequestUsesPromptAndAudio() throws {
         let audioData = Data([0xAA, 0xBB, 0xCC])
         let audioAttachment = try ChatAttachment.makeRecordedAudio(

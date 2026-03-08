@@ -46,7 +46,7 @@ GEMINI_MODEL = gemini-3-flash-preview
 
 ```xcconfig
 AI_BACKEND_MODE = relay
-AI_RELAY_BASE_URL = http://127.0.0.1:8787
+AI_RELAY_BASE_URL = http:/$()/127.0.0.1:8787
 AI_RELAY_BEARER_TOKEN = your-relay-token
 GEMINI_MODEL = gemini-3-flash-preview
 ```
@@ -60,6 +60,7 @@ APP_GROUP_IDENTIFIER = group.your.company.aichat
 说明：
 
 - `Config/Secrets.xcconfig` 已经被 `.gitignore` 忽略
+- `Config/Secrets.xcconfig.example` 里已经演示了 relay URL 的 `xcconfig` 写法；不要直接写 `http://...`，因为 `//` 会被当成注释
 - 直连 Gemini 只适合开发，不适合真正上线
 - 如果要让 iPhone 和 Watch 真正共享文件存储，需要再给 target 配好 App Group entitlement
 - `Gemini 3` 会走 `thinkingLevel`，`Gemini 2.5` 会自动映射到 `thinkingBudget`

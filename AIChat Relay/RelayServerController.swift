@@ -130,7 +130,7 @@ final class RelayServerController: ObservableObject {
     var clientConfigurationSnippet: String {
         """
         AI_BACKEND_MODE = relay
-        AI_RELAY_BASE_URL = \(recommendedClientBaseURL)
+        AI_RELAY_BASE_URL = \(Self.xcconfigEscaped(recommendedClientBaseURL))
         AI_RELAY_BEARER_TOKEN = \(settings.runtimeConfiguration.relayBearerToken)
         GEMINI_MODEL = gemini-3-flash-preview
         """
@@ -259,6 +259,10 @@ final class RelayServerController: ObservableObject {
                 sink.controller?.handleServerEvent(event)
             }
         }
+    }
+
+    private static func xcconfigEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "//", with: "/$()/")
     }
 }
 

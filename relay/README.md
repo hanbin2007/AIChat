@@ -43,7 +43,9 @@ node relay/server.mjs
 
 ```xcconfig
 AI_BACKEND_MODE = relay
-AI_RELAY_BASE_URL = http://127.0.0.1:8787
+AI_RELAY_BASE_URL = http:/$()/127.0.0.1:8787
 AI_RELAY_BEARER_TOKEN = your-relay-token
 GEMINI_MODEL = gemini-3-flash-preview
 ```
+
+注意：`.xcconfig` 里的 `//` 会被当成注释，所以这里不能直接写 `http://...`。
