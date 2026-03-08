@@ -20,13 +20,15 @@ struct ConversationSettingsView: View {
             List {
                 Section("Conversation") {
                     TextField("Title", text: $draftTitle)
+                        .disabled(chatStore.isReadOnlyMode)
+
                     Button("Save Title") {
                         Task {
                             await chatStore.renameConversation(id: conversationID, title: draftTitle)
                             dismiss()
                         }
                     }
-                    .disabled(draftTitle.trimmed.isEmpty)
+                    .disabled(chatStore.isReadOnlyMode || draftTitle.trimmed.isEmpty)
 
                     Button("Clear Messages", role: .destructive) {
                         Task {
@@ -34,18 +36,18 @@ struct ConversationSettingsView: View {
                             dismiss()
                         }
                     }
+                    .disabled(chatStore.isReadOnlyMode)
                 }
 
                 Section("Runtime") {
                     LabeledContent("Backend", value: chatStore.configuration.backendSummary)
                     LabeledContent("Storage", value: chatStore.storageDescription)
                     LabeledContent("Sync", value: chatStore.syncStatusDescription)
+                    LabeledContent("Activation", value: chatStore.activationStatusTitle)
                 }
 
                 if let conversation = chatStore.conversation(id: conversationID) {
-                    let aiConfiguration = conversation.resolvedAIConfiguration(
-                        defaultModel: chatStore.configuration.geminiModel
-                    )
+                    let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
                     Section("AI") {
                         LabeledContent("Model", value: AIModelCatalog.displayName(for: aiConfiguration.model))
@@ -60,6 +62,7 @@ struct ConversationSettingsView: View {
                             dismiss()
                         }
                     }
+                    .disabled(chatStore.isReadOnlyMode)
                 }
             }
             .navigationTitle("Manage Chat")

@@ -25,14 +25,17 @@ final class ChatStore: ObservableObject {
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
     @Published private(set) var syncStatusDescription: String
+    @Published private(set) var activationState: OfflineActivationState?
 
     let configuration: AppConfiguration
     let storageDescription: String
+    let deviceIdentity: WatchDeviceIdentity
 
     private let repository: ConversationRepository
     private let aiService: AIStreamingService
     private let transcriptionService: AITranscriptionService?
     private let syncBridge: CompanionSyncBridge
+    private let activationRepository: ActivationRepository
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
 
@@ -41,13 +44,17 @@ final class ChatStore: ObservableObject {
         aiService: AIStreamingService,
         transcriptionService: AITranscriptionService?,
         configuration: AppConfiguration,
-        syncBridge: CompanionSyncBridge
+        syncBridge: CompanionSyncBridge,
+        activationRepository: ActivationRepository = ActivationRepository(),
+        deviceIdentity: WatchDeviceIdentity? = nil
     ) {
         self.repository = repository
         self.aiService = aiService
         self.transcriptionService = transcriptionService
         self.configuration = configuration
         self.syncBridge = syncBridge
+        self.activationRepository = activationRepository
+        self.deviceIdentity = deviceIdentity ?? WatchDeviceIdentityProvider.current()
         self.storageDescription = repository.storageDescription
         self.syncStatusDescription = syncBridge.currentStatus.description
 
@@ -62,12 +69,84 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    var activationStatus: OfflineActivationStatus {
+        OfflineActivation.status(for: activationState, deviceToken: deviceIdentity.deviceToken)
+    }
+
+    var isReadOnlyMode: Bool {
+        switch activationStatus {
+        case .active:
+            return false
+        case .inactive, .pending, .expired, .exhausted, .invalid:
+            return true
+        }
+    }
+
+    var activationStatusTitle: String {
+        switch activationStatus {
+        case .inactive:
+            return "未激活"
+        case .pending:
+            return "授权未生效"
+        case .active:
+            return "已激活"
+        case .expired:
+            return "授权已过期"
+        case .exhausted:
+            return "次数已用尽"
+        case .invalid:
+            return "授权无效"
+        }
+    }
+
+    var activationStatusMessage: String {
+        switch activationStatus {
+        case .inactive:
+            return "当前只能查看历史消息。发新消息前，需要在 Apple Watch 上完成离线激活。"
+        case .pending(let state):
+            return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
+        case .active(let state, let remainingMessages):
+            var components: [String] = []
+            if let validUntil = state.license.validUntil {
+                components.append("有效期至 \(validUntil.formatted(date: .abbreviated, time: .shortened))")
+            } else {
+                components.append("长期有效")
+            }
+
+            if let remainingMessages {
+                components.append("剩余 \(remainingMessages) 次")
+            } else {
+                components.append("次数不限")
+            }
+
+            components.append("模型: \(allowedModelsDescription(for: state.license.allowedModelIDs))")
+            return components.joined(separator: " • ")
+        case .expired(let state):
+            if let validUntil = state.license.validUntil {
+                return "授权已于 \(validUntil.formatted(date: .abbreviated, time: .shortened)) 过期，请重新激活。"
+            }
+            return "当前授权不可用，请重新激活。"
+        case .exhausted(let state):
+            return "当前授权的 \(state.license.messageLimit ?? 0) 次发送额度已用完，请重新生成激活码。"
+        case .invalid(let message):
+            return message
+        }
+    }
+
+    var activationAllowedModelIDs: Set<String>? {
+        OfflineActivation.allowedModelIDs(
+            for: activationState,
+            deviceToken: deviceIdentity.deviceToken
+        )
+    }
+
     func loadConversationsIfNeeded() async {
         guard hasLoadedConversations == false else {
             return
         }
 
         hasLoadedConversations = true
+        await refreshActivationState()
 
         do {
             conversations = try await repository.loadConversations()
@@ -75,6 +154,30 @@ final class ChatStore: ObservableObject {
         } catch {
             startupError = error.localizedDescription
         }
+    }
+
+    func refreshActivationState() async {
+        activationState = await activationRepository.loadState()
+    }
+
+    func activationRequestCode(now: Date = .now) -> String {
+        OfflineActivation.makeRequestCode(deviceToken: deviceIdentity.deviceToken, now: now)
+    }
+
+    func applyActivationCode(_ rawCode: String, now: Date = .now) async throws {
+        let nextState = try OfflineActivation.activate(
+            code: rawCode,
+            deviceToken: deviceIdentity.deviceToken,
+            now: now,
+            currentState: activationState
+        )
+        try await activationRepository.saveState(nextState)
+        activationState = nextState
+    }
+
+    func clearActivation() async {
+        await activationRepository.clearState()
+        activationState = nil
     }
 
     func createConversation() async -> UUID {
@@ -85,7 +188,7 @@ final class ChatStore: ObservableObject {
     }
 
     func renameConversation(id: UUID, title: String) async {
-        guard var conversation = conversation(id: id) else {
+        guard isReadOnlyMode == false, var conversation = conversation(id: id) else {
             return
         }
 
@@ -96,26 +199,45 @@ final class ChatStore: ObservableObject {
 
     func aiConfiguration(for conversationID: UUID) -> ConversationAIConfiguration {
         if let conversation = conversation(id: conversationID) {
-            return conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+            return licensedConfiguration(
+                from: conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+            )
         }
 
-        return ConversationAIConfiguration(model: configuration.geminiModel)
+        return licensedConfiguration(from: ConversationAIConfiguration(model: configuration.geminiModel))
+    }
+
+    func availableModelOptions() -> [AIModelOption] {
+        AIModelCatalog.quickOptions(
+            defaultModel: configuration.geminiModel,
+            allowedModelIDs: activationAllowedModelIDs
+        )
     }
 
     func updateModel(_ model: String, for conversationID: UUID) async {
+        if let activationMessage = activationFailureMessage(for: model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.model = model
         }
     }
 
     func updateThinkingIntensity(_ thinkingIntensity: AIThinkingIntensity, for conversationID: UUID) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.thinkingIntensity = thinkingIntensity
         }
     }
 
     func clearConversation(id: UUID) async {
-        guard var conversation = conversation(id: id) else {
+        guard isReadOnlyMode == false, var conversation = conversation(id: id) else {
             return
         }
 
@@ -128,10 +250,18 @@ final class ChatStore: ObservableObject {
     }
 
     func deleteConversation(id: UUID) async {
+        guard isReadOnlyMode == false else {
+            return
+        }
+
         await deleteConversation(id: id, sync: true)
     }
 
     func deleteConversations(at offsets: IndexSet) async {
+        guard isReadOnlyMode == false else {
+            return
+        }
+
         let ids = offsets.compactMap { index in
             conversations.indices.contains(index) ? conversations[index].id : nil
         }
@@ -150,6 +280,10 @@ final class ChatStore: ObservableObject {
     }
 
     func updateDraftText(_ text: String, for conversationID: UUID) {
+        guard isReadOnlyMode == false else {
+            return
+        }
+
         var draft = drafts[conversationID] ?? ConversationDraft()
         draft.text = text
         drafts[conversationID] = draft
@@ -160,6 +294,10 @@ final class ChatStore: ObservableObject {
     }
 
     func addAttachment(from rawData: Data, suggestedFilename: String?, to conversationID: UUID) throws {
+        guard isReadOnlyMode == false else {
+            throw OfflineActivationError.notActivated
+        }
+
         var draft = drafts[conversationID] ?? ConversationDraft()
         draft.attachments.append(
             try ChatAttachment.makeNormalizedImage(from: rawData, suggestedFilename: suggestedFilename)
@@ -173,6 +311,10 @@ final class ChatStore: ObservableObject {
         durationSeconds: Double,
         to conversationID: UUID
     ) throws {
+        guard isReadOnlyMode == false else {
+            throw OfflineActivationError.notActivated
+        }
+
         var draft = drafts[conversationID] ?? ConversationDraft()
         draft.attachments.append(
             try ChatAttachment.makeRecordedAudio(
@@ -185,6 +327,10 @@ final class ChatStore: ObservableObject {
     }
 
     func removeAttachment(id attachmentID: UUID, from conversationID: UUID) {
+        guard isReadOnlyMode == false else {
+            return
+        }
+
         var draft = drafts[conversationID] ?? ConversationDraft()
         draft.attachments.removeAll { $0.id == attachmentID }
         drafts[conversationID] = draft
@@ -240,6 +386,14 @@ final class ChatStore: ObservableObject {
             return
         }
 
+        let effectiveAIConfiguration = licensedConfiguration(
+            from: currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        )
+        if let activationMessage = activationFailureMessage(for: effectiveAIConfiguration.model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
         conversationErrors[conversationID] = nil
         transcribingConversationIDs.insert(conversationID)
 
@@ -275,9 +429,38 @@ final class ChatStore: ObservableObject {
             return
         }
 
+        let effectiveAIConfiguration = licensedConfiguration(
+            from: currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        )
+        if let activationMessage = activationFailureMessage(for: effectiveAIConfiguration.model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        let currentConfiguration = currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        if currentConfiguration != effectiveAIConfiguration {
+            currentConversation.updateAIConfiguration(effectiveAIConfiguration)
+            upsertConversation(currentConversation)
+            await persist(currentConversation, sync: true)
+        }
         let trimmedText = draft.text.trimmed
 
         guard trimmedText.isEmpty == false || draft.attachments.isEmpty == false else {
+            return
+        }
+
+        do {
+            let nextActivationState = try OfflineActivation.consumeMessage(
+                from: activationState,
+                deviceToken: deviceIdentity.deviceToken,
+                modelID: effectiveAIConfiguration.model
+            )
+            if nextActivationState != activationState {
+                try await activationRepository.saveState(nextActivationState)
+                activationState = nextActivationState
+            }
+        } catch {
+            conversationErrors[conversationID] = error.localizedDescription
             return
         }
 
@@ -431,9 +614,50 @@ final class ChatStore: ObservableObject {
 
         var resolvedConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
         mutation(&resolvedConfiguration)
+        resolvedConfiguration = licensedConfiguration(from: resolvedConfiguration)
         conversation.updateAIConfiguration(resolvedConfiguration)
         upsertConversation(conversation)
         await persist(conversation, sync: true)
+    }
+
+    private func licensedConfiguration(from configuration: ConversationAIConfiguration) -> ConversationAIConfiguration {
+        var resolvedConfiguration = configuration
+        resolvedConfiguration.model = OfflineActivation.recommendedModel(
+            preferredModelID: configuration.model,
+            defaultModelID: self.configuration.geminiModel,
+            state: activationState,
+            deviceToken: deviceIdentity.deviceToken
+        )
+        return resolvedConfiguration
+    }
+
+    private func activationFailureMessage(for modelID: String) -> String? {
+        switch activationStatus {
+        case .inactive:
+            return OfflineActivationError.notActivated.localizedDescription
+        case .pending(let state):
+            return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
+        case .expired:
+            return OfflineActivationError.licenseExpired.localizedDescription
+        case .exhausted:
+            return OfflineActivationError.messageLimitReached.localizedDescription
+        case .invalid(let message):
+            return message
+        case .active(let state, _):
+            return state.license.allows(modelID: modelID) ? nil : OfflineActivationError.modelNotAllowed.localizedDescription
+        }
+    }
+
+    private func allowedModelsDescription(for allowedModelIDs: Set<String>?) -> String {
+        guard let allowedModelIDs else {
+            return "全部"
+        }
+
+        let titles = LicensedModelCatalog.supportedModels
+            .filter { allowedModelIDs.contains($0.id) }
+            .map(\.title)
+
+        return titles.isEmpty ? "全部" : titles.joined(separator: "、")
     }
 
     private func handleSyncEvent(_ event: CompanionSyncEvent) async {
@@ -514,6 +738,19 @@ extension ChatStore {
         store.transcribingConversationIDs = []
         store.conversationErrors = conversationErrors
         store.startupError = startupError
+        store.activationState = OfflineActivationState(
+            license: OfflineActivationLicense(
+                deviceToken: store.deviceIdentity.deviceToken,
+                requestIssuedAt: .now,
+                validFrom: .now,
+                validUntil: nil,
+                messageLimit: nil,
+                modelMask: LicensedModelCatalog.unrestrictedMask
+            ),
+            activationCodeFingerprint: "preview",
+            activatedAt: .now,
+            usedMessageCount: 0
+        )
         store.hasLoadedConversations = true
         return store
     }

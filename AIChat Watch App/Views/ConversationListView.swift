@@ -10,12 +10,25 @@ import SwiftUI
 struct ConversationListView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
+    @State private var isShowingActivationCenter = false
 
     var body: some View {
         ZStack {
             AppBackdropView()
 
             List {
+                ActivationStatusCard(
+                    title: chatStore.activationStatusTitle,
+                    message: chatStore.activationStatusMessage,
+                    iconName: chatStore.isReadOnlyMode ? "lock.fill" : "checkmark.seal.fill",
+                    accentColor: chatStore.isReadOnlyMode ? .orange : .green,
+                    actionTitle: chatStore.isReadOnlyMode ? "立即激活" : "管理授权"
+                ) {
+                    isShowingActivationCenter = true
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                .listRowBackground(Color.clear)
+
                 if chatStore.configuration.isAIConfigured == false {
                     ConfigurationBannerView(message: chatStore.configuration.configurationMessage)
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
@@ -45,21 +58,32 @@ struct ConversationListView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                 } else {
-                    ForEach(chatStore.conversations) { conversation in
-                        NavigationLink(value: conversation.id) {
-                            ConversationRowView(
-                                conversation: conversation,
-                                aiConfiguration: conversation.resolvedAIConfiguration(
-                                    defaultModel: chatStore.configuration.geminiModel
+                    if chatStore.isReadOnlyMode {
+                        ForEach(chatStore.conversations) { conversation in
+                            NavigationLink(value: conversation.id) {
+                                ConversationRowView(
+                                    conversation: conversation,
+                                    aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
                                 )
-                            )
+                            }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                            .listRowBackground(Color.clear)
                         }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                    }
-                    .onDelete { offsets in
-                        Task {
-                            await chatStore.deleteConversations(at: offsets)
+                    } else {
+                        ForEach(chatStore.conversations) { conversation in
+                            NavigationLink(value: conversation.id) {
+                                ConversationRowView(
+                                    conversation: conversation,
+                                    aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
+                                )
+                            }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                            .listRowBackground(Color.clear)
+                        }
+                        .onDelete { offsets in
+                            Task {
+                                await chatStore.deleteConversations(at: offsets)
+                            }
                         }
                     }
                 }
@@ -68,6 +92,9 @@ struct ConversationListView: View {
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("AIChat")
+        .sheet(isPresented: $isShowingActivationCenter) {
+            ActivationCenterView()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -79,6 +106,7 @@ struct ConversationListView: View {
                     Image(systemName: "square.and.pencil")
                 }
                 .accessibilityLabel("New conversation")
+                .disabled(chatStore.isReadOnlyMode)
             }
         }
     }
@@ -88,21 +116,32 @@ struct ConversationListView: View {
             Text("Built for Watch")
                 .font(.headline)
 
-            Text("Context-aware Gemini chat, voice prompts, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone.")
+            Text(
+                chatStore.isReadOnlyMode ?
+                "你现在可以查看历史消息。完成手表离线激活后，才能开始新会话并发送消息。" :
+                "Context-aware Gemini chat, voice prompts, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone."
+            )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
             Button {
-                Task {
-                    let newConversationID = await chatStore.createConversation()
-                    navigationPath = [newConversationID]
+                if chatStore.isReadOnlyMode {
+                    isShowingActivationCenter = true
+                } else {
+                    Task {
+                        let newConversationID = await chatStore.createConversation()
+                        navigationPath = [newConversationID]
+                    }
                 }
             } label: {
-                Label("Start Chat", systemImage: "sparkles")
+                Label(
+                    chatStore.isReadOnlyMode ? "Activate Watch" : "Start Chat",
+                    systemImage: chatStore.isReadOnlyMode ? "key.fill" : "sparkles"
+                )
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.cyan)
+            .tint(chatStore.isReadOnlyMode ? .orange : .cyan)
         }
         .padding(14)
         .background(
