@@ -68,7 +68,7 @@ struct AppConfiguration: Equatable {
     var backendSummary: String {
         switch backendMode {
         case .direct:
-            return "\(backendMode.displayName) • \(AIModelCatalog.shortLabel(for: geminiModel))"
+            return backendMode.displayName
         case .relay:
             return "\(backendMode.displayName) • \(relayBaseURL?.host() ?? "URL missing")"
         }

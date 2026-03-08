@@ -31,19 +31,19 @@ enum AIModelCatalog {
         AIModelOption(
             id: "gemini-3-flash-preview",
             title: "Gemini 3 Flash",
-            shortTitle: "3 Flash",
+            shortTitle: "Flash",
             subtitle: "Fast multimodal"
         ),
         AIModelOption(
             id: "gemini-3.1-pro-preview",
             title: "Gemini 3.1 Pro",
-            shortTitle: "3.1 Pro",
+            shortTitle: "Pro",
             subtitle: "Deeper reasoning"
         ),
         AIModelOption(
             id: "gemini-2.5-flash",
             title: "Gemini 2.5 Flash",
-            shortTitle: "2.5 F",
+            shortTitle: "2.5",
             subtitle: "Stable fallback"
         )
     ]
@@ -86,9 +86,36 @@ enum AIModelCatalog {
         AIModelOption(
             id: model,
             title: prettifiedModelName(for: model),
-            shortTitle: prettifiedModelName(for: model),
+            shortTitle: compactShortLabel(for: model),
             subtitle: "Configured default"
         )
+    }
+
+    private static func compactShortLabel(for model: String) -> String {
+        let lowercased = model.lowercased()
+
+        if lowercased.contains("pro") {
+            return "Pro"
+        }
+
+        if lowercased.contains("flash") {
+            if let version = versionToken(in: lowercased) {
+                return version == "3" ? "Flash" : version
+            }
+
+            return "Flash"
+        }
+
+        if let version = versionToken(in: lowercased) {
+            return version
+        }
+
+        return "Custom"
+    }
+
+    private static func versionToken(in model: String) -> String? {
+        let pattern = /(\d+(?:\.\d+)?)/
+        return model.firstMatch(of: pattern).map { String($0.output.1) }
     }
 
     private static func prettifiedModelName(for model: String) -> String {

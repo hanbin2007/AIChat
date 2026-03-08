@@ -109,23 +109,43 @@ struct ChatBubbleView: View {
 private struct ThoughtSummaryCard: View {
     let thoughtSummary: String
     let isStreaming: Bool
+    @State private var isExpanded = false
+
+    private var normalizedSummary: String {
+        thoughtSummary.collapseWhitespace()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: isStreaming ? "brain.head.profile" : "sparkles.rectangle.stack")
-                    .font(.caption2)
-                    .foregroundStyle(.cyan.opacity(0.9))
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isStreaming ? "brain.head.profile" : "sparkles.rectangle.stack")
+                        .font(.caption2)
+                        .foregroundStyle(.cyan.opacity(0.9))
 
-                Text(isStreaming ? "Thinking" : "Thought Summary")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.88))
+                    Text(isStreaming ? "Thinking" : "Thought Summary")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.66))
+                }
             }
+            .buttonStyle(.plain)
 
-            Text(thoughtSummary)
+            Text(normalizedSummary)
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.76))
                 .multilineTextAlignment(.leading)
+                .lineLimit(isExpanded ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(8)
         .background(

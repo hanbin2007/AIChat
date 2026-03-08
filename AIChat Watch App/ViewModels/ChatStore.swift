@@ -361,3 +361,61 @@ final class ChatStore: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+private struct PreviewAIStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.thoughtDelta("Reviewing the draft and condensing the most useful points."))
+            continuation.yield(.answerDelta("This is a preview reply from the mock AI service."))
+            continuation.finish()
+        }
+    }
+}
+
+extension ChatStore {
+    static func previewStore(
+        conversations: [ConversationThread],
+        drafts: [UUID: ConversationDraft] = [:],
+        sendingConversationIDs: Set<UUID> = [],
+        conversationErrors: [UUID: String] = [:],
+        startupError: String? = nil,
+        configuration: AppConfiguration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "preview-key",
+            geminiModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+    ) -> ChatStore {
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatPreview-\(UUID().uuidString)", isDirectory: true)
+        )
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: PreviewAIStreamingService(),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+
+        store.conversations = conversations.sorted { lhs, rhs in
+            if lhs.updatedAt == rhs.updatedAt {
+                return lhs.createdAt > rhs.createdAt
+            }
+
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        store.drafts = drafts
+        store.sendingConversationIDs = sendingConversationIDs
+        store.conversationErrors = conversationErrors
+        store.startupError = startupError
+        store.hasLoadedConversations = true
+        return store
+    }
+}
+#endif

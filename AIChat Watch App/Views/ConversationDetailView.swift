@@ -7,9 +7,21 @@
 
 import PhotosUI
 import SwiftUI
+import UIKit
 
 private enum ComposerLayout {
+    static let messagesToComposerSpacing: CGFloat = 4
+    static let expandedBottomInset: CGFloat = 1
     static let collapsedBottomInset: CGFloat = 56
+    static let containerBottomPadding: CGFloat = 0
+    static let composerInnerBottomPadding: CGFloat = 4
+    static let collapsedButtonBottomPadding: CGFloat = 8
+    static let regularComposerSpacing: CGFloat = 8
+    static let compactComposerSpacing: CGFloat = 6
+    static let regularAttachmentSize: CGFloat = 60
+    static let compactAttachmentSize: CGFloat = 44
+    static let regularActionButtonSize: CGFloat = 42
+    static let compactActionButtonSize: CGFloat = 38
 }
 
 struct ConversationDetailView: View {
@@ -29,7 +41,7 @@ struct ConversationDetailView: View {
 
             if let conversation = chatStore.conversation(id: conversationID) {
                 ZStack(alignment: .bottomTrailing) {
-                    VStack(spacing: 8) {
+                    VStack(spacing: ComposerLayout.messagesToComposerSpacing) {
                         messagesView(conversation: conversation)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
@@ -40,12 +52,12 @@ struct ConversationDetailView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.horizontal, 6)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, ComposerLayout.containerBottomPadding)
 
                     if isComposerExpanded == false {
                         collapsedComposerButton
                             .padding(.trailing, 10)
-                            .padding(.bottom, 8)
+                            .padding(.bottom, ComposerLayout.collapsedButtonBottomPadding)
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
@@ -125,22 +137,22 @@ struct ConversationDetailView: View {
                     }
 
                     Color.clear
-                        .frame(height: isComposerExpanded ? 1 : ComposerLayout.collapsedBottomInset)
+                        .frame(height: isComposerExpanded ? ComposerLayout.expandedBottomInset : ComposerLayout.collapsedBottomInset)
                         .id("bottom")
                 }
                 .padding(.horizontal, 4)
             }
             .onAppear {
-                scrollToBottom(with: proxy)
+                scrollToBottom(with: proxy, animated: false)
             }
             .onChange(of: conversation.messages.count) { _, _ in
-                scrollToBottom(with: proxy)
+                scrollToBottom(with: proxy, animated: true)
             }
             .onChange(of: conversation.updatedAt) { _, _ in
-                scrollToBottom(with: proxy)
+                scrollToBottom(with: proxy, animated: false)
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, _ in
-                scrollToBottom(with: proxy)
+                scrollToBottom(with: proxy, animated: false)
             }
         }
     }
@@ -182,16 +194,22 @@ struct ConversationDetailView: View {
 
     private func composerView(conversation: ConversationThread) -> some View {
         let aiConfiguration = conversation.resolvedAIConfiguration(defaultModel: chatStore.configuration.geminiModel)
+        let attachments = chatStore.draftAttachments(for: conversationID)
+        let hasAttachments = attachments.isEmpty == false
 
-        return VStack(alignment: .leading, spacing: 8) {
-            compactControlBar(configuration: aiConfiguration)
+        return VStack(alignment: .leading, spacing: hasAttachments ? ComposerLayout.compactComposerSpacing : ComposerLayout.regularComposerSpacing) {
+            compactControlBar(
+                configuration: aiConfiguration,
+                isDense: hasAttachments
+            )
 
-            if chatStore.draftAttachments(for: conversationID).isEmpty == false {
+            if hasAttachments {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(chatStore.draftAttachments(for: conversationID)) { attachment in
+                    HStack(spacing: hasAttachments ? 6 : 8) {
+                        ForEach(attachments) { attachment in
                             DraftAttachmentPill(
                                 attachment: attachment,
+                                size: hasAttachments ? ComposerLayout.compactAttachmentSize : ComposerLayout.regularAttachmentSize,
                                 onRemove: {
                                     chatStore.removeAttachment(id: attachment.id, from: conversationID)
                                 }
@@ -200,67 +218,87 @@ struct ConversationDetailView: View {
                     }
                     .padding(.horizontal, 2)
                 }
+                .frame(height: hasAttachments ? ComposerLayout.compactAttachmentSize : ComposerLayout.regularAttachmentSize)
             }
 
-            TextField(
-                "Ask Gemini",
-                text: Binding(
-                    get: { chatStore.draftText(for: conversationID) },
-                    set: { chatStore.updateDraftText($0, for: conversationID) }
-                ),
-                prompt: Text("Ask Gemini")
-            )
-            .textInputAutocapitalization(.sentences)
-            .submitLabel(.send)
-            .font(.body)
-            .onSubmit {
-                sendCurrentDraft()
-            }
+            HStack(spacing: hasAttachments ? 5 : 6) {
+                TextField(
+                    "Ask Gemini",
+                    text: Binding(
+                        get: { chatStore.draftText(for: conversationID) },
+                        set: { chatStore.updateDraftText($0, for: conversationID) }
+                    ),
+                    prompt: Text("Ask Gemini")
+                )
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.sentences)
+                .submitLabel(.send)
+                .font(hasAttachments ? .callout : .body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, hasAttachments ? 10 : 12)
+                .padding(.vertical, hasAttachments ? 8 : 10)
+                .background(
+                    RoundedRectangle(cornerRadius: hasAttachments ? 16 : 18, style: .continuous)
+                        .fill(Color.white.opacity(0.10))
+                )
+                .onSubmit {
+                    sendCurrentDraft()
+                }
 
-            HStack(spacing: 6) {
                 PhotosPicker(
                     selection: $selectedPhotoItems,
                     maxSelectionCount: 3,
                     matching: .images
                 ) {
-                    Label("Photo", systemImage: "photo.on.rectangle")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: hasAttachments ? 15 : 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(.white.opacity(0.8))
-                .frame(width: 52)
+                .frame(
+                    width: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize,
+                    height: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
+                )
+                .accessibilityLabel("Add photo")
 
                 Button {
                     sendCurrentDraft()
                 } label: {
-                    Label("Send", systemImage: "arrow.up.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .frame(maxWidth: .infinity)
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: hasAttachments ? 16 : 17, weight: .semibold))
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.cyan)
+                .frame(
+                    width: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize,
+                    height: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
+                )
                 .disabled(
                     chatStore.isSending(conversationID: conversationID) ||
                     (
                         chatStore.draftText(for: conversationID).nonEmptyTrimmed == nil &&
-                        chatStore.draftAttachments(for: conversationID).isEmpty
+                        attachments.isEmpty
                     )
                 )
+                .accessibilityLabel("Send")
             }
         }
-        .padding(8)
+        .padding(.top, hasAttachments ? 6 : 8)
+        .padding(.horizontal, hasAttachments ? 6 : 8)
+        .padding(.bottom, (hasAttachments ? 6 : 8) + ComposerLayout.composerInnerBottomPadding)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)
                 .fill(Color.black.opacity(0.5))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous))
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
@@ -297,14 +335,15 @@ struct ConversationDetailView: View {
         .accessibilityLabel("Open composer")
     }
 
-    private func compactControlBar(configuration: ConversationAIConfiguration) -> some View {
+    private func compactControlBar(configuration: ConversationAIConfiguration, isDense: Bool) -> some View {
         HStack(spacing: 6) {
             Button {
                 isShowingModelPicker = true
             } label: {
                 CompactMenuButtonLabel(
                     iconName: "cpu",
-                    title: AIModelCatalog.shortLabel(for: configuration.model)
+                    title: AIModelCatalog.shortLabel(for: configuration.model),
+                    isDense: isDense
                 )
             }
             .buttonStyle(.plain)
@@ -315,7 +354,8 @@ struct ConversationDetailView: View {
             } label: {
                 CompactMenuButtonLabel(
                     iconName: "brain.head.profile",
-                    title: configuration.thinkingIntensity.shortLabel
+                    title: configuration.thinkingIntensity.shortLabel,
+                    isDense: isDense
                 )
             }
             .buttonStyle(.plain)
@@ -348,8 +388,18 @@ struct ConversationDetailView: View {
         selectedPhotoItems = []
     }
 
-    private func scrollToBottom(with proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
+    private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.animation = nil
+
+        withTransaction(transaction) {
             proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
@@ -407,26 +457,32 @@ struct ConversationDetailView: View {
 private struct CompactMenuButtonLabel: View {
     let iconName: String
     let title: String
+    let isDense: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: isDense ? 4 : 5) {
             Image(systemName: iconName)
                 .font(.caption2)
                 .foregroundStyle(.cyan.opacity(0.92))
+                .frame(width: isDense ? 10 : 12)
 
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .allowsTightening(true)
+                .layoutPriority(1)
 
             Spacer(minLength: 0)
 
             Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: isDense ? 9 : 10, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .frame(width: isDense ? 8 : 10)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, isDense ? 6 : 8)
+        .padding(.vertical, isDense ? 6 : 8)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.white.opacity(0.07))
@@ -440,6 +496,7 @@ private struct CompactMenuButtonLabel: View {
 
 private struct DraftAttachmentPill: View {
     let attachment: ChatImageAttachment
+    let size: CGFloat
     let onRemove: () -> Void
 
     var body: some View {
@@ -448,12 +505,12 @@ private struct DraftAttachmentPill: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
             } else {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
                     .fill(Color.white.opacity(0.08))
-                    .frame(width: 60, height: 60)
+                    .frame(width: size, height: size)
                     .overlay {
                         Image(systemName: "photo")
                             .foregroundStyle(.secondary)
@@ -462,10 +519,114 @@ private struct DraftAttachmentPill: View {
 
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
+                    .font(size <= ComposerLayout.compactAttachmentSize ? .caption2 : .caption)
                     .foregroundStyle(.white, .black.opacity(0.7))
             }
-            .offset(x: 4, y: -4)
+            .offset(x: size <= ComposerLayout.compactAttachmentSize ? 3 : 4, y: size <= ComposerLayout.compactAttachmentSize ? -3 : -4)
         }
     }
 }
+
+#if DEBUG
+private enum ConversationDetailPreviewData {
+    static let conversationID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+    private static let baseDate = Date(timeIntervalSinceReferenceDate: 763_344_000)
+
+    static let conversation = ConversationThread(
+        id: conversationID,
+        title: "Trip Planning",
+        createdAt: baseDate,
+        updatedAt: baseDate.addingTimeInterval(240),
+        messages: [
+            ChatMessage(
+                id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee1")!,
+                role: .user,
+                text: "Summarize our Tokyo plan and keep the must-see stops.",
+                createdAt: baseDate
+            ),
+            ChatMessage(
+                id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee2")!,
+                role: .assistant,
+                text: "You have three anchor stops right now: Asakusa in the morning, the Shibuya and Harajuku area in the afternoon, and a quieter evening in Nakameguro. I would keep teamLab Borderless as the one pre-booked activity and leave the second day flexible for food and shopping.",
+                thoughtSummary: "Grouped the itinerary by area, removed repeated transport notes, and kept only places that already had clear intent.",
+                createdAt: baseDate.addingTimeInterval(90)
+            ),
+            ChatMessage(
+                id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee3")!,
+                role: .user,
+                text: "Also check this screenshot and tell me if the route still makes sense.",
+                createdAt: baseDate.addingTimeInterval(180),
+                attachments: [
+                    placeholderAttachment(
+                        id: UUID(uuidString: "bbbbbbbb-cccc-dddd-eeee-fffffffffff1")!,
+                        filename: "tokyo-route.png"
+                    )
+                ]
+            ),
+            ChatMessage(
+                id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee4")!,
+                role: .assistant,
+                text: "Yes. The route is still coherent if you keep Asakusa first, then move west only once for the rest of the day. The biggest improvement would be swapping Shinjuku Gyoen and Harajuku so the walking flow is tighter.",
+                thoughtSummary: "Compared the screenshot ordering against the earlier plan and looked for unnecessary backtracking.",
+                createdAt: baseDate.addingTimeInterval(240)
+            )
+        ],
+        aiConfiguration: ConversationAIConfiguration(
+            model: "gemini-3.1-pro-preview",
+            thinkingIntensity: .deep
+        )
+    )
+
+    static var draft: ConversationDraft {
+        ConversationDraft(
+            text: "Turn that into a tighter day-one itinerary with breakfast and dinner suggestions.",
+            attachments: [
+                placeholderAttachment(
+                    id: UUID(uuidString: "bbbbbbbb-cccc-dddd-eeee-fffffffffff2")!,
+                    filename: "food-notes.png"
+                )
+            ]
+        )
+    }
+
+    static func makeStore() -> ChatStore {
+        ChatStore.previewStore(
+            conversations: [conversation],
+            drafts: [conversationID: draft]
+        )
+    }
+
+    private static func placeholderAttachment(id: UUID, filename: String) -> ChatImageAttachment {
+        let symbolName = filename.contains("route") ? "map.fill" : "fork.knife.circle.fill"
+        let previewImage = UIImage(systemName: symbolName)?
+            .withTintColor(
+                UIColor(red: 0.12, green: 0.76, blue: 0.72, alpha: 1),
+                renderingMode: .alwaysOriginal
+            )
+
+        return ChatImageAttachment(
+            id: id,
+            filename: filename,
+            mimeType: "image/png",
+            data: previewImage?.pngData() ?? Data(),
+            pixelWidth: Int(previewImage?.size.width ?? 320),
+            pixelHeight: Int(previewImage?.size.height ?? 320)
+        )
+    }
+}
+
+private struct ConversationDetailPreviewContainer: View {
+    @StateObject private var chatStore = ConversationDetailPreviewData.makeStore()
+
+    var body: some View {
+        NavigationStack {
+            ConversationDetailView(conversationID: ConversationDetailPreviewData.conversationID)
+        }
+        .environmentObject(chatStore)
+    }
+}
+
+#Preview("Conversation Detail") {
+    ConversationDetailPreviewContainer()
+}
+#endif

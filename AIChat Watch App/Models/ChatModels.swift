@@ -54,11 +54,11 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
     var shortLabel: String {
         switch self {
         case .fast:
-            return "Fast"
+            return "LO"
         case .balanced:
-            return "Smart"
+            return "MID"
         case .deep:
-            return "Deep"
+            return "HI"
         }
     }
 
