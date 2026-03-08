@@ -10,7 +10,7 @@ import Foundation
 
 struct ConversationDraft: Equatable {
     var text: String = ""
-    var attachments: [ChatImageAttachment] = []
+    var attachments: [ChatAttachment] = []
 
     var hasContent: Bool {
         text.nonEmptyTrimmed != nil || attachments.isEmpty == false
@@ -22,6 +22,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var conversations: [ConversationThread] = []
     @Published private(set) var startupError: String?
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
+    @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
     @Published private(set) var syncStatusDescription: String
 
@@ -30,18 +31,21 @@ final class ChatStore: ObservableObject {
 
     private let repository: ConversationRepository
     private let aiService: AIStreamingService
+    private let transcriptionService: AITranscriptionService?
     private let syncBridge: CompanionSyncBridge
-    private var drafts: [UUID: ConversationDraft] = [:]
+    @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
 
     init(
         repository: ConversationRepository,
         aiService: AIStreamingService,
+        transcriptionService: AITranscriptionService?,
         configuration: AppConfiguration,
         syncBridge: CompanionSyncBridge
     ) {
         self.repository = repository
         self.aiService = aiService
+        self.transcriptionService = transcriptionService
         self.configuration = configuration
         self.syncBridge = syncBridge
         self.storageDescription = repository.storageDescription
@@ -118,6 +122,7 @@ final class ChatStore: ObservableObject {
         conversation.clearMessages()
         drafts[id] = ConversationDraft()
         conversationErrors[id] = nil
+        transcribingConversationIDs.remove(id)
         upsertConversation(conversation)
         await persist(conversation, sync: true)
     }
@@ -150,13 +155,32 @@ final class ChatStore: ObservableObject {
         drafts[conversationID] = draft
     }
 
-    func draftAttachments(for conversationID: UUID) -> [ChatImageAttachment] {
+    func draftAttachments(for conversationID: UUID) -> [ChatAttachment] {
         drafts[conversationID]?.attachments ?? []
     }
 
     func addAttachment(from rawData: Data, suggestedFilename: String?, to conversationID: UUID) throws {
         var draft = drafts[conversationID] ?? ConversationDraft()
-        draft.attachments.append(try ChatImageAttachment.makeNormalized(from: rawData, suggestedFilename: suggestedFilename))
+        draft.attachments.append(
+            try ChatAttachment.makeNormalizedImage(from: rawData, suggestedFilename: suggestedFilename)
+        )
+        drafts[conversationID] = draft
+    }
+
+    func addRecordedAudio(
+        from rawData: Data,
+        suggestedFilename: String?,
+        durationSeconds: Double,
+        to conversationID: UUID
+    ) throws {
+        var draft = drafts[conversationID] ?? ConversationDraft()
+        draft.attachments.append(
+            try ChatAttachment.makeRecordedAudio(
+                from: rawData,
+                suggestedFilename: suggestedFilename,
+                durationSeconds: durationSeconds
+            )
+        )
         drafts[conversationID] = draft
     }
 
@@ -168,6 +192,10 @@ final class ChatStore: ObservableObject {
 
     func isSending(conversationID: UUID) -> Bool {
         sendingConversationIDs.contains(conversationID)
+    }
+
+    func isTranscribing(conversationID: UUID) -> Bool {
+        transcribingConversationIDs.contains(conversationID)
     }
 
     func errorMessage(for conversationID: UUID) -> String? {
@@ -183,6 +211,61 @@ final class ChatStore: ObservableObject {
     }
 
     func sendMessage(in conversationID: UUID) async {
+        let draft = drafts[conversationID] ?? ConversationDraft()
+        await send(draft: draft, in: conversationID, clearStoredDraft: true)
+    }
+
+    func sendRecordedAudio(_ audioAttachment: ChatAttachment, in conversationID: UUID) async {
+        guard configuration.isAIConfigured else {
+            conversationErrors[conversationID] = configuration.configurationMessage
+            return
+        }
+
+        guard let transcriptionService else {
+            conversationErrors[conversationID] =
+                configuration.voiceInputConfigurationMessage ??
+                VoiceTranscriptionError.unavailable.localizedDescription
+            return
+        }
+
+        guard audioAttachment.isAudio else {
+            conversationErrors[conversationID] = VoiceTranscriptionError.invalidAudio.localizedDescription
+            return
+        }
+
+        guard isSending(conversationID: conversationID) == false,
+              isTranscribing(conversationID: conversationID) == false,
+              let currentConversation = conversation(id: conversationID)
+        else {
+            return
+        }
+
+        conversationErrors[conversationID] = nil
+        transcribingConversationIDs.insert(conversationID)
+
+        do {
+            let transcription = try await transcriptionService.transcribeUserAudio(
+                audioAttachment,
+                in: currentConversation
+            )
+
+            transcribingConversationIDs.remove(conversationID)
+            await send(
+                draft: ConversationDraft(text: transcription.text, attachments: []),
+                in: conversationID,
+                clearStoredDraft: false
+            )
+        } catch {
+            transcribingConversationIDs.remove(conversationID)
+            conversationErrors[conversationID] = error.localizedDescription
+        }
+    }
+
+    private func send(
+        draft: ConversationDraft,
+        in conversationID: UUID,
+        clearStoredDraft: Bool
+    ) async {
         guard configuration.isAIConfigured else {
             conversationErrors[conversationID] = configuration.configurationMessage
             return
@@ -192,7 +275,6 @@ final class ChatStore: ObservableObject {
             return
         }
 
-        let draft = drafts[conversationID] ?? ConversationDraft()
         let trimmedText = draft.text.trimmed
 
         guard trimmedText.isEmpty == false || draft.attachments.isEmpty == false else {
@@ -207,7 +289,9 @@ final class ChatStore: ObservableObject {
             attachments: draft.attachments
         )
         currentConversation.append(userMessage)
-        drafts[conversationID] = ConversationDraft()
+        if clearStoredDraft {
+            drafts[conversationID] = ConversationDraft()
+        }
         upsertConversation(currentConversation)
         await persist(currentConversation, sync: true)
 
@@ -311,6 +395,7 @@ final class ChatStore: ObservableObject {
         drafts[id] = nil
         conversationErrors[id] = nil
         sendingConversationIDs.remove(id)
+        transcribingConversationIDs.remove(id)
 
         do {
             try await repository.deleteConversation(id: id)
@@ -373,6 +458,18 @@ private struct PreviewAIStreamingService: AIStreamingService {
     }
 }
 
+private struct PreviewAITranscriptionService: AITranscriptionService {
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) async throws -> VoiceTranscriptionResult {
+        VoiceTranscriptionResult(
+            text: "This is a preview voice transcript.",
+            model: "gemini-3-flash-preview"
+        )
+    }
+}
+
 extension ChatStore {
     static func previewStore(
         conversations: [ConversationThread],
@@ -384,6 +481,7 @@ extension ChatStore {
             backendMode: .direct,
             geminiAPIKey: "preview-key",
             geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
             relayBaseURL: nil,
             relayBearerToken: nil,
             relayStreamPath: "v1/chat/stream",
@@ -399,6 +497,7 @@ extension ChatStore {
         let store = ChatStore(
             repository: repository,
             aiService: PreviewAIStreamingService(),
+            transcriptionService: PreviewAITranscriptionService(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -412,6 +511,7 @@ extension ChatStore {
         }
         store.drafts = drafts
         store.sendingConversationIDs = sendingConversationIDs
+        store.transcribingConversationIDs = []
         store.conversationErrors = conversationErrors
         store.startupError = startupError
         store.hasLoadedConversations = true

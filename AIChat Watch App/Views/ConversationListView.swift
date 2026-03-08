@@ -88,7 +88,7 @@ struct ConversationListView: View {
             Text("Built for Watch")
                 .font(.headline)
 
-            Text("Context-aware Gemini chat, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone.")
+            Text("Context-aware Gemini chat, voice prompts, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -142,7 +142,11 @@ private struct ConversationRowView: View {
             HStack(spacing: 6) {
                 Label("\(conversation.messageCount)", systemImage: "bubble.left.and.bubble.right")
                     .labelStyle(.titleAndIcon)
-                if conversation.messages.contains(where: { $0.attachments.isEmpty == false }) {
+                if conversation.messages.contains(where: { $0.attachments.contains(where: \.isAudio) }) {
+                    Label("Voice", systemImage: "waveform")
+                        .labelStyle(.titleAndIcon)
+                }
+                if conversation.messages.contains(where: { $0.attachments.contains(where: \.isImage) }) {
                     Label("Photo", systemImage: "photo")
                         .labelStyle(.titleAndIcon)
                 }

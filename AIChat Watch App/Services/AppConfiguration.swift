@@ -25,6 +25,7 @@ struct AppConfiguration: Equatable {
     let backendMode: AIBackendMode
     let geminiAPIKey: String?
     let geminiModel: String
+    let geminiTranscriptionModel: String
     let relayBaseURL: URL?
     let relayBearerToken: String?
     let relayStreamPath: String
@@ -39,6 +40,11 @@ struct AppConfiguration: Equatable {
 
         let geminiAPIKey = value(for: "GEMINI_API_KEY", bundle: bundle, environment: environment)
         let geminiModel = value(for: "GEMINI_MODEL", bundle: bundle, environment: environment) ?? "gemini-3-flash-preview"
+        let geminiTranscriptionModel = value(
+            for: "GEMINI_TRANSCRIPTION_MODEL",
+            bundle: bundle,
+            environment: environment
+        ) ?? "gemini-3-flash-preview"
         let relayBaseURL = value(for: "AI_RELAY_BASE_URL", bundle: bundle, environment: environment)
             .flatMap(URL.init(string:))
         let relayBearerToken = value(for: "AI_RELAY_BEARER_TOKEN", bundle: bundle, environment: environment)
@@ -49,6 +55,7 @@ struct AppConfiguration: Equatable {
             backendMode: backendMode,
             geminiAPIKey: geminiAPIKey,
             geminiModel: geminiModel,
+            geminiTranscriptionModel: geminiTranscriptionModel,
             relayBaseURL: relayBaseURL,
             relayBearerToken: relayBearerToken,
             relayStreamPath: relayStreamPath,
@@ -95,6 +102,14 @@ struct AppConfiguration: Equatable {
             }
             return "Relay gateway is ready."
         }
+    }
+
+    var voiceInputConfigurationMessage: String? {
+        guard geminiAPIKey == nil else {
+            return nil
+        }
+
+        return "Voice transcription needs GEMINI_API_KEY because audio is transcribed with Gemini before sending."
     }
 
     var relayStreamURL: URL? {

@@ -12,13 +12,14 @@ enum AIContextBuilder {
         """
         You are AIChat on Apple Watch.
         Keep answers clear, concise, and easy to scan on a small screen unless the user explicitly asks for detail.
+        If a user turn includes audio attachments, treat the speech in the audio as the user's request and answer it directly instead of only describing or transcribing the audio.
         """
 
     static func selectedMessages(
         from messages: [ChatMessage],
         maxContextMessages: Int,
         maxCharacterBudget: Int,
-        maxInlineImageBytes: Int
+        maxInlineAttachmentBytes: Int
     ) -> [ChatMessage] {
         let eligibleMessages = messages.filter { message in
             message.status != .failed &&
@@ -41,7 +42,7 @@ enum AIContextBuilder {
                 (
                     selectedMessages.count >= maxContextMessages ||
                     consumedCharacters + messageCharacters > maxCharacterBudget ||
-                    consumedImageBytes + imageBytes > maxInlineImageBytes
+                    consumedImageBytes + imageBytes > maxInlineAttachmentBytes
                 )
 
             if exceedsBudget {
@@ -54,5 +55,46 @@ enum AIContextBuilder {
         }
 
         return selectedMessages.reversed()
+    }
+
+    static func transcriptionContextSummary(
+        from messages: [ChatMessage],
+        maxContextMessages: Int,
+        maxCharacterBudget: Int
+    ) -> String? {
+        var selectedLines: [String] = []
+        var consumedCharacters = 0
+
+        for message in messages.reversed() {
+            guard message.status != .failed,
+                  message.role != .system,
+                  let text = message.cleanedText.nonEmptyTrimmed
+            else {
+                continue
+            }
+
+            let speaker = message.role == .assistant ? "Assistant" : "User"
+            let line = "\(speaker): \(text.collapseWhitespace())"
+            let lineCost = max(line.count, 24)
+
+            let exceedsBudget =
+                selectedLines.isEmpty == false &&
+                (
+                    selectedLines.count >= maxContextMessages ||
+                    consumedCharacters + lineCost > maxCharacterBudget
+                )
+
+            if exceedsBudget {
+                break
+            }
+
+            selectedLines.append(line)
+            consumedCharacters += lineCost
+        }
+
+        return selectedLines
+            .reversed()
+            .joined(separator: "\n")
+            .nonEmptyTrimmed
     }
 }

@@ -38,7 +38,7 @@ struct GeminiAPIClient: AIStreamingService {
     var session: URLSession = .shared
     var maxContextMessages: Int = 12
     var maxCharacterBudget: Int = 12_000
-    var maxInlineImageBytes: Int = 1_800_000
+    var maxInlineAttachmentBytes: Int = 4_000_000
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -155,7 +155,7 @@ struct GeminiAPIClient: AIStreamingService {
             from: messages,
             maxContextMessages: maxContextMessages,
             maxCharacterBudget: maxCharacterBudget,
-            maxInlineImageBytes: maxInlineImageBytes
+            maxInlineAttachmentBytes: maxInlineAttachmentBytes
         )
 
         return selectedMessages.compactMap { message in
@@ -173,7 +173,7 @@ struct GeminiAPIClient: AIStreamingService {
                 )
             }
 
-            if let text = message.cleanedText.nonEmptyTrimmed {
+            if let text = requestText(for: message) {
                 parts.insert(GeminiPart(text: text, inlineData: nil), at: 0)
             }
 
@@ -208,6 +208,18 @@ struct GeminiAPIClient: AIStreamingService {
             thoughtSummary: thoughtSummary,
             finishReason: finishReason
         )
+    }
+
+    private func requestText(for message: ChatMessage) -> String? {
+        if let text = message.cleanedText.nonEmptyTrimmed {
+            return text
+        }
+
+        guard message.role == .user, message.attachments.contains(where: \.isAudio) else {
+            return nil
+        }
+
+        return "Listen to the attached audio, infer the user's request, and answer it directly."
     }
 
     private func thinkingConfiguration(for runtimeConfiguration: ConversationAIConfiguration) -> GeminiThinkingConfig {
