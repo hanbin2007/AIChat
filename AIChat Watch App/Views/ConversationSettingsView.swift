@@ -42,6 +42,17 @@ struct ConversationSettingsView: View {
                     LabeledContent("Sync", value: chatStore.syncStatusDescription)
                 }
 
+                if let conversation = chatStore.conversation(id: conversationID) {
+                    let aiConfiguration = conversation.resolvedAIConfiguration(
+                        defaultModel: chatStore.configuration.geminiModel
+                    )
+
+                    Section("AI") {
+                        LabeledContent("Model", value: AIModelCatalog.displayName(for: aiConfiguration.model))
+                        LabeledContent("Thinking", value: aiConfiguration.thinkingIntensity.displayName)
+                    }
+                }
+
                 Section("Danger Zone") {
                     Button("Delete Conversation", role: .destructive) {
                         Task {

@@ -34,7 +34,7 @@ struct GeminiAPIClient: AIStreamingService {
     var maxCharacterBudget: Int = 12_000
     var maxInlineImageBytes: Int = 1_800_000
 
-    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<String, Error> {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -42,9 +42,11 @@ struct GeminiAPIClient: AIStreamingService {
                         throw GeminiAPIError.missingAPIKey
                     }
 
+                    let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+
                     var request = URLRequest(
                         url: URL(
-                            string: "https://generativelanguage.googleapis.com/v1beta/models/\(configuration.geminiModel):streamGenerateContent?alt=sse"
+                            string: "https://generativelanguage.googleapis.com/v1beta/models/\(runtimeConfiguration.model):streamGenerateContent?alt=sse"
                         )!
                     )
                     request.httpMethod = "POST"
@@ -54,7 +56,7 @@ struct GeminiAPIClient: AIStreamingService {
 
                     let encoder = JSONEncoder()
                     encoder.keyEncodingStrategy = .convertToSnakeCase
-                    request.httpBody = try encoder.encode(makeRequestBody(for: conversation.messages))
+                    request.httpBody = try encoder.encode(makeRequestBody(for: conversation))
 
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
@@ -70,6 +72,7 @@ struct GeminiAPIClient: AIStreamingService {
                     decoder.keyDecodingStrategy = .convertFromSnakeCase
 
                     var accumulatedText = ""
+                    var accumulatedThoughtSummary = ""
 
                     for try await line in bytes.lines {
                         let trimmedLine = line.trimmed
@@ -87,11 +90,22 @@ struct GeminiAPIClient: AIStreamingService {
                         }
 
                         let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
-                        let chunkText = extractText(from: responseEnvelope) ?? ""
-                        let delta = normalizedDelta(chunkText: chunkText, currentText: &accumulatedText)
+                        let streamChunk = extractChunk(from: responseEnvelope)
 
-                        if let delta, delta.isEmpty == false {
-                            continuation.yield(delta)
+                        if let thoughtDelta = normalizedDelta(
+                            chunkText: streamChunk.thoughtSummary ?? "",
+                            currentText: &accumulatedThoughtSummary
+                        ),
+                        thoughtDelta.isEmpty == false {
+                            continuation.yield(.thoughtDelta(thoughtDelta))
+                        }
+
+                        if let answerDelta = normalizedDelta(
+                            chunkText: streamChunk.answerText ?? "",
+                            currentText: &accumulatedText
+                        ),
+                        answerDelta.isEmpty == false {
+                            continuation.yield(.answerDelta(answerDelta))
                         }
                     }
 
@@ -107,14 +121,17 @@ struct GeminiAPIClient: AIStreamingService {
         }
     }
 
-    func makeRequestBody(for messages: [ChatMessage]) -> GeminiGenerateContentRequest {
-        GeminiGenerateContentRequest(
+    func makeRequestBody(for conversation: ConversationThread) -> GeminiGenerateContentRequest {
+        let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+
+        return GeminiGenerateContentRequest(
             systemInstruction: GeminiContent.systemPrompt(AIContextBuilder.systemPrompt),
-            contents: contextWindow(from: messages),
+            contents: contextWindow(from: conversation.messages),
             generationConfig: GeminiGenerationConfig(
                 temperature: 0.65,
                 topP: 0.9,
-                maxOutputTokens: 512
+                maxOutputTokens: 512,
+                thinkingConfig: thinkingConfiguration(for: runtimeConfiguration)
             )
         )
     }
@@ -150,15 +167,40 @@ struct GeminiAPIClient: AIStreamingService {
         }
     }
 
-    private func extractText(from responseEnvelope: GeminiGenerateContentResponse) -> String? {
-        responseEnvelope.candidates
-            .compactMap { candidate in
-                candidate.content?.parts
-                    .compactMap(\.text)
-                    .joined(separator: "\n")
-                    .nonEmptyTrimmed
-            }
-            .first
+    private func extractChunk(from responseEnvelope: GeminiGenerateContentResponse) -> GeminiStreamChunk {
+        let parts = responseEnvelope.candidates
+            .compactMap { $0.content?.parts }
+            .first ?? []
+
+        let answerText = parts
+            .filter { $0.thought != true }
+            .compactMap(\.text)
+            .joined(separator: "\n")
+            .nonEmptyTrimmed
+
+        let thoughtSummary = parts
+            .filter { $0.thought == true }
+            .compactMap(\.text)
+            .joined(separator: "\n")
+            .nonEmptyTrimmed
+
+        return GeminiStreamChunk(answerText: answerText, thoughtSummary: thoughtSummary)
+    }
+
+    private func thinkingConfiguration(for runtimeConfiguration: ConversationAIConfiguration) -> GeminiThinkingConfig {
+        if AIModelCatalog.usesThinkingLevel(model: runtimeConfiguration.model) {
+            return GeminiThinkingConfig(
+                thinkingBudget: nil,
+                thinkingLevel: runtimeConfiguration.thinkingIntensity.gemini3ThinkingLevel,
+                includeThoughts: true
+            )
+        }
+
+        return GeminiThinkingConfig(
+            thinkingBudget: runtimeConfiguration.thinkingIntensity.gemini25ThinkingBudget,
+            thinkingLevel: nil,
+            includeThoughts: true
+        )
     }
 
     private func geminiError(from data: Data) -> Error {
@@ -211,6 +253,13 @@ struct GeminiGenerationConfig: Codable, Equatable {
     var temperature: Double
     var topP: Double
     var maxOutputTokens: Int
+    var thinkingConfig: GeminiThinkingConfig?
+}
+
+struct GeminiThinkingConfig: Codable, Equatable {
+    var thinkingBudget: Int?
+    var thinkingLevel: String?
+    var includeThoughts: Bool?
 }
 
 struct GeminiContent: Codable, Equatable {
@@ -225,6 +274,17 @@ struct GeminiContent: Codable, Equatable {
 struct GeminiPart: Codable, Equatable {
     var text: String?
     var inlineData: GeminiInlineData?
+    var thought: Bool?
+
+    init(
+        text: String?,
+        inlineData: GeminiInlineData?,
+        thought: Bool? = nil
+    ) {
+        self.text = text
+        self.inlineData = inlineData
+        self.thought = thought
+    }
 }
 
 struct GeminiInlineData: Codable, Equatable {
@@ -238,6 +298,11 @@ struct GeminiGenerateContentResponse: Decodable {
 
 struct GeminiCandidate: Decodable {
     var content: GeminiContent?
+}
+
+struct GeminiStreamChunk: Equatable {
+    var answerText: String?
+    var thoughtSummary: String?
 }
 
 struct GeminiAPIErrorEnvelope: Decodable {

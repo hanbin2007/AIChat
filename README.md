@@ -6,6 +6,8 @@
 - 上下文续聊与本地持久化
 - 图片上传并参与 Gemini 多模态推理
 - 流式回复显示，而不是整段返回
+- Gemini thinking 摘要展示与会话级思考强度切换
+- 会话内快速模型切换，支持 `Gemini 3 Flash` / `Gemini 3.1 Pro`
 - 可切换 `Direct Gemini` 和 `Relay Gateway`
 - 为未来 iPhone 伴生端准备的共享存储与 `WatchConnectivity` 同步桥
 
@@ -34,7 +36,7 @@
 ```xcconfig
 AI_BACKEND_MODE = direct
 GEMINI_API_KEY = your-gemini-api-key
-GEMINI_MODEL = gemini-2.5-flash
+GEMINI_MODEL = gemini-3-flash-preview
 ```
 
 生产推荐 relay：
@@ -43,7 +45,7 @@ GEMINI_MODEL = gemini-2.5-flash
 AI_BACKEND_MODE = relay
 AI_RELAY_BASE_URL = http://127.0.0.1:8787
 AI_RELAY_BEARER_TOKEN = your-relay-token
-GEMINI_MODEL = gemini-2.5-flash
+GEMINI_MODEL = gemini-3-flash-preview
 ```
 
 可选共享容器：
@@ -57,6 +59,7 @@ APP_GROUP_IDENTIFIER = group.your.company.aichat
 - `Config/Secrets.xcconfig` 已经被 `.gitignore` 忽略
 - 直连 Gemini 只适合开发，不适合真正上线
 - 如果要让 iPhone 和 Watch 真正共享文件存储，需要再给 target 配好 App Group entitlement
+- `Gemini 3` 会走 `thinkingLevel`，`Gemini 2.5` 会自动映射到 `thinkingBudget`
 
 ## 构建
 
@@ -78,7 +81,7 @@ xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS Sim
 
 - 服务端持有 `GEMINI_API_KEY`
 - 对客户端做 Bearer 鉴权
-- 把 Gemini SSE 流转成更简单的 `delta` 事件
+- 把 Gemini SSE 流转成客户端更容易消费的 `answer_delta` / `thought_delta` 事件
 
 ## 当前状态
 

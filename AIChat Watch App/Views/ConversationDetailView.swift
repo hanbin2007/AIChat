@@ -15,15 +15,35 @@ struct ConversationDetailView: View {
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isShowingSettings = false
+    @State private var isShowingModelPicker = false
+    @State private var isShowingThinkingPicker = false
+    @State private var isComposerExpanded = true
 
     var body: some View {
         ZStack {
             AppBackdropView()
 
             if let conversation = chatStore.conversation(id: conversationID) {
-                VStack(spacing: 8) {
-                    messagesView(conversation: conversation)
-                    composerView
+                ZStack(alignment: .bottomTrailing) {
+                    VStack(spacing: 8) {
+                        messagesView(conversation: conversation)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                        if isComposerExpanded {
+                            composerView(conversation: conversation)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 4)
+
+                    if isComposerExpanded == false {
+                        collapsedComposerButton
+                            .padding(.trailing, 10)
+                            .padding(.bottom, 8)
+                            .transition(.scale.combined(with: .opacity))
+                    }
                 }
             } else {
                 VStack(spacing: 10) {
@@ -52,11 +72,30 @@ struct ConversationDetailView: View {
         .sheet(isPresented: $isShowingSettings) {
             ConversationSettingsView(conversationID: conversationID)
         }
+        .confirmationDialog("Choose Model", isPresented: $isShowingModelPicker) {
+            ForEach(AIModelCatalog.quickOptions(defaultModel: chatStore.configuration.geminiModel)) { option in
+                Button(option.title) {
+                    Task {
+                        await chatStore.updateModel(option.id, for: conversationID)
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Thinking Mode", isPresented: $isShowingThinkingPicker) {
+            ForEach(AIThinkingIntensity.allCases) { intensity in
+                Button(intensity.displayName) {
+                    Task {
+                        await chatStore.updateThinkingIntensity(intensity, for: conversationID)
+                    }
+                }
+            }
+        }
         .onChange(of: selectedPhotoItems) { _, newItems in
             Task {
                 await importPickedItems(newItems)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: isComposerExpanded)
     }
 
     private func messagesView(conversation: ConversationThread) -> some View {
@@ -82,7 +121,7 @@ struct ConversationDetailView: View {
                     }
 
                     Color.clear
-                        .frame(height: 1)
+                        .frame(height: isComposerExpanded ? 1 : 56)
                         .id("bottom")
                 }
                 .padding(.horizontal, 4)
@@ -91,6 +130,9 @@ struct ConversationDetailView: View {
                 scrollToBottom(with: proxy)
             }
             .onChange(of: conversation.messages.count) { _, _ in
+                scrollToBottom(with: proxy)
+            }
+            .onChange(of: conversation.updatedAt) { _, _ in
                 scrollToBottom(with: proxy)
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, _ in
@@ -108,12 +150,12 @@ struct ConversationDetailView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 starterChip("Summarize notes")
                 starterChip("Explain this photo")
             }
         }
-        .padding(14)
+        .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color.black.opacity(0.35))
@@ -129,12 +171,17 @@ struct ConversationDetailView: View {
             chatStore.updateDraftText(text, for: conversationID)
         }
         .buttonStyle(.bordered)
+        .controlSize(.small)
         .tint(.white.opacity(0.8))
         .font(.caption2)
     }
 
-    private var composerView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func composerView(conversation: ConversationThread) -> some View {
+        let aiConfiguration = conversation.resolvedAIConfiguration(defaultModel: chatStore.configuration.geminiModel)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            compactControlBar(configuration: aiConfiguration)
+
             if chatStore.draftAttachments(for: conversationID).isEmpty == false {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -161,13 +208,12 @@ struct ConversationDetailView: View {
             )
             .textInputAutocapitalization(.sentences)
             .submitLabel(.send)
+            .font(.body)
             .onSubmit {
-                Task {
-                    await chatStore.sendMessage(in: conversationID)
-                }
+                sendCurrentDraft()
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 PhotosPicker(
                     selection: $selectedPhotoItems,
                     maxSelectionCount: 3,
@@ -175,21 +221,22 @@ struct ConversationDetailView: View {
                 ) {
                     Label("Photo", systemImage: "photo.on.rectangle")
                         .labelStyle(.iconOnly)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .tint(.white.opacity(0.8))
+                .frame(width: 52)
 
                 Button {
-                    chatStore.clearError(for: conversationID)
-                    Task {
-                        await chatStore.sendMessage(in: conversationID)
-                    }
+                    sendCurrentDraft()
                 } label: {
                     Label("Send", systemImage: "arrow.up.circle.fill")
                         .labelStyle(.titleAndIcon)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .tint(.cyan)
                 .disabled(
                     chatStore.isSending(conversationID: conversationID) ||
@@ -200,7 +247,7 @@ struct ConversationDetailView: View {
                 )
             }
         }
-        .padding(10)
+        .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color.black.opacity(0.5))
@@ -209,6 +256,56 @@ struct ConversationDetailView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+    }
+
+    private var collapsedComposerButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isComposerExpanded = true
+            }
+        } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 46, height: 46)
+                .background(
+                    Circle()
+                        .fill(Color.cyan.opacity(0.92))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.28), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open composer")
+    }
+
+    private func compactControlBar(configuration: ConversationAIConfiguration) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                isShowingModelPicker = true
+            } label: {
+                CompactMenuButtonLabel(
+                    iconName: "cpu",
+                    title: AIModelCatalog.shortLabel(for: configuration.model)
+                )
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+
+            Button {
+                isShowingThinkingPicker = true
+            } label: {
+                CompactMenuButtonLabel(
+                    iconName: "brain.head.profile",
+                    title: configuration.thinkingIntensity.shortLabel
+                )
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+        }
     }
 
     @MainActor
@@ -240,6 +337,67 @@ struct ConversationDetailView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             proxy.scrollTo("bottom", anchor: .bottom)
         }
+    }
+
+    private func sendCurrentDraft() {
+        guard chatStore.isSending(conversationID: conversationID) == false else {
+            return
+        }
+
+        let draft = ConversationDraft(
+            text: chatStore.draftText(for: conversationID),
+            attachments: chatStore.draftAttachments(for: conversationID)
+        )
+
+        guard draft.hasContent else {
+            return
+        }
+
+        if chatStore.configuration.isAIConfigured {
+            withAnimation(.easeOut(duration: 0.2)) {
+                isComposerExpanded = false
+            }
+        }
+
+        chatStore.clearError(for: conversationID)
+
+        Task {
+            await chatStore.sendMessage(in: conversationID)
+        }
+    }
+}
+
+private struct CompactMenuButtonLabel: View {
+    let iconName: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .font(.caption2)
+                .foregroundStyle(.cyan.opacity(0.92))
+
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 

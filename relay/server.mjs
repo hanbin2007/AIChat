@@ -21,6 +21,34 @@ function unauthorized(res) {
   sendJson(res, 401, { message: "Unauthorized relay request." });
 }
 
+function thinkingConfigFor(model, thinkingIntensity = "balanced", includeThoughts = true) {
+  const normalizedIntensity = typeof thinkingIntensity === "string" ? thinkingIntensity : "balanced";
+
+  if (String(model || "").startsWith("gemini-3")) {
+    const thinkingLevelByIntensity = {
+      fast: "minimal",
+      balanced: "medium",
+      deep: "high"
+    };
+
+    return {
+      thinkingLevel: thinkingLevelByIntensity[normalizedIntensity] || "medium",
+      includeThoughts
+    };
+  }
+
+  const thinkingBudgetByIntensity = {
+    fast: 0,
+    balanced: 8192,
+    deep: 24576
+  };
+
+  return {
+    thinkingBudget: thinkingBudgetByIntensity[normalizedIntensity] ?? 8192,
+    includeThoughts
+  };
+}
+
 function toGeminiRequest(body) {
   return {
     systemInstruction: {
@@ -50,16 +78,54 @@ function toGeminiRequest(body) {
     generationConfig: {
       temperature: 0.65,
       topP: 0.9,
-      maxOutputTokens: 512
+      maxOutputTokens: 512,
+      thinkingConfig: thinkingConfigFor(body.model, body.thinkingIntensity, body.includeThoughts !== false)
     }
   };
 }
 
-function extractChunkText(chunk) {
-  return chunk?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || "")
+function extractChunkParts(chunk) {
+  const parts = chunk?.candidates?.[0]?.content?.parts || [];
+  const answerText = parts
+    .filter((part) => part.thought !== true)
+    .map((part) => part.text || "")
     .join("\n")
     .trim();
+  const thoughtText = parts
+    .filter((part) => part.thought === true)
+    .map((part) => part.text || "")
+    .join("\n")
+    .trim();
+
+  return {
+    answerText,
+    thoughtText
+  };
+}
+
+function normalizedDelta(chunkText, emittedText) {
+  if (!chunkText) {
+    return { delta: "", emittedText };
+  }
+
+  if (chunkText.startsWith(emittedText)) {
+    return {
+      delta: chunkText.slice(emittedText.length),
+      emittedText: chunkText
+    };
+  }
+
+  if (emittedText.startsWith(chunkText)) {
+    return {
+      delta: "",
+      emittedText
+    };
+  }
+
+  return {
+    delta: chunkText,
+    emittedText: emittedText + chunkText
+  };
 }
 
 async function streamGeminiResponse({ model, requestBody, res }) {
@@ -89,7 +155,8 @@ async function streamGeminiResponse({ model, requestBody, res }) {
   });
 
   let buffered = "";
-  let emittedText = "";
+  let emittedAnswerText = "";
+  let emittedThoughtText = "";
 
   for await (const chunk of geminiResponse.body) {
     buffered += decoder.decode(chunk, { stream: true });
@@ -114,27 +181,27 @@ async function streamGeminiResponse({ model, requestBody, res }) {
         continue;
       }
 
-      const chunkText = extractChunkText(parsed);
-      if (!chunkText) {
-        continue;
+      const { answerText, thoughtText } = extractChunkParts(parsed);
+
+      if (thoughtText) {
+        const result = normalizedDelta(thoughtText, emittedThoughtText);
+        emittedThoughtText = result.emittedText;
+
+        if (result.delta) {
+          res.write(`event: thought_delta\n`);
+          res.write(`data: ${JSON.stringify({ type: "thought_delta", text: result.delta })}\n\n`);
+        }
       }
 
-      let delta = chunkText;
-      if (chunkText.startsWith(emittedText)) {
-        delta = chunkText.slice(emittedText.length);
-        emittedText = chunkText;
-      } else if (emittedText.startsWith(chunkText)) {
-        delta = "";
-      } else {
-        emittedText += chunkText;
-      }
+      if (answerText) {
+        const result = normalizedDelta(answerText, emittedAnswerText);
+        emittedAnswerText = result.emittedText;
 
-      if (!delta) {
-        continue;
+        if (result.delta) {
+          res.write(`event: answer_delta\n`);
+          res.write(`data: ${JSON.stringify({ type: "answer_delta", text: result.delta })}\n\n`);
+        }
       }
-
-      res.write(`event: delta\n`);
-      res.write(`data: ${JSON.stringify({ type: "delta", text: delta })}\n\n`);
     }
   }
 
@@ -175,7 +242,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     await streamGeminiResponse({
-      model: body.model || "gemini-2.5-flash",
+      model: body.model || "gemini-3-flash-preview",
       requestBody: toGeminiRequest(body),
       res
     });

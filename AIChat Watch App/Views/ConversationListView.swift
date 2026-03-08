@@ -47,7 +47,12 @@ struct ConversationListView: View {
                 } else {
                     ForEach(chatStore.conversations) { conversation in
                         NavigationLink(value: conversation.id) {
-                            ConversationRowView(conversation: conversation)
+                            ConversationRowView(
+                                conversation: conversation,
+                                aiConfiguration: conversation.resolvedAIConfiguration(
+                                    defaultModel: chatStore.configuration.geminiModel
+                                )
+                            )
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                         .listRowBackground(Color.clear)
@@ -113,6 +118,7 @@ struct ConversationListView: View {
 
 private struct ConversationRowView: View {
     let conversation: ConversationThread
+    let aiConfiguration: ConversationAIConfiguration
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -140,6 +146,9 @@ private struct ConversationRowView: View {
                     Label("Photo", systemImage: "photo")
                         .labelStyle(.titleAndIcon)
                 }
+                Text(AIModelCatalog.shortLabel(for: aiConfiguration.model))
+                Text("•")
+                Text(aiConfiguration.thinkingIntensity.shortLabel)
             }
             .font(.caption2)
             .foregroundStyle(.cyan)

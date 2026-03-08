@@ -31,6 +31,73 @@ nonisolated enum ChatMessageStatus: String, Codable, Hashable {
     case failed
 }
 
+nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, Identifiable {
+    case fast
+    case balanced
+    case deep
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .fast:
+            return "Fast"
+        case .balanced:
+            return "Balanced"
+        case .deep:
+            return "Deep"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .fast:
+            return "Fast"
+        case .balanced:
+            return "Smart"
+        case .deep:
+            return "Deep"
+        }
+    }
+
+    var gemini3ThinkingLevel: String {
+        switch self {
+        case .fast:
+            return "minimal"
+        case .balanced:
+            return "medium"
+        case .deep:
+            return "high"
+        }
+    }
+
+    var gemini25ThinkingBudget: Int {
+        switch self {
+        case .fast:
+            return 0
+        case .balanced:
+            return 8_192
+        case .deep:
+            return 24_576
+        }
+    }
+}
+
+nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
+    var model: String
+    var thinkingIntensity: AIThinkingIntensity
+
+    init(
+        model: String,
+        thinkingIntensity: AIThinkingIntensity = .balanced
+    ) {
+        self.model = model
+        self.thinkingIntensity = thinkingIntensity
+    }
+}
+
 nonisolated enum AttachmentProcessingError: LocalizedError {
     case unsupportedImage
     case imageTooLarge(maximumBytes: Int)
@@ -120,6 +187,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     let id: UUID
     var role: ChatRole
     var text: String
+    var thoughtSummary: String?
     var createdAt: Date
     var attachments: [ChatImageAttachment]
     var status: ChatMessageStatus
@@ -128,6 +196,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         id: UUID = UUID(),
         role: ChatRole,
         text: String,
+        thoughtSummary: String? = nil,
         createdAt: Date = .now,
         attachments: [ChatImageAttachment] = [],
         status: ChatMessageStatus = .sent
@@ -135,6 +204,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         self.id = id
         self.role = role
         self.text = text
+        self.thoughtSummary = thoughtSummary
         self.createdAt = createdAt
         self.attachments = attachments
         self.status = status
@@ -144,8 +214,15 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         text.trimmed
     }
 
+    var cleanedThoughtSummary: String? {
+        thoughtSummary?.nonEmptyTrimmed
+    }
+
     var hasVisibleContent: Bool {
-        cleanedText.isEmpty == false || attachments.isEmpty == false || status == .streaming
+        cleanedText.isEmpty == false ||
+        cleanedThoughtSummary != nil ||
+        attachments.isEmpty == false ||
+        status == .streaming
     }
 }
 
@@ -157,19 +234,22 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     var createdAt: Date
     var updatedAt: Date
     var messages: [ChatMessage]
+    var aiConfiguration: ConversationAIConfiguration?
 
     init(
         id: UUID = UUID(),
         title: String = ConversationThread.untitledTitle,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        messages: [ChatMessage] = []
+        messages: [ChatMessage] = [],
+        aiConfiguration: ConversationAIConfiguration? = nil
     ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.messages = messages
+        self.aiConfiguration = aiConfiguration
     }
 
     static func empty(now: Date = .now) -> ConversationThread {
@@ -182,6 +262,9 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         }
 
         if lastMessage.status == .streaming, lastMessage.cleanedText.isEmpty {
+            if let thoughtSummary = lastMessage.cleanedThoughtSummary {
+                return "Thinking: \(thoughtSummary)"
+            }
             return "Streaming response..."
         }
 
@@ -191,6 +274,10 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
         if let text = lastMessage.cleanedText.nonEmptyTrimmed {
             return text
+        }
+
+        if let thoughtSummary = lastMessage.cleanedThoughtSummary {
+            return thoughtSummary
         }
 
         let count = lastMessage.attachments.count
@@ -235,6 +322,11 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         updatedAt = .now
     }
 
+    mutating func updateAIConfiguration(_ newConfiguration: ConversationAIConfiguration?) {
+        aiConfiguration = newConfiguration
+        updatedAt = .now
+    }
+
     mutating func upsertMessage(_ message: ChatMessage) {
         if let index = messages.firstIndex(where: { $0.id == message.id }) {
             messages[index] = message
@@ -262,5 +354,15 @@ nonisolated extension String {
 
     func collapseWhitespace() -> String {
         replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+}
+
+nonisolated extension ConversationThread {
+    func resolvedAIConfiguration(defaultModel: String) -> ConversationAIConfiguration {
+        if let aiConfiguration {
+            return aiConfiguration
+        }
+
+        return ConversationAIConfiguration(model: defaultModel)
     }
 }

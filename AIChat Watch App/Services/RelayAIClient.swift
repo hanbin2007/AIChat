@@ -34,7 +34,7 @@ struct RelayAIClient: AIStreamingService {
     var maxCharacterBudget: Int = 12_000
     var maxInlineImageBytes: Int = 1_800_000
 
-    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<String, Error> {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -52,7 +52,7 @@ struct RelayAIClient: AIStreamingService {
 
                     let encoder = JSONEncoder()
                     encoder.keyEncodingStrategy = .convertToSnakeCase
-                    request.httpBody = try encoder.encode(makeRelayRequest(for: conversation.messages))
+                    request.httpBody = try encoder.encode(makeRelayRequest(for: conversation))
 
                     let (bytes, response) = try await session.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
@@ -65,6 +65,7 @@ struct RelayAIClient: AIStreamingService {
                     }
 
                     var accumulatedText = ""
+                    var accumulatedThoughtSummary = ""
                     var currentEvent = "message"
 
                     for try await line in bytes.lines {
@@ -90,10 +91,15 @@ struct RelayAIClient: AIStreamingService {
                         let payload = try JSONDecoder().decode(RelayStreamEvent.self, from: data)
 
                         switch payload.type ?? currentEvent {
-                        case "delta":
+                        case "delta", "answer_delta":
                             let delta = normalizedDelta(chunkText: payload.text ?? "", currentText: &accumulatedText)
                             if let delta, delta.isEmpty == false {
-                                continuation.yield(delta)
+                                continuation.yield(.answerDelta(delta))
+                            }
+                        case "thought_delta":
+                            let delta = normalizedDelta(chunkText: payload.text ?? "", currentText: &accumulatedThoughtSummary)
+                            if let delta, delta.isEmpty == false {
+                                continuation.yield(.thoughtDelta(delta))
                             }
                         case "error":
                             throw RelayAPIError.remote(message: payload.message ?? "Relay stream failed.")
@@ -116,17 +122,20 @@ struct RelayAIClient: AIStreamingService {
         }
     }
 
-    func makeRelayRequest(for messages: [ChatMessage]) -> RelayChatRequest {
+    func makeRelayRequest(for conversation: ConversationThread) -> RelayChatRequest {
+        let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
         let selectedMessages = AIContextBuilder.selectedMessages(
-            from: messages,
+            from: conversation.messages,
             maxContextMessages: maxContextMessages,
             maxCharacterBudget: maxCharacterBudget,
             maxInlineImageBytes: maxInlineImageBytes
         )
 
         return RelayChatRequest(
-            model: configuration.geminiModel,
+            model: runtimeConfiguration.model,
             systemPrompt: AIContextBuilder.systemPrompt,
+            thinkingIntensity: runtimeConfiguration.thinkingIntensity,
+            includeThoughts: true,
             messages: selectedMessages.map { message in
                 RelayMessage(
                     role: message.role.rawValue,
@@ -155,6 +164,8 @@ struct RelayAIClient: AIStreamingService {
 struct RelayChatRequest: Codable, Equatable {
     var model: String
     var systemPrompt: String
+    var thinkingIntensity: AIThinkingIntensity
+    var includeThoughts: Bool
     var messages: [RelayMessage]
 }
 

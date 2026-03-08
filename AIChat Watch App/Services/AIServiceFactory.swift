@@ -7,8 +7,13 @@
 
 import Foundation
 
+enum AIStreamEvent: Equatable {
+    case answerDelta(String)
+    case thoughtDelta(String)
+}
+
 protocol AIStreamingService {
-    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<String, Error>
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error>
 }
 
 enum AIServiceFactory {

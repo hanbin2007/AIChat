@@ -25,11 +25,18 @@ struct ChatBubbleView: View {
                     AttachmentGridView(attachments: message.attachments)
                 }
 
+                if isUser == false, let thoughtSummary = message.cleanedThoughtSummary {
+                    ThoughtSummaryCard(
+                        thoughtSummary: thoughtSummary,
+                        isStreaming: message.status == .streaming
+                    )
+                }
+
                 if message.status == .streaming, message.cleanedText.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView()
                             .tint(.white.opacity(0.8))
-                        Text("Streaming...")
+                        Text(message.cleanedThoughtSummary == nil ? "Thinking..." : "Drafting answer...")
                             .font(.footnote)
                             .foregroundStyle(.white.opacity(0.8))
                     }
@@ -89,6 +96,39 @@ struct ChatBubbleView: View {
         }
 
         return AnyShapeStyle(Color.black.opacity(0.38))
+    }
+}
+
+private struct ThoughtSummaryCard: View {
+    let thoughtSummary: String
+    let isStreaming: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: isStreaming ? "brain.head.profile" : "sparkles.rectangle.stack")
+                    .font(.caption2)
+                    .foregroundStyle(.cyan.opacity(0.9))
+
+                Text(isStreaming ? "Thinking" : "Thought Summary")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+
+            Text(thoughtSummary)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.76))
+                .multilineTextAlignment(.leading)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 

@@ -90,6 +90,26 @@ final class ChatStore: ObservableObject {
         await persist(conversation, sync: true)
     }
 
+    func aiConfiguration(for conversationID: UUID) -> ConversationAIConfiguration {
+        if let conversation = conversation(id: conversationID) {
+            return conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        }
+
+        return ConversationAIConfiguration(model: configuration.geminiModel)
+    }
+
+    func updateModel(_ model: String, for conversationID: UUID) async {
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.model = model
+        }
+    }
+
+    func updateThinkingIntensity(_ thinkingIntensity: AIThinkingIntensity, for conversationID: UUID) async {
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.thinkingIntensity = thinkingIntensity
+        }
+    }
+
     func clearConversation(id: UUID) async {
         guard var conversation = conversation(id: id) else {
             return
@@ -205,16 +225,24 @@ final class ChatStore: ObservableObject {
         sendingConversationIDs.insert(conversationID)
 
         var streamedText = ""
+        var streamedThoughtSummary = ""
 
         do {
-            for try await delta in aiService.streamReply(for: requestConversation) {
-                streamedText.append(delta)
+            for try await event in aiService.streamReply(for: requestConversation) {
+                switch event {
+                case .answerDelta(let delta):
+                    streamedText.append(delta)
+                case .thoughtDelta(let delta):
+                    streamedThoughtSummary.append(delta)
+                }
+
                 mutateConversation(id: conversationID) { conversation in
                     conversation.upsertMessage(
                         ChatMessage(
                             id: assistantMessageID,
                             role: .assistant,
                             text: streamedText,
+                            thoughtSummary: streamedThoughtSummary.nonEmptyTrimmed,
                             createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? .now,
                             status: .streaming
                         )
@@ -228,6 +256,7 @@ final class ChatStore: ObservableObject {
                         id: assistantMessageID,
                         role: .assistant,
                         text: streamedText,
+                        thoughtSummary: streamedThoughtSummary.nonEmptyTrimmed,
                         createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? .now,
                         status: .sent
                     )
@@ -244,7 +273,7 @@ final class ChatStore: ObservableObject {
             conversationErrors[conversationID] = error.localizedDescription
 
             mutateConversation(id: conversationID) { conversation in
-                if streamedText.isEmpty {
+                if streamedText.isEmpty, streamedThoughtSummary.isEmpty {
                     conversation.removeMessage(id: assistantMessageID)
                 } else {
                     conversation.upsertMessage(
@@ -252,6 +281,7 @@ final class ChatStore: ObservableObject {
                             id: assistantMessageID,
                             role: .assistant,
                             text: streamedText,
+                            thoughtSummary: streamedThoughtSummary.nonEmptyTrimmed,
                             createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? .now,
                             status: .failed
                         )
@@ -304,6 +334,21 @@ final class ChatStore: ObservableObject {
 
         mutation(&conversation)
         upsertConversation(conversation)
+    }
+
+    private func updateAIConfiguration(
+        for conversationID: UUID,
+        mutation: (inout ConversationAIConfiguration) -> Void
+    ) async {
+        guard var conversation = conversation(id: conversationID) else {
+            return
+        }
+
+        var resolvedConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        mutation(&resolvedConfiguration)
+        conversation.updateAIConfiguration(resolvedConfiguration)
+        upsertConversation(conversation)
+        await persist(conversation, sync: true)
     }
 
     private func handleSyncEvent(_ event: CompanionSyncEvent) async {

@@ -38,7 +38,7 @@ struct AppConfiguration: Equatable {
         ) ?? .direct
 
         let geminiAPIKey = value(for: "GEMINI_API_KEY", bundle: bundle, environment: environment)
-        let geminiModel = value(for: "GEMINI_MODEL", bundle: bundle, environment: environment) ?? "gemini-2.5-flash"
+        let geminiModel = value(for: "GEMINI_MODEL", bundle: bundle, environment: environment) ?? "gemini-3-flash-preview"
         let relayBaseURL = value(for: "AI_RELAY_BASE_URL", bundle: bundle, environment: environment)
             .flatMap(URL.init(string:))
         let relayBearerToken = value(for: "AI_RELAY_BEARER_TOKEN", bundle: bundle, environment: environment)
@@ -68,7 +68,7 @@ struct AppConfiguration: Equatable {
     var backendSummary: String {
         switch backendMode {
         case .direct:
-            return "\(backendMode.displayName) • \(geminiModel)"
+            return "\(backendMode.displayName) • \(AIModelCatalog.shortLabel(for: geminiModel))"
         case .relay:
             return "\(backendMode.displayName) • \(relayBaseURL?.host() ?? "URL missing")"
         }

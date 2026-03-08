@@ -57,6 +57,62 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[2].parts.last?.inlineData?.data, imageData.base64EncodedString())
     }
 
+    func testGemini3RequestUsesThinkingLevel() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Explain this image")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3-flash-preview",
+                thinkingIntensity: .deep
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+    }
+
+    func testGemini25RequestUsesThinkingBudget() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Summarize this thread")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-2.5-flash",
+                thinkingIntensity: .balanced
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-2.5-flash",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, nil)
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, 8_192)
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+    }
+
     func testNormalizedDeltaHandlesCumulativeChunks() {
         var currentText = ""
 

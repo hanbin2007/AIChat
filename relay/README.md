@@ -4,7 +4,7 @@
 
 - 在服务端持有 `GEMINI_API_KEY`
 - 对客户端做 Bearer 鉴权
-- 把 Gemini 的 SSE 流转换成更简单的 `delta` 事件流
+- 把 Gemini 的 SSE 流转换成 `answer_delta` / `thought_delta` 事件流
 
 ## 启动
 
@@ -22,5 +22,5 @@ node relay/server.mjs
 AI_BACKEND_MODE = relay
 AI_RELAY_BASE_URL = http://127.0.0.1:8787
 AI_RELAY_BEARER_TOKEN = your-relay-token
-GEMINI_MODEL = gemini-2.5-flash
+GEMINI_MODEL = gemini-3-flash-preview
 ```
