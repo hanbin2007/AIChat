@@ -83,6 +83,7 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
             return 24_576
         }
     }
+
 }
 
 nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {

@@ -8,6 +8,10 @@
 import PhotosUI
 import SwiftUI
 
+private enum ComposerLayout {
+    static let collapsedBottomInset: CGFloat = 56
+}
+
 struct ConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -121,7 +125,7 @@ struct ConversationDetailView: View {
                     }
 
                     Color.clear
-                        .frame(height: isComposerExpanded ? 1 : 56)
+                        .frame(height: isComposerExpanded ? 1 : ComposerLayout.collapsedBottomInset)
                         .id("bottom")
                 }
                 .padding(.horizontal, 4)
@@ -256,13 +260,24 @@ struct ConversationDetailView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    guard isPredominantlyVertical(value.translation) else {
+                        return
+                    }
+
+                    if value.translation.height > 24 {
+                        collapseComposer()
+                    }
+                }
+        )
     }
 
     private var collapsedComposerButton: some View {
         Button {
-            withAnimation(.easeOut(duration: 0.2)) {
-                isComposerExpanded = true
-            }
+            expandComposer()
         } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 18, weight: .semibold))
@@ -354,9 +369,7 @@ struct ConversationDetailView: View {
         }
 
         if chatStore.configuration.isAIConfigured {
-            withAnimation(.easeOut(duration: 0.2)) {
-                isComposerExpanded = false
-            }
+            collapseComposer()
         }
 
         chatStore.clearError(for: conversationID)
@@ -364,6 +377,30 @@ struct ConversationDetailView: View {
         Task {
             await chatStore.sendMessage(in: conversationID)
         }
+    }
+
+    private func collapseComposer() {
+        guard isComposerExpanded else {
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            isComposerExpanded = false
+        }
+    }
+
+    private func expandComposer() {
+        guard isComposerExpanded == false else {
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            isComposerExpanded = true
+        }
+    }
+
+    private func isPredominantlyVertical(_ translation: CGSize) -> Bool {
+        abs(translation.height) > abs(translation.width)
     }
 }
 

@@ -14,6 +14,10 @@ struct ChatBubbleView: View {
         message.role == .user
     }
 
+    private var bubbleShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
             if isUser {
@@ -69,9 +73,12 @@ struct ChatBubbleView: View {
                 }
             }
             .padding(10)
-            .background(bubbleBackground)
+            .background {
+                bubbleShape.fill(bubbleBackground)
+            }
+            .clipShape(bubbleShape)
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                bubbleShape
                     .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
             )
 

@@ -7,11 +7,13 @@
 
 import Foundation
 
-enum GeminiAPIError: LocalizedError {
+enum GeminiAPIError: LocalizedError, Equatable {
     case missingAPIKey
     case invalidResponse
     case api(message: String)
     case emptyResponse
+    case incompleteResponse
+    case truncated
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +25,10 @@ enum GeminiAPIError: LocalizedError {
             return message
         case .emptyResponse:
             return "Gemini returned an empty reply."
+        case .incompleteResponse:
+            return "Reply was interrupted before completion."
+        case .truncated:
+            return "Reply hit the output limit before completion. Send a follow-up to continue."
         }
     }
 }
@@ -73,6 +79,7 @@ struct GeminiAPIClient: AIStreamingService {
 
                     var accumulatedText = ""
                     var accumulatedThoughtSummary = ""
+                    var finishReason: String?
 
                     for try await line in bytes.lines {
                         let trimmedLine = line.trimmed
@@ -91,6 +98,9 @@ struct GeminiAPIClient: AIStreamingService {
 
                         let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
                         let streamChunk = extractChunk(from: responseEnvelope)
+                        if let chunkFinishReason = streamChunk.finishReason {
+                            finishReason = chunkFinishReason
+                        }
 
                         if let thoughtDelta = normalizedDelta(
                             chunkText: streamChunk.thoughtSummary ?? "",
@@ -107,6 +117,10 @@ struct GeminiAPIClient: AIStreamingService {
                         answerDelta.isEmpty == false {
                             continuation.yield(.answerDelta(answerDelta))
                         }
+                    }
+
+                    if let completionError = geminiCompletionError(for: finishReason) {
+                        throw completionError
                     }
 
                     guard accumulatedText.nonEmptyTrimmed != nil else {
@@ -130,7 +144,7 @@ struct GeminiAPIClient: AIStreamingService {
             generationConfig: GeminiGenerationConfig(
                 temperature: 0.65,
                 topP: 0.9,
-                maxOutputTokens: 512,
+                maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
                 thinkingConfig: thinkingConfiguration(for: runtimeConfiguration)
             )
         )
@@ -184,7 +198,16 @@ struct GeminiAPIClient: AIStreamingService {
             .joined(separator: "\n")
             .nonEmptyTrimmed
 
-        return GeminiStreamChunk(answerText: answerText, thoughtSummary: thoughtSummary)
+        let finishReason = responseEnvelope.candidates
+            .compactMap(\.finishReason)
+            .first?
+            .nonEmptyTrimmed
+
+        return GeminiStreamChunk(
+            answerText: answerText,
+            thoughtSummary: thoughtSummary,
+            finishReason: finishReason
+        )
     }
 
     private func thinkingConfiguration(for runtimeConfiguration: ConversationAIConfiguration) -> GeminiThinkingConfig {
@@ -298,11 +321,13 @@ struct GeminiGenerateContentResponse: Decodable {
 
 struct GeminiCandidate: Decodable {
     var content: GeminiContent?
+    var finishReason: String?
 }
 
 struct GeminiStreamChunk: Equatable {
     var answerText: String?
     var thoughtSummary: String?
+    var finishReason: String?
 }
 
 struct GeminiAPIErrorEnvelope: Decodable {
@@ -311,4 +336,19 @@ struct GeminiAPIErrorEnvelope: Decodable {
 
 struct GeminiAPIErrorMessage: Decodable {
     var message: String
+}
+
+func geminiCompletionError(for finishReason: String?) -> GeminiAPIError? {
+    guard let normalizedReason = finishReason?.trimmed.nonEmptyTrimmed?.uppercased() else {
+        return .incompleteResponse
+    }
+
+    switch normalizedReason {
+    case "STOP":
+        return nil
+    case "MAX_TOKENS":
+        return .truncated
+    default:
+        return .api(message: "Gemini stopped before completing the reply (\(normalizedReason)).")
+    }
 }

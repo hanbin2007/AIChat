@@ -49,6 +49,14 @@ function thinkingConfigFor(model, thinkingIntensity = "balanced", includeThought
   };
 }
 
+function maxOutputTokensForModel(model = "") {
+  if (String(model).startsWith("gemini-3") || String(model).startsWith("gemini-2.5")) {
+    return 65536;
+  }
+
+  return 8192;
+}
+
 function toGeminiRequest(body) {
   return {
     systemInstruction: {
@@ -78,14 +86,18 @@ function toGeminiRequest(body) {
     generationConfig: {
       temperature: 0.65,
       topP: 0.9,
-      maxOutputTokens: 512,
+      maxOutputTokens:
+        Number.isFinite(body.maxOutputTokens) && body.maxOutputTokens > 0
+          ? Math.floor(body.maxOutputTokens)
+          : maxOutputTokensForModel(body.model),
       thinkingConfig: thinkingConfigFor(body.model, body.thinkingIntensity, body.includeThoughts !== false)
     }
   };
 }
 
 function extractChunkParts(chunk) {
-  const parts = chunk?.candidates?.[0]?.content?.parts || [];
+  const candidate = chunk?.candidates?.[0];
+  const parts = candidate?.content?.parts || [];
   const answerText = parts
     .filter((part) => part.thought !== true)
     .map((part) => part.text || "")
@@ -99,7 +111,8 @@ function extractChunkParts(chunk) {
 
   return {
     answerText,
-    thoughtText
+    thoughtText,
+    finishReason: typeof candidate?.finishReason === "string" ? candidate.finishReason.trim() : ""
   };
 }
 
@@ -157,6 +170,7 @@ async function streamGeminiResponse({ model, requestBody, res }) {
   let buffered = "";
   let emittedAnswerText = "";
   let emittedThoughtText = "";
+  let finishReason = "";
 
   for await (const chunk of geminiResponse.body) {
     buffered += decoder.decode(chunk, { stream: true });
@@ -181,7 +195,10 @@ async function streamGeminiResponse({ model, requestBody, res }) {
         continue;
       }
 
-      const { answerText, thoughtText } = extractChunkParts(parsed);
+      const { answerText, thoughtText, finishReason: chunkFinishReason } = extractChunkParts(parsed);
+      if (chunkFinishReason) {
+        finishReason = chunkFinishReason;
+      }
 
       if (thoughtText) {
         const result = normalizedDelta(thoughtText, emittedThoughtText);
@@ -205,9 +222,72 @@ async function streamGeminiResponse({ model, requestBody, res }) {
     }
   }
 
+  buffered += decoder.decode();
+  if (buffered.trim()) {
+    const trimmed = buffered.trim();
+    if (trimmed.startsWith("data:")) {
+      const payload = trimmed.slice(5).trim();
+      if (payload && payload !== "[DONE]") {
+        try {
+          const parsed = JSON.parse(payload);
+          const { answerText, thoughtText, finishReason: chunkFinishReason } = extractChunkParts(parsed);
+          if (chunkFinishReason) {
+            finishReason = chunkFinishReason;
+          }
+
+          if (thoughtText) {
+            const result = normalizedDelta(thoughtText, emittedThoughtText);
+            emittedThoughtText = result.emittedText;
+
+            if (result.delta) {
+              res.write(`event: thought_delta\n`);
+              res.write(`data: ${JSON.stringify({ type: "thought_delta", text: result.delta })}\n\n`);
+            }
+          }
+
+          if (answerText) {
+            const result = normalizedDelta(answerText, emittedAnswerText);
+            emittedAnswerText = result.emittedText;
+
+            if (result.delta) {
+              res.write(`event: answer_delta\n`);
+              res.write(`data: ${JSON.stringify({ type: "answer_delta", text: result.delta })}\n\n`);
+            }
+          }
+        } catch {
+          // Ignore an incomplete tail chunk; completion is validated below.
+        }
+      }
+    }
+  }
+
+  if (!finishReason) {
+    res.write(`event: error\n`);
+    res.write(
+      `data: ${JSON.stringify({ type: "error", message: "Relay stream ended before Gemini sent a terminal chunk." })}\n\n`
+    );
+    res.end();
+    return;
+  }
+
   res.write(`event: done\n`);
-  res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "done", finishReason })}\n\n`);
   res.end();
+}
+
+function writeRelayStreamError(res, message) {
+  if (res.writableEnded) {
+    return;
+  }
+
+  if (res.headersSent) {
+    res.write(`event: error\n`);
+    res.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
+    res.end();
+    return;
+  }
+
+  sendJson(res, 502, { message });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -247,7 +327,7 @@ const server = http.createServer(async (req, res) => {
       res
     });
   } catch (error) {
-    sendJson(res, 502, { message: error instanceof Error ? error.message : "Relay error." });
+    writeRelayStreamError(res, error instanceof Error ? error.message : "Relay error.");
   }
 });
 

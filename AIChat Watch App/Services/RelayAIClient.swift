@@ -7,11 +7,13 @@
 
 import Foundation
 
-enum RelayAPIError: LocalizedError {
+enum RelayAPIError: LocalizedError, Equatable {
     case missingConfiguration
     case invalidResponse
     case remote(message: String)
     case emptyResponse
+    case incompleteResponse
+    case truncated
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +25,10 @@ enum RelayAPIError: LocalizedError {
             return message
         case .emptyResponse:
             return "Relay returned an empty reply."
+        case .incompleteResponse:
+            return "Reply was interrupted before completion."
+        case .truncated:
+            return "Reply hit the output limit before completion. Send a follow-up to continue."
         }
     }
 }
@@ -67,6 +73,8 @@ struct RelayAIClient: AIStreamingService {
                     var accumulatedText = ""
                     var accumulatedThoughtSummary = ""
                     var currentEvent = "message"
+                    var didReceiveDoneEvent = false
+                    var finishReason: String?
 
                     for try await line in bytes.lines {
                         let trimmedLine = line.trimmed
@@ -104,10 +112,20 @@ struct RelayAIClient: AIStreamingService {
                         case "error":
                             throw RelayAPIError.remote(message: payload.message ?? "Relay stream failed.")
                         case "done":
-                            break
+                            didReceiveDoneEvent = true
+                            if let payloadFinishReason = payload.finishReason?.nonEmptyTrimmed {
+                                finishReason = payloadFinishReason
+                            }
                         default:
                             continue
                         }
+                    }
+
+                    if let completionError = relayCompletionError(
+                        didReceiveDoneEvent: didReceiveDoneEvent,
+                        finishReason: finishReason
+                    ) {
+                        throw completionError
                     }
 
                     guard accumulatedText.nonEmptyTrimmed != nil else {
@@ -135,6 +153,7 @@ struct RelayAIClient: AIStreamingService {
             model: runtimeConfiguration.model,
             systemPrompt: AIContextBuilder.systemPrompt,
             thinkingIntensity: runtimeConfiguration.thinkingIntensity,
+            maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
             includeThoughts: true,
             messages: selectedMessages.map { message in
                 RelayMessage(
@@ -165,6 +184,7 @@ struct RelayChatRequest: Codable, Equatable {
     var model: String
     var systemPrompt: String
     var thinkingIntensity: AIThinkingIntensity
+    var maxOutputTokens: Int
     var includeThoughts: Bool
     var messages: [RelayMessage]
 }
@@ -185,8 +205,31 @@ struct RelayStreamEvent: Codable {
     var type: String?
     var text: String?
     var message: String?
+    var finishReason: String?
 }
 
 struct RelayErrorEnvelope: Codable {
     var message: String
+}
+
+func relayCompletionError(
+    didReceiveDoneEvent: Bool,
+    finishReason: String?
+) -> RelayAPIError? {
+    guard didReceiveDoneEvent else {
+        return .incompleteResponse
+    }
+
+    guard let normalizedReason = finishReason?.trimmed.nonEmptyTrimmed?.uppercased() else {
+        return .incompleteResponse
+    }
+
+    switch normalizedReason {
+    case "STOP":
+        return nil
+    case "MAX_TOKENS":
+        return .truncated
+    default:
+        return .remote(message: "Relay reported an incomplete finish (\(normalizedReason)).")
+    }
 }

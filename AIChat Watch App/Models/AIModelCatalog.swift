@@ -74,6 +74,14 @@ enum AIModelCatalog {
         model.hasPrefix("gemini-3")
     }
 
+    static func maxOutputTokens(for model: String) -> Int {
+        if model.hasPrefix("gemini-3") || model.hasPrefix("gemini-2.5") {
+            return 65_536
+        }
+
+        return 8_192
+    }
+
     private static func customOption(for model: String) -> AIModelOption {
         AIModelOption(
             id: model,

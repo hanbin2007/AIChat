@@ -83,6 +83,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+        XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
     }
 
     func testGemini25RequestUsesThinkingBudget() {
@@ -111,6 +112,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, 8_192)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+        XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
     }
 
     func testNormalizedDeltaHandlesCumulativeChunks() {
@@ -121,5 +123,59 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertEqual(normalizedDelta(chunkText: "Hello world", currentText: &currentText), " world")
         XCTAssertEqual(currentText, "Hello world")
+    }
+
+    func testRelayRequestCarriesThinkingOutputTokenBudget() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Write a deeper analysis")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3-flash-preview",
+                thinkingIntensity: .deep
+            )
+        )
+
+        let client = RelayAIClient(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = client.makeRelayRequest(for: conversation)
+
+        XCTAssertEqual(request.maxOutputTokens, 65_536)
+    }
+
+    func testModelCatalogUsesDesktopScaleOutputBudgetForSupportedGeminiModels() {
+        XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-3-flash-preview"), 65_536)
+        XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-3.1-pro-preview"), 65_536)
+        XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-2.5-flash"), 65_536)
+        XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "custom-model"), 8_192)
+    }
+
+    func testGeminiCompletionErrorRequiresTerminalFinishReason() {
+        XCTAssertEqual(geminiCompletionError(for: nil), .incompleteResponse)
+        XCTAssertEqual(geminiCompletionError(for: "STOP"), nil)
+        XCTAssertEqual(geminiCompletionError(for: "MAX_TOKENS"), .truncated)
+    }
+
+    func testRelayCompletionErrorRequiresDoneEventAndStopFinishReason() {
+        XCTAssertEqual(
+            relayCompletionError(didReceiveDoneEvent: false, finishReason: "STOP"),
+            .incompleteResponse
+        )
+        XCTAssertEqual(
+            relayCompletionError(didReceiveDoneEvent: true, finishReason: "STOP"),
+            nil
+        )
+        XCTAssertEqual(
+            relayCompletionError(didReceiveDoneEvent: true, finishReason: "MAX_TOKENS"),
+            .truncated
+        )
     }
 }
