@@ -160,7 +160,7 @@ private struct ThoughtSummaryCard: View {
 }
 
 private struct AttachmentGridView: View {
-    let attachments: [ChatImageAttachment]
+    let attachments: [ChatAttachment]
 
     private let columns = [
         GridItem(.flexible(), spacing: 6),
@@ -177,24 +177,58 @@ private struct AttachmentGridView: View {
 }
 
 private struct AttachmentThumbnailView: View {
-    let attachment: ChatImageAttachment
+    let attachment: ChatAttachment
 
     var body: some View {
-        Group {
+        ZStack {
             if let image = attachment.previewImage {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
             } else {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-                    .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.12, green: 0.18, blue: 0.24),
+                                Color(red: 0.03, green: 0.43, blue: 0.51)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Image(systemName: attachment.isAudio ? "waveform" : "photo")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text(attachment.isAudio ? "Voice note" : "Attachment")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    if let durationText = formattedDuration(for: attachment.durationSeconds) {
+                        Text(durationText)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.78))
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(10)
             }
         }
         .frame(minHeight: 74)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func formattedDuration(for durationSeconds: Double?) -> String? {
+        guard let durationSeconds, durationSeconds > 0 else {
+            return nil
+        }
+
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.zeroFormattingBehavior = [.pad]
+        return formatter.string(from: durationSeconds)
     }
 }

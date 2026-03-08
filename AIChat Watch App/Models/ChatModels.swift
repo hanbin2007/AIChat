@@ -99,56 +99,128 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
     }
 }
 
+nonisolated enum ChatAttachmentKind: String, Codable, Hashable {
+    case image
+    case audio
+}
+
 nonisolated enum AttachmentProcessingError: LocalizedError {
     case unsupportedImage
+    case unsupportedAudio
     case imageTooLarge(maximumBytes: Int)
+    case audioTooLarge(maximumBytes: Int)
 
     var errorDescription: String? {
         switch self {
         case .unsupportedImage:
             return "这张图片无法在 Apple Watch 上解析。"
+        case .unsupportedAudio:
+            return "录音文件无法处理，请重试。"
         case .imageTooLarge(let maximumBytes):
             let megabytes = Double(maximumBytes) / 1_000_000
             return "图片过大，请换一张小于 \(String(format: "%.1f", megabytes)) MB 的图片。"
+        case .audioTooLarge(let maximumBytes):
+            let megabytes = Double(maximumBytes) / 1_000_000
+            return "录音过长，请控制在 \(String(format: "%.1f", megabytes)) MB 以内。"
         }
     }
 }
 
-nonisolated struct ChatImageAttachment: Identifiable, Codable, Hashable {
-    static let maximumPayloadBytes = 1_500_000
+nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
+    static let maximumImagePayloadBytes = 1_500_000
+    static let maximumAudioPayloadBytes = 4_000_000
 
     let id: UUID
+    var kind: ChatAttachmentKind
     var filename: String
     var mimeType: String
     var data: Data
-    var pixelWidth: Int
-    var pixelHeight: Int
+    var pixelWidth: Int?
+    var pixelHeight: Int?
+    var durationSeconds: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+        case filename
+        case mimeType
+        case data
+        case pixelWidth
+        case pixelHeight
+        case durationSeconds
+    }
 
     init(
         id: UUID = UUID(),
+        kind: ChatAttachmentKind,
         filename: String,
         mimeType: String,
         data: Data,
-        pixelWidth: Int,
-        pixelHeight: Int
+        pixelWidth: Int? = nil,
+        pixelHeight: Int? = nil,
+        durationSeconds: Double? = nil
     ) {
         self.id = id
+        self.kind = kind
         self.filename = filename
         self.mimeType = mimeType
         self.data = data
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.durationSeconds = durationSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let pixelWidth = try container.decodeIfPresent(Int.self, forKey: .pixelWidth)
+        let pixelHeight = try container.decodeIfPresent(Int.self, forKey: .pixelHeight)
+        let mimeType = try container.decode(String.self, forKey: .mimeType)
+
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.kind = try container.decodeIfPresent(ChatAttachmentKind.self, forKey: .kind) ??
+            Self.inferredKind(
+                mimeType: mimeType,
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight
+            )
+        self.filename = try container.decode(String.self, forKey: .filename)
+        self.mimeType = mimeType
+        self.data = try container.decode(Data.self, forKey: .data)
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
     }
 
     var previewImage: UIImage? {
-        UIImage(data: data)
+        guard kind == .image else {
+            return nil
+        }
+
+        return UIImage(data: data)
     }
 
     var sizeInBytes: Int {
         data.count
     }
 
-    static func makeNormalized(from rawData: Data, suggestedFilename: String?) throws -> ChatImageAttachment {
+    var isImage: Bool {
+        kind == .image
+    }
+
+    var isAudio: Bool {
+        kind == .audio
+    }
+
+    var shortSummary: String {
+        switch kind {
+        case .image:
+            return "Image"
+        case .audio:
+            return "Voice"
+        }
+    }
+
+    static func makeNormalizedImage(from rawData: Data, suggestedFilename: String?) throws -> ChatAttachment {
         guard let image = UIImage(data: rawData) else {
             throw AttachmentProcessingError.unsupportedImage
         }
@@ -164,17 +236,18 @@ nonisolated struct ChatImageAttachment: Identifiable, Codable, Hashable {
         for quality in compressionQualities {
             if let jpegData = image.jpegData(compressionQuality: quality) {
                 normalizedData = jpegData
-                if jpegData.count <= maximumPayloadBytes {
+                if jpegData.count <= maximumImagePayloadBytes {
                     break
                 }
             }
         }
 
-        guard normalizedData.count <= maximumPayloadBytes else {
-            throw AttachmentProcessingError.imageTooLarge(maximumBytes: maximumPayloadBytes)
+        guard normalizedData.count <= maximumImagePayloadBytes else {
+            throw AttachmentProcessingError.imageTooLarge(maximumBytes: maximumImagePayloadBytes)
         }
 
-        return ChatImageAttachment(
+        return ChatAttachment(
+            kind: .image,
             filename: "\(filenameStem)-\(UUID().uuidString.prefix(6)).jpg",
             mimeType: "image/jpeg",
             data: normalizedData,
@@ -182,7 +255,52 @@ nonisolated struct ChatImageAttachment: Identifiable, Codable, Hashable {
             pixelHeight: Int(image.size.height)
         )
     }
+
+    static func makeRecordedAudio(
+        from rawData: Data,
+        suggestedFilename: String?,
+        durationSeconds: Double
+    ) throws -> ChatAttachment {
+        guard rawData.isEmpty == false else {
+            throw AttachmentProcessingError.unsupportedAudio
+        }
+
+        guard rawData.count <= maximumAudioPayloadBytes else {
+            throw AttachmentProcessingError.audioTooLarge(maximumBytes: maximumAudioPayloadBytes)
+        }
+
+        let filenameStem = URL(fileURLWithPath: suggestedFilename ?? "voice.wav")
+            .deletingPathExtension()
+            .lastPathComponent
+            .nonEmptyTrimmed ?? "voice"
+
+        return ChatAttachment(
+            kind: .audio,
+            filename: "\(filenameStem)-\(UUID().uuidString.prefix(6)).wav",
+            mimeType: "audio/wav",
+            data: rawData,
+            durationSeconds: max(durationSeconds, 0)
+        )
+    }
+
+    private static func inferredKind(
+        mimeType: String,
+        pixelWidth: Int?,
+        pixelHeight: Int?
+    ) -> ChatAttachmentKind {
+        if mimeType.lowercased().hasPrefix("audio/") {
+            return .audio
+        }
+
+        if pixelWidth != nil || pixelHeight != nil || mimeType.lowercased().hasPrefix("image/") {
+            return .image
+        }
+
+        return .image
+    }
 }
+
+typealias ChatImageAttachment = ChatAttachment
 
 nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     let id: UUID
@@ -190,7 +308,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     var text: String
     var thoughtSummary: String?
     var createdAt: Date
-    var attachments: [ChatImageAttachment]
+    var attachments: [ChatAttachment]
     var status: ChatMessageStatus
 
     init(
@@ -199,7 +317,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         text: String,
         thoughtSummary: String? = nil,
         createdAt: Date = .now,
-        attachments: [ChatImageAttachment] = [],
+        attachments: [ChatAttachment] = [],
         status: ChatMessageStatus = .sent
     ) {
         self.id = id
@@ -281,8 +399,7 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
             return thoughtSummary
         }
 
-        let count = lastMessage.attachments.count
-        return count == 1 ? "1 image attached" : "\(count) images attached"
+        return attachmentSummary(for: lastMessage.attachments)
     }
 
     var messageCount: Int {
@@ -293,24 +410,37 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         messages.append(message)
         updatedAt = max(updatedAt, message.createdAt)
 
-        if title == Self.untitledTitle, message.role == .user, let suggested = Self.suggestedTitle(from: message.text) {
+        if title == Self.untitledTitle,
+           message.role == .user,
+           let suggested = Self.suggestedTitle(
+               from: message.text,
+               attachments: message.attachments
+           ) {
             title = suggested
         }
     }
 
-    static func suggestedTitle(from text: String) -> String? {
+    static func suggestedTitle(from text: String, attachments: [ChatAttachment] = []) -> String? {
         let collapsed = text.collapseWhitespace().nonEmptyTrimmed
-        guard let collapsed else {
-            return nil
+        if let collapsed {
+            let limit = 26
+            guard collapsed.count > limit else {
+                return collapsed
+            }
+
+            let truncated = String(collapsed.prefix(limit)).trimmed
+            return truncated.isEmpty ? nil : "\(truncated)..."
         }
 
-        let limit = 26
-        guard collapsed.count > limit else {
-            return collapsed
+        if attachments.contains(where: \.isAudio) {
+            return "Voice message"
         }
 
-        let truncated = String(collapsed.prefix(limit)).trimmed
-        return truncated.isEmpty ? nil : "\(truncated)..."
+        if attachments.contains(where: \.isImage) {
+            return "Photo prompt"
+        }
+
+        return nil
     }
 
     mutating func clearMessages() {
@@ -340,6 +470,24 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     mutating func removeMessage(id: UUID) {
         messages.removeAll { $0.id == id }
         updatedAt = .now
+    }
+
+    private func attachmentSummary(for attachments: [ChatAttachment]) -> String {
+        let imageCount = attachments.filter(\.isImage).count
+        let audioCount = attachments.filter(\.isAudio).count
+
+        switch (imageCount, audioCount) {
+        case (0, 1):
+            return "1 voice note attached"
+        case (0, let audioCount) where audioCount > 1:
+            return "\(audioCount) voice notes attached"
+        case (1, 0):
+            return "1 image attached"
+        case (let imageCount, 0) where imageCount > 1:
+            return "\(imageCount) images attached"
+        default:
+            return "\(attachments.count) attachments"
+        }
     }
 }
 

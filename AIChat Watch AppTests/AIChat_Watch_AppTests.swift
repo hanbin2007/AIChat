@@ -19,6 +19,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     func testContextWindowMapsRolesAndPreservesLatestMessages() {
         let imageData = Data([0x01, 0x02, 0x03])
         let attachment = ChatImageAttachment(
+            kind: .image,
             filename: "photo.jpg",
             mimeType: "image/jpeg",
             data: imageData,
@@ -37,6 +38,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 backendMode: .direct,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-2.5-flash",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
                 relayBaseURL: nil,
                 relayBearerToken: nil,
                 relayStreamPath: "v1/chat/stream",
@@ -45,7 +47,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             session: .shared,
             maxContextMessages: 10,
             maxCharacterBudget: 1_000,
-            maxInlineImageBytes: 1_000
+            maxInlineAttachmentBytes: 1_000
         )
         let contents = client.contextWindow(from: messages)
 
@@ -55,6 +57,36 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[2].role, "user")
         XCTAssertEqual(contents[2].parts.first?.text, "latest")
         XCTAssertEqual(contents[2].parts.last?.inlineData?.data, imageData.base64EncodedString())
+    }
+
+    func testAudioOnlyMessageAddsHiddenPromptForGemini() {
+        let audioData = Data([0x10, 0x20, 0x30])
+        let attachment = try! ChatAttachment.makeRecordedAudio(
+            from: audioData,
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.2
+        )
+        let messages = [ChatMessage(role: .user, text: "", attachments: [attachment])]
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let contents = client.contextWindow(from: messages)
+
+        XCTAssertEqual(contents.count, 1)
+        XCTAssertEqual(contents[0].parts.first?.text, "Listen to the attached audio, infer the user's request, and answer it directly.")
+        XCTAssertEqual(contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
+        XCTAssertEqual(contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
     }
 
     func testGemini3RequestUsesThinkingLevel() {
@@ -71,6 +103,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 backendMode: .direct,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
                 relayBaseURL: nil,
                 relayBearerToken: nil,
                 relayStreamPath: "v1/chat/stream",
@@ -100,6 +133,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 backendMode: .direct,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-2.5-flash",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
                 relayBaseURL: nil,
                 relayBearerToken: nil,
                 relayStreamPath: "v1/chat/stream",
@@ -139,6 +173,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 backendMode: .relay,
                 geminiAPIKey: nil,
                 geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
                 relayBaseURL: URL(string: "http://127.0.0.1:8787"),
                 relayBearerToken: "token",
                 relayStreamPath: "v1/chat/stream",
@@ -177,5 +212,108 @@ final class AIChat_Watch_AppTests: XCTestCase {
             relayCompletionError(didReceiveDoneEvent: true, finishReason: "MAX_TOKENS"),
             .truncated
         )
+    }
+
+    func testTranscriptionRequestUsesContextAndAudio() throws {
+        let audioData = Data([0xAA, 0xBB, 0xCC])
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: audioData,
+            suggestedFilename: "voice.wav",
+            durationSeconds: 4.5
+        )
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .assistant, text: "Do you want the Tokyo or Osaka plan?"),
+                ChatMessage(role: .user, text: "Use the Tokyo one and keep it short.")
+            ]
+        )
+
+        let service = GeminiTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = service.makeRequestBody(for: audioAttachment, in: conversation)
+
+        XCTAssertEqual(request.contents.count, 1)
+        XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
+        XCTAssertEqual(request.contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
+        XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Assistant: Do you want the Tokyo or Osaka plan?") == true)
+        XCTAssertTrue(request.contents[0].parts.first?.text?.contains("User: Use the Tokyo one and keep it short.") == true)
+    }
+
+    @MainActor
+    func testRecordedAudioIsTranscribedIntoDisplayedAndForwardedText() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: MockTranscriptionService(transcript: "Book me a train to Hangzhou tomorrow morning"),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let conversationID = await store.createConversation()
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x01, 0x02, 0x03]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.0
+        )
+
+        await store.sendRecordedAudio(audioAttachment, in: conversationID)
+
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(conversation.messages.count, 2)
+        XCTAssertEqual(conversation.messages[0].role, .user)
+        XCTAssertEqual(conversation.messages[0].text, "Book me a train to Hangzhou tomorrow morning")
+        XCTAssertTrue(conversation.messages[0].attachments.isEmpty)
+        XCTAssertEqual(conversation.messages[1].text, "Echo: Book me a train to Hangzhou tomorrow morning")
+        XCTAssertNil(store.errorMessage(for: conversationID))
+    }
+}
+
+private struct MockTranscriptionService: AITranscriptionService {
+    let transcript: String
+
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) async throws -> VoiceTranscriptionResult {
+        VoiceTranscriptionResult(
+            text: transcript,
+            model: "gemini-3-flash-preview"
+        )
+    }
+}
+
+private struct EchoReplyAIStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let latestUserText = conversation.messages.last(where: { $0.role == .user })?.cleanedText ?? "missing"
+
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.answerDelta("Echo: \(latestUserText)"))
+            continuation.finish()
+        }
     }
 }

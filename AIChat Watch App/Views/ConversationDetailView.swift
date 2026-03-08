@@ -16,12 +16,17 @@ private enum ComposerLayout {
     static let containerBottomPadding: CGFloat = 0
     static let composerInnerBottomPadding: CGFloat = 4
     static let collapsedButtonBottomPadding: CGFloat = 8
-    static let regularComposerSpacing: CGFloat = 8
-    static let compactComposerSpacing: CGFloat = 6
+    static let regularComposerSpacing: CGFloat = 9
+    static let compactComposerSpacing: CGFloat = 8
     static let regularAttachmentSize: CGFloat = 60
     static let compactAttachmentSize: CGFloat = 44
-    static let regularActionButtonSize: CGFloat = 42
-    static let compactActionButtonSize: CGFloat = 38
+    static let regularInputRowHeight: CGFloat = 44
+    static let compactInputRowHeight: CGFloat = 40
+    static let actionButtonSizeDelta: CGFloat = 1
+    static let regularActionButtonSize: CGFloat = regularInputRowHeight + actionButtonSizeDelta
+    static let compactActionButtonSize: CGFloat = compactInputRowHeight + actionButtonSizeDelta
+    static let regularInputRowSpacing: CGFloat = 8
+    static let compactInputRowSpacing: CGFloat = 8
 }
 
 struct ConversationDetailView: View {
@@ -29,6 +34,7 @@ struct ConversationDetailView: View {
 
     let conversationID: UUID
 
+    @StateObject private var voiceRecorder = VoiceRecorder()
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isShowingSettings = false
     @State private var isShowingModelPicker = false
@@ -46,7 +52,7 @@ struct ConversationDetailView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                         if isComposerExpanded {
-                            composerView(conversation: conversation)
+                            composerView()
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -111,6 +117,21 @@ struct ConversationDetailView: View {
                 await importPickedItems(newItems)
             }
         }
+        .onChange(of: voiceRecorder.completedAttachment) { _, attachment in
+            guard let attachment else {
+                return
+            }
+
+            handleRecordedAttachment(attachment)
+        }
+        .onChange(of: voiceRecorder.errorMessage) { _, errorMessage in
+            guard let errorMessage else {
+                return
+            }
+
+            chatStore.presentError(errorMessage, for: conversationID)
+            voiceRecorder.clearError()
+        }
         .animation(.easeOut(duration: 0.2), value: isComposerExpanded)
     }
 
@@ -162,7 +183,7 @@ struct ConversationDetailView: View {
             Text("Start with anything")
                 .font(.headline)
 
-            Text("Ask a question, dictate a prompt, or attach a photo for visual analysis.")
+            Text("Ask a question, record a voice prompt that will be transcribed automatically, or attach a photo for visual analysis.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -192,10 +213,20 @@ struct ConversationDetailView: View {
         .font(.caption2)
     }
 
-    private func composerView(conversation: ConversationThread) -> some View {
-        let aiConfiguration = conversation.resolvedAIConfiguration(defaultModel: chatStore.configuration.geminiModel)
+    private func composerView() -> some View {
+        let aiConfiguration = chatStore.aiConfiguration(for: conversationID)
         let attachments = chatStore.draftAttachments(for: conversationID)
+        let draftText = chatStore.draftText(for: conversationID)
         let hasAttachments = attachments.isEmpty == false
+        let hasDraftContent = draftText.nonEmptyTrimmed != nil || hasAttachments
+        let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
+        let inputRowHeight = hasAttachments ? ComposerLayout.compactInputRowHeight : ComposerLayout.regularInputRowHeight
+        let actionButtonSize = hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
+        let sendEnabled =
+            chatStore.isSending(conversationID: conversationID) == false &&
+            isTranscribing == false &&
+            voiceRecorder.isInteractive &&
+            hasDraftContent
 
         return VStack(alignment: .leading, spacing: hasAttachments ? ComposerLayout.compactComposerSpacing : ComposerLayout.regularComposerSpacing) {
             compactControlBar(
@@ -221,69 +252,98 @@ struct ConversationDetailView: View {
                 .frame(height: hasAttachments ? ComposerLayout.compactAttachmentSize : ComposerLayout.regularAttachmentSize)
             }
 
-            HStack(spacing: hasAttachments ? 5 : 6) {
-                TextField(
-                    "Ask Gemini",
-                    text: Binding(
-                        get: { chatStore.draftText(for: conversationID) },
-                        set: { chatStore.updateDraftText($0, for: conversationID) }
-                    ),
-                    prompt: Text("Ask Gemini")
+            if voiceRecorder.isRecording || voiceRecorder.isPreparing {
+                RecordingStatusBanner(
+                    iconName: voiceRecorder.isRecording ? "waveform.circle.fill" : "mic.circle",
+                    title: voiceRecorder.isRecording ? "Recording \(voiceRecorder.elapsedTimeText)" : "Preparing microphone...",
+                    tint: voiceRecorder.isRecording ? .red : .white.opacity(0.82)
                 )
-                .textFieldStyle(.plain)
-                .textInputAutocapitalization(.sentences)
-                .submitLabel(.send)
-                .font(hasAttachments ? .callout : .body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, hasAttachments ? 10 : 12)
-                .padding(.vertical, hasAttachments ? 8 : 10)
-                .background(
-                    RoundedRectangle(cornerRadius: hasAttachments ? 16 : 18, style: .continuous)
-                        .fill(Color.white.opacity(0.10))
+            } else if isTranscribing {
+                RecordingStatusBanner(
+                    iconName: "waveform.and.magnifyingglass",
+                    title: "Transcribing with \(AIModelCatalog.shortLabel(for: chatStore.configuration.geminiTranscriptionModel))...",
+                    tint: .cyan
                 )
-                .onSubmit {
-                    sendCurrentDraft()
+            }
+
+            HStack(spacing: hasAttachments ? ComposerLayout.compactInputRowSpacing : ComposerLayout.regularInputRowSpacing) {
+                TextFieldLink(prompt: Text("Ask Gemini")) {
+                    Text(draftText.nonEmptyTrimmed ?? "Ask Gemini")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } onSubmit: { submittedText in
+                    chatStore.updateDraftText(submittedText, for: conversationID)
                 }
+                .frame(maxWidth: .infinity, minHeight: inputRowHeight, alignment: .leading)
+                .accessibilityLabel("Compose message")
+                .disabled(voiceRecorder.isRecording || isTranscribing)
+
+                Button {
+                    toggleVoiceRecording()
+                } label: {
+                    ComposerActionButtonLabel(
+                        systemName: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic",
+                        dimension: actionButtonSize,
+                        fillStyle: AnyShapeStyle(
+                            voiceRecorder.isRecording ?
+                            Color.red.opacity(0.94) :
+                            Color.white.opacity(0.11)
+                        ),
+                        strokeColor: Color.white.opacity(voiceRecorder.isRecording ? 0.14 : 0.08)
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(
+                    width: actionButtonSize,
+                    height: actionButtonSize
+                )
+                .disabled(
+                    voiceRecorder.isRecording == false &&
+                    (
+                        chatStore.isSending(conversationID: conversationID) ||
+                        isTranscribing ||
+                        voiceRecorder.isPreparing ||
+                        hasDraftContent
+                    )
+                )
+                .accessibilityLabel(voiceRecorder.isRecording ? "Stop recording and send" : "Record voice message")
 
                 PhotosPicker(
                     selection: $selectedPhotoItems,
                     maxSelectionCount: 3,
                     matching: .images
                 ) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: hasAttachments ? 15 : 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
+                    ComposerActionButtonLabel(
+                        systemName: "photo.on.rectangle",
+                        dimension: actionButtonSize,
+                        fillStyle: AnyShapeStyle(Color.white.opacity(0.11)),
+                        strokeColor: Color.white.opacity(0.08)
+                    )
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.white.opacity(0.8))
+                .buttonStyle(.plain)
                 .frame(
-                    width: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize,
-                    height: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
+                    width: actionButtonSize,
+                    height: actionButtonSize
                 )
+                .disabled(voiceRecorder.isRecording || isTranscribing)
                 .accessibilityLabel("Add photo")
 
                 Button {
                     sendCurrentDraft()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: hasAttachments ? 16 : 17, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.cyan)
-                .frame(
-                    width: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize,
-                    height: hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
-                )
-                .disabled(
-                    chatStore.isSending(conversationID: conversationID) ||
-                    (
-                        chatStore.draftText(for: conversationID).nonEmptyTrimmed == nil &&
-                        attachments.isEmpty
+                    ComposerActionButtonLabel(
+                        systemName: "arrow.up.circle.fill",
+                        dimension: actionButtonSize,
+                        fillStyle: AnyShapeStyle(Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)),
+                        strokeColor: Color.white.opacity(sendEnabled ? 0.10 : 0.05)
                     )
+                }
+                .buttonStyle(.plain)
+                .frame(
+                    width: actionButtonSize,
+                    height: actionButtonSize
                 )
+                .disabled(sendEnabled == false)
                 .accessibilityLabel("Send")
             }
         }
@@ -388,6 +448,27 @@ struct ConversationDetailView: View {
         selectedPhotoItems = []
     }
 
+    private func toggleVoiceRecording() {
+        if voiceRecorder.isRecording {
+            voiceRecorder.stopRecording()
+            return
+        }
+
+        chatStore.clearError(for: conversationID)
+
+        Task {
+            await voiceRecorder.startRecording()
+        }
+    }
+
+    private func handleRecordedAttachment(_ attachment: ChatAttachment) {
+        voiceRecorder.consumeCompletedAttachment()
+
+        Task {
+            await chatStore.sendRecordedAudio(attachment, in: conversationID)
+        }
+    }
+
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
         if animated {
             withAnimation(.easeOut(duration: 0.18)) {
@@ -405,7 +486,9 @@ struct ConversationDetailView: View {
     }
 
     private func sendCurrentDraft() {
-        guard chatStore.isSending(conversationID: conversationID) == false else {
+        guard chatStore.isSending(conversationID: conversationID) == false,
+              chatStore.isTranscribing(conversationID: conversationID) == false
+        else {
             return
         }
 
@@ -459,15 +542,33 @@ private struct CompactMenuButtonLabel: View {
     let title: String
     let isDense: Bool
 
+    private var leadingIconPointSize: CGFloat {
+        isDense ? 13 : 14
+    }
+
+    private var leadingIconFrameSize: CGFloat {
+        isDense ? 14 : 16
+    }
+
+    private var leadingIconScale: CGFloat {
+        iconName == "cpu" ? 1.12 : 1.0
+    }
+
+    private var titlePointSize: CGFloat {
+        isDense ? 13 : 14
+    }
+
     var body: some View {
         HStack(spacing: isDense ? 4 : 5) {
             Image(systemName: iconName)
-                .font(.caption2)
+                .font(.system(size: leadingIconPointSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.cyan.opacity(0.92))
-                .frame(width: isDense ? 10 : 12)
+                .frame(width: leadingIconFrameSize, height: leadingIconFrameSize)
+                .scaleEffect(leadingIconScale)
 
             Text(title)
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: titlePointSize, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .allowsTightening(true)
@@ -494,8 +595,60 @@ private struct CompactMenuButtonLabel: View {
     }
 }
 
+private struct ComposerActionButtonLabel: View {
+    let systemName: String
+    let dimension: CGFloat
+    let fillStyle: AnyShapeStyle
+    let strokeColor: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: dimension * 0.36, style: .continuous)
+            .fill(fillStyle)
+            .overlay(
+                RoundedRectangle(cornerRadius: dimension * 0.36, style: .continuous)
+                    .stroke(strokeColor, lineWidth: 1)
+            )
+            .overlay {
+                Image(systemName: systemName)
+                    .font(.system(size: dimension * 0.40, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+    }
+}
+
+private struct RecordingStatusBanner: View {
+    let iconName: String
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
 private struct DraftAttachmentPill: View {
-    let attachment: ChatImageAttachment
+    let attachment: ChatAttachment
     let size: CGFloat
     let onRemove: () -> Void
 
@@ -509,11 +662,30 @@ private struct DraftAttachmentPill: View {
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
             } else {
                 RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.12, green: 0.18, blue: 0.24),
+                                Color(red: 0.03, green: 0.43, blue: 0.51)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: size, height: size)
-                    .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
+                    .overlay(alignment: .bottomLeading) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Image(systemName: attachment.isAudio ? "waveform" : "paperclip")
+                                .font(size <= ComposerLayout.compactAttachmentSize ? .caption2 : .caption)
+                                .foregroundStyle(.white.opacity(0.9))
+
+                            if let durationText = formattedDuration {
+                                Text(durationText)
+                                    .font(.system(size: size <= ComposerLayout.compactAttachmentSize ? 9 : 10, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.82))
+                            }
+                        }
+                        .padding(size <= ComposerLayout.compactAttachmentSize ? 6 : 8)
                     }
             }
 
@@ -524,6 +696,17 @@ private struct DraftAttachmentPill: View {
             }
             .offset(x: size <= ComposerLayout.compactAttachmentSize ? 3 : 4, y: size <= ComposerLayout.compactAttachmentSize ? -3 : -4)
         }
+    }
+
+    private var formattedDuration: String? {
+        guard let durationSeconds = attachment.durationSeconds, durationSeconds > 0 else {
+            return nil
+        }
+
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.zeroFormattingBehavior = [.pad]
+        return formatter.string(from: durationSeconds)
     }
 }
 
@@ -606,6 +789,7 @@ private enum ConversationDetailPreviewData {
 
         return ChatImageAttachment(
             id: id,
+            kind: .image,
             filename: filename,
             mimeType: "image/png",
             data: previewImage?.pngData() ?? Data(),

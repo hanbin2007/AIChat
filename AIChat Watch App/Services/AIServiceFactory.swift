@@ -12,8 +12,20 @@ enum AIStreamEvent: Equatable {
     case thoughtDelta(String)
 }
 
+struct VoiceTranscriptionResult: Equatable {
+    var text: String
+    var model: String
+}
+
 protocol AIStreamingService {
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error>
+}
+
+protocol AITranscriptionService {
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread
+    ) async throws -> VoiceTranscriptionResult
 }
 
 enum AIServiceFactory {
@@ -24,5 +36,13 @@ enum AIServiceFactory {
         case .relay:
             return RelayAIClient(configuration: configuration)
         }
+    }
+
+    static func makeTranscriptionService(configuration: AppConfiguration) -> AITranscriptionService? {
+        guard configuration.geminiAPIKey != nil else {
+            return nil
+        }
+
+        return GeminiTranscriptionService(configuration: configuration)
     }
 }

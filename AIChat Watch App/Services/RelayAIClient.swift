@@ -38,7 +38,7 @@ struct RelayAIClient: AIStreamingService {
     var session: URLSession = .shared
     var maxContextMessages: Int = 12
     var maxCharacterBudget: Int = 12_000
-    var maxInlineImageBytes: Int = 1_800_000
+    var maxInlineAttachmentBytes: Int = 4_000_000
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -146,7 +146,7 @@ struct RelayAIClient: AIStreamingService {
             from: conversation.messages,
             maxContextMessages: maxContextMessages,
             maxCharacterBudget: maxCharacterBudget,
-            maxInlineImageBytes: maxInlineImageBytes
+            maxInlineAttachmentBytes: maxInlineAttachmentBytes
         )
 
         return RelayChatRequest(
@@ -158,7 +158,7 @@ struct RelayAIClient: AIStreamingService {
             messages: selectedMessages.map { message in
                 RelayMessage(
                     role: message.role.rawValue,
-                    text: message.cleanedText.nonEmptyTrimmed,
+                    text: requestText(for: message),
                     attachments: message.attachments.map { attachment in
                         RelayAttachment(
                             mimeType: attachment.mimeType,
@@ -169,6 +169,18 @@ struct RelayAIClient: AIStreamingService {
                 )
             }
         )
+    }
+
+    private func requestText(for message: ChatMessage) -> String? {
+        if let text = message.cleanedText.nonEmptyTrimmed {
+            return text
+        }
+
+        guard message.role == .user, message.attachments.contains(where: \.isAudio) else {
+            return nil
+        }
+
+        return "Listen to the attached audio, infer the user's request, and answer it directly."
     }
 
     private func relayError(from data: Data) -> Error {
