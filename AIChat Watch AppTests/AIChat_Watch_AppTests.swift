@@ -33,7 +33,15 @@ final class AIChat_Watch_AppTests: XCTestCase {
         ]
 
         let client = GeminiAPIClient(
-            configuration: AppConfiguration(geminiAPIKey: "test", geminiModel: "gemini-2.0-flash"),
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-2.5-flash",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            ),
             session: .shared,
             maxContextMessages: 10,
             maxCharacterBudget: 1_000,
@@ -47,5 +55,15 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[2].role, "user")
         XCTAssertEqual(contents[2].parts.first?.text, "latest")
         XCTAssertEqual(contents[2].parts.last?.inlineData?.data, imageData.base64EncodedString())
+    }
+
+    func testNormalizedDeltaHandlesCumulativeChunks() {
+        var currentText = ""
+
+        XCTAssertEqual(normalizedDelta(chunkText: "Hello", currentText: &currentText), "Hello")
+        XCTAssertEqual(currentText, "Hello")
+
+        XCTAssertEqual(normalizedDelta(chunkText: "Hello world", currentText: &currentText), " world")
+        XCTAssertEqual(currentText, "Hello world")
     }
 }

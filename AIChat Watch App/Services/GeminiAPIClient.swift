@@ -7,10 +7,6 @@
 
 import Foundation
 
-protocol AIChatService {
-    func generateReply(for conversation: ConversationThread) async throws -> String
-}
-
 enum GeminiAPIError: LocalizedError {
     case missingAPIKey
     case invalidResponse
@@ -31,78 +27,92 @@ enum GeminiAPIError: LocalizedError {
     }
 }
 
-struct GeminiAPIClient: AIChatService {
+struct GeminiAPIClient: AIStreamingService {
     let configuration: AppConfiguration
     var session: URLSession = .shared
     var maxContextMessages: Int = 12
     var maxCharacterBudget: Int = 12_000
     var maxInlineImageBytes: Int = 1_800_000
 
-    func generateReply(for conversation: ConversationThread) async throws -> String {
-        guard let apiKey = configuration.geminiAPIKey else {
-            throw GeminiAPIError.missingAPIKey
-        }
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard let apiKey = configuration.geminiAPIKey else {
+                        throw GeminiAPIError.missingAPIKey
+                    }
 
-        let requestBody = makeRequestBody(for: conversation.messages)
-        var request = URLRequest(
-            url: URL(
-                string: "https://generativelanguage.googleapis.com/v1beta/models/\(configuration.geminiModel):generateContent?key=\(apiKey)"
-            )!
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    var request = URLRequest(
+                        url: URL(
+                            string: "https://generativelanguage.googleapis.com/v1beta/models/\(configuration.geminiModel):streamGenerateContent?alt=sse"
+                        )!
+                    )
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(requestBody)
+                    let encoder = JSONEncoder()
+                    encoder.keyEncodingStrategy = .convertToSnakeCase
+                    request.httpBody = try encoder.encode(makeRequestBody(for: conversation.messages))
 
-        let (data, response) = try await session.data(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw GeminiAPIError.invalidResponse
+                    }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiAPIError.invalidResponse
-        }
+                    guard (200...299).contains(httpResponse.statusCode) else {
+                        let errorData = try await readAllBytes(from: bytes)
+                        throw geminiError(from: errorData)
+                    }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+                    let decoder = JSONDecoder()
+                    decoder.keyDecodingStrategy = .convertFromSnakeCase
 
-        if (200...299).contains(httpResponse.statusCode) == false {
-            if let apiError = try? decoder.decode(GeminiAPIErrorEnvelope.self, from: data) {
-                throw GeminiAPIError.api(message: apiError.error.message)
+                    var accumulatedText = ""
+
+                    for try await line in bytes.lines {
+                        let trimmedLine = line.trimmed
+                        guard trimmedLine.hasPrefix("data:") else {
+                            continue
+                        }
+
+                        let payload = String(trimmedLine.dropFirst(5)).trimmed
+                        guard payload.isEmpty == false, payload != "[DONE]" else {
+                            continue
+                        }
+
+                        guard let data = payload.data(using: .utf8) else {
+                            continue
+                        }
+
+                        let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
+                        let chunkText = extractText(from: responseEnvelope) ?? ""
+                        let delta = normalizedDelta(chunkText: chunkText, currentText: &accumulatedText)
+
+                        if let delta, delta.isEmpty == false {
+                            continuation.yield(delta)
+                        }
+                    }
+
+                    guard accumulatedText.nonEmptyTrimmed != nil else {
+                        throw GeminiAPIError.emptyResponse
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
             }
-
-            throw GeminiAPIError.invalidResponse
         }
-
-        let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
-        let reply = responseEnvelope.candidates
-            .compactMap { candidate in
-                candidate.content?.parts
-                    .compactMap(\.text)
-                    .map { $0.trimmed }
-                    .filter { $0.isEmpty == false }
-                    .joined(separator: "\n")
-                    .nonEmptyTrimmed
-            }
-            .first
-
-        guard let reply else {
-            throw GeminiAPIError.emptyResponse
-        }
-
-        return reply
     }
 
     func makeRequestBody(for messages: [ChatMessage]) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
-            systemInstruction: GeminiContent.systemPrompt(
-                """
-                You are AIChat on Apple Watch.
-                Keep answers clear, concise, and easy to scan on a small screen unless the user explicitly asks for detail.
-                """
-            ),
+            systemInstruction: GeminiContent.systemPrompt(AIContextBuilder.systemPrompt),
             contents: contextWindow(from: messages),
             generationConfig: GeminiGenerationConfig(
-                temperature: 0.7,
+                temperature: 0.65,
                 topP: 0.9,
                 maxOutputTokens: 512
             )
@@ -110,63 +120,85 @@ struct GeminiAPIClient: AIChatService {
     }
 
     func contextWindow(from messages: [ChatMessage]) -> [GeminiContent] {
-        let eligibleMessages = messages.filter { message in
-            message.status == .sent &&
-            message.role != .system &&
-            message.hasVisibleContent
-        }
+        let selectedMessages = AIContextBuilder.selectedMessages(
+            from: messages,
+            maxContextMessages: maxContextMessages,
+            maxCharacterBudget: maxCharacterBudget,
+            maxInlineImageBytes: maxInlineImageBytes
+        )
 
-        var selectedMessages: [ChatMessage] = []
-        var consumedCharacters = 0
-        var consumedImageBytes = 0
-
-        for message in eligibleMessages.reversed() {
-            let messageCharacters = max(message.cleanedText.count, 24)
-            let imageBytes = message.attachments.reduce(0) { partialResult, attachment in
-                partialResult + attachment.sizeInBytes
+        return selectedMessages.compactMap { message in
+            guard let role = message.role.geminiRole else {
+                return nil
             }
 
-            let exceedsBudget =
-                selectedMessages.isEmpty == false &&
-                (
-                    selectedMessages.count >= maxContextMessages ||
-                    consumedCharacters + messageCharacters > maxCharacterBudget ||
-                    consumedImageBytes + imageBytes > maxInlineImageBytes
-                )
-
-            if exceedsBudget {
-                break
-            }
-
-            selectedMessages.append(message)
-            consumedCharacters += messageCharacters
-            consumedImageBytes += imageBytes
-        }
-
-        return selectedMessages
-            .reversed()
-            .compactMap { message in
-                guard let role = message.role.geminiRole else {
-                    return nil
-                }
-
-                var parts = message.attachments.map { attachment in
-                    GeminiPart(
-                        text: nil,
-                        inlineData: GeminiInlineData(
-                            mimeType: attachment.mimeType,
-                            data: attachment.data.base64EncodedString()
-                        )
+            var parts = message.attachments.map { attachment in
+                GeminiPart(
+                    text: nil,
+                    inlineData: GeminiInlineData(
+                        mimeType: attachment.mimeType,
+                        data: attachment.data.base64EncodedString()
                     )
-                }
-
-                if let text = message.cleanedText.nonEmptyTrimmed {
-                    parts.insert(GeminiPart(text: text, inlineData: nil), at: 0)
-                }
-
-                return GeminiContent(role: role, parts: parts)
+                )
             }
+
+            if let text = message.cleanedText.nonEmptyTrimmed {
+                parts.insert(GeminiPart(text: text, inlineData: nil), at: 0)
+            }
+
+            return GeminiContent(role: role, parts: parts)
+        }
     }
+
+    private func extractText(from responseEnvelope: GeminiGenerateContentResponse) -> String? {
+        responseEnvelope.candidates
+            .compactMap { candidate in
+                candidate.content?.parts
+                    .compactMap(\.text)
+                    .joined(separator: "\n")
+                    .nonEmptyTrimmed
+            }
+            .first
+    }
+
+    private func geminiError(from data: Data) -> Error {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        if let apiError = try? decoder.decode(GeminiAPIErrorEnvelope.self, from: data) {
+            return GeminiAPIError.api(message: apiError.error.message)
+        }
+
+        return GeminiAPIError.invalidResponse
+    }
+}
+
+func normalizedDelta(chunkText: String, currentText: inout String) -> String? {
+    let normalizedChunk = chunkText.nonEmptyTrimmed
+    guard let normalizedChunk else {
+        return nil
+    }
+
+    if normalizedChunk.hasPrefix(currentText) {
+        let delta = String(normalizedChunk.dropFirst(currentText.count))
+        currentText = normalizedChunk
+        return delta
+    }
+
+    if currentText.hasPrefix(normalizedChunk) {
+        return nil
+    }
+
+    currentText.append(normalizedChunk)
+    return normalizedChunk
+}
+
+func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
+    var collected = Data()
+    for try await byte in bytes {
+        collected.append(byte)
+    }
+    return collected
 }
 
 struct GeminiGenerateContentRequest: Encodable {

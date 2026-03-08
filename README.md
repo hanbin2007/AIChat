@@ -1,44 +1,87 @@
 # AIChat for Apple Watch
 
-一个专门面向 Apple Watch 小屏场景设计的 Gemini 对话应用，支持：
+一个面向 Apple Watch 小屏交互构建的 AI 对话应用，当前已经具备：
 
-- 多会话管理与新建对话
-- 连续上下文对话
-- 图片上传后联动 Gemini 多模态推理
-- 本地持久化保存聊天记录
-- 适配 watchOS 的卡片化聊天界面
+- 多会话列表、新建、删除、重命名、清空
+- 上下文续聊与本地持久化
+- 图片上传并参与 Gemini 多模态推理
+- 流式回复显示，而不是整段返回
+- 可切换 `Direct Gemini` 和 `Relay Gateway`
+- 为未来 iPhone 伴生端准备的共享存储与 `WatchConnectivity` 同步桥
 
-## 项目结构
+## 目录
 
 - `AIChat Watch App/Models`
-  数据模型、图片附件归一化、会话标题生成
+  会话、消息、图片附件和标题生成
 - `AIChat Watch App/Services`
-  Gemini API client、本地仓库、运行时配置
+  Gemini client、relay client、配置、存储、同步桥
 - `AIChat Watch App/ViewModels`
-  聊天状态管理与发送流程
+  聊天状态与流式发送流程
 - `AIChat Watch App/Views`
-  Apple Watch 端会话列表、聊天详情、消息气泡和背景组件
+  Apple Watch UI、聊天页、设置页、消息气泡
+- `Config`
+  Xcode 构建配置与本地 secrets
+- `relay`
+  一个最小可运行的 Node relay 示例
 
-## Gemini 配置
+## 本地配置
 
-开发时二选一：
+1. 复制 `Config/Secrets.xcconfig.example` 为 `Config/Secrets.xcconfig`
+2. 选择一种模式
 
-1. 在 Xcode Scheme 里注入环境变量 `GEMINI_API_KEY`
-2. 在 target 的 `Info.plist` 里增加 `GEMINI_API_KEY`
+开发直连 Gemini：
 
-可选环境变量：
+```xcconfig
+AI_BACKEND_MODE = direct
+GEMINI_API_KEY = your-gemini-api-key
+GEMINI_MODEL = gemini-2.5-flash
+```
 
-- `GEMINI_MODEL`
-  默认是 `gemini-2.0-flash`
+生产推荐 relay：
 
-## 本地构建
+```xcconfig
+AI_BACKEND_MODE = relay
+AI_RELAY_BASE_URL = http://127.0.0.1:8787
+AI_RELAY_BEARER_TOKEN = your-relay-token
+GEMINI_MODEL = gemini-2.5-flash
+```
+
+可选共享容器：
+
+```xcconfig
+APP_GROUP_IDENTIFIER = group.your.company.aichat
+```
+
+说明：
+
+- `Config/Secrets.xcconfig` 已经被 `.gitignore` 忽略
+- 直连 Gemini 只适合开发，不适合真正上线
+- 如果要让 iPhone 和 Watch 真正共享文件存储，需要再给 target 配好 App Group entitlement
+
+## 构建
 
 ```bash
 xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS" build
 ```
 
-## 生产建议
+测试代码编译：
 
-当前网络层已经被隔离在 `AIChat Watch App/Services/GeminiAPIClient.swift`，开发时可以直接连 Gemini。
+```bash
+xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS Simulator" build-for-testing
+```
 
-如果要真正上线，建议把直连 API key 替换成你自己的后端中继或 token broker，避免把第三方密钥长期放在客户端。
+## Relay
+
+中继示例见 `relay/server.mjs` 和 `relay/README.md`。
+
+它做三件事：
+
+- 服务端持有 `GEMINI_API_KEY`
+- 对客户端做 Bearer 鉴权
+- 把 Gemini SSE 流转成更简单的 `delta` 事件
+
+## 当前状态
+
+工程已经可以成功构建，并且 watch app 可以直接安装到 watchOS 模拟器启动。
+
+如果你现在还没填 `Config/Secrets.xcconfig`，应用会正常启动，但会显示 Gemini 配置提示卡片，而不会真正发请求。

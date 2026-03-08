@@ -14,6 +14,7 @@ struct ConversationDetailView: View {
     let conversationID: UUID
 
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var isShowingSettings = false
 
     var body: some View {
         ZStack {
@@ -38,6 +39,19 @@ struct ConversationDetailView: View {
         }
         .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("Conversation settings")
+            }
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            ConversationSettingsView(conversationID: conversationID)
+        }
         .onChange(of: selectedPhotoItems) { _, newItems in
             Task {
                 await importPickedItems(newItems)
@@ -56,22 +70,6 @@ struct ConversationDetailView: View {
                             ChatBubbleView(message: message)
                                 .id(message.id)
                         }
-                    }
-
-                    if chatStore.isSending(conversationID: conversationID) {
-                        HStack {
-                            ProgressView()
-                                .tint(.cyan)
-                            Text("Gemini is thinking")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color.white.opacity(0.06))
-                        )
                     }
 
                     if let errorMessage = chatStore.errorMessage(for: conversationID) {

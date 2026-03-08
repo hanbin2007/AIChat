@@ -27,6 +27,7 @@ nonisolated enum ChatRole: String, Codable, Hashable {
 
 nonisolated enum ChatMessageStatus: String, Codable, Hashable {
     case sent
+    case streaming
     case failed
 }
 
@@ -144,7 +145,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     }
 
     var hasVisibleContent: Bool {
-        cleanedText.isEmpty == false || attachments.isEmpty == false
+        cleanedText.isEmpty == false || attachments.isEmpty == false || status == .streaming
     }
 }
 
@@ -178,6 +179,14 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     var previewText: String {
         guard let lastMessage = messages.last(where: \.hasVisibleContent) else {
             return "Tap to start a conversation"
+        }
+
+        if lastMessage.status == .streaming, lastMessage.cleanedText.isEmpty {
+            return "Streaming response..."
+        }
+
+        if lastMessage.status == .failed, lastMessage.cleanedText.isEmpty {
+            return "Last reply failed"
         }
 
         if let text = lastMessage.cleanedText.nonEmptyTrimmed {
@@ -214,6 +223,30 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
         let truncated = String(collapsed.prefix(limit)).trimmed
         return truncated.isEmpty ? nil : "\(truncated)..."
+    }
+
+    mutating func clearMessages() {
+        messages.removeAll()
+        updatedAt = .now
+    }
+
+    mutating func updateTitle(_ newTitle: String) {
+        title = newTitle.nonEmptyTrimmed ?? Self.untitledTitle
+        updatedAt = .now
+    }
+
+    mutating func upsertMessage(_ message: ChatMessage) {
+        if let index = messages.firstIndex(where: { $0.id == message.id }) {
+            messages[index] = message
+        } else {
+            messages.append(message)
+        }
+        updatedAt = .now
+    }
+
+    mutating func removeMessage(id: UUID) {
+        messages.removeAll { $0.id == id }
+        updatedAt = .now
     }
 }
 

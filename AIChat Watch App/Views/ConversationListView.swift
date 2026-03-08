@@ -16,11 +16,19 @@ struct ConversationListView: View {
             AppBackdropView()
 
             List {
-                if chatStore.configuration.isGeminiConfigured == false {
+                if chatStore.configuration.isAIConfigured == false {
                     ConfigurationBannerView(message: chatStore.configuration.configurationMessage)
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                 }
+
+                ConfigurationBannerView(
+                    iconName: "network",
+                    title: chatStore.configuration.backendSummary,
+                    message: "\(chatStore.storageDescription) • \(chatStore.syncStatusDescription)"
+                )
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                .listRowBackground(Color.clear)
 
                 if let startupError = chatStore.startupError {
                     ConfigurationBannerView(
@@ -75,7 +83,7 @@ struct ConversationListView: View {
             Text("Built for Watch")
                 .font(.headline)
 
-            Text("Context-aware Gemini chat, photo prompts, and fast handoff between threads.")
+            Text("Context-aware Gemini chat, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 

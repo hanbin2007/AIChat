@@ -13,13 +13,15 @@ struct AIChat_Watch_AppApp: App {
 
     init() {
         let configuration = AppConfiguration.load()
-        let repository = ConversationRepository()
-        let service = GeminiAPIClient(configuration: configuration)
+        let repository = ConversationRepository(configuration: configuration)
+        let service = AIServiceFactory.makeService(configuration: configuration)
+        let syncBridge = CompanionSyncBridge()
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
                 aiService: service,
-                configuration: configuration
+                configuration: configuration,
+                syncBridge: syncBridge
             )
         )
     }

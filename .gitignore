@@ -2,5 +2,6 @@ DerivedData/
 .build/
 *.xcuserstate
 *.xcuserdata/
+Config/Secrets.xcconfig
 Secrets.xcconfig
 .env.local

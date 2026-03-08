@@ -8,14 +8,28 @@
 import Foundation
 
 actor ConversationRepository {
+    nonisolated let storageDescription: String
+    nonisolated let resolvedRootURL: URL
+
     private let rootURL: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
-    init(rootURL: URL? = nil, fileManager: FileManager = .default) {
+    init(
+        configuration: AppConfiguration? = nil,
+        rootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) {
         self.fileManager = fileManager
-        self.rootURL = rootURL ?? Self.defaultRootURL(fileManager: fileManager)
+        let resolvedStorage = Self.defaultRootURL(
+            fileManager: fileManager,
+            appGroupIdentifier: configuration?.appGroupIdentifier,
+            overrideRootURL: rootURL
+        )
+        self.rootURL = resolvedStorage.url
+        self.resolvedRootURL = resolvedStorage.url
+        self.storageDescription = resolvedStorage.description
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -72,7 +86,23 @@ actor ConversationRepository {
         }
     }
 
-    private static func defaultRootURL(fileManager: FileManager) -> URL {
+    private static func defaultRootURL(
+        fileManager: FileManager,
+        appGroupIdentifier: String?,
+        overrideRootURL: URL?
+    ) -> (url: URL, description: String) {
+        if let overrideRootURL {
+            return (overrideRootURL, "Custom storage")
+        }
+
+        if let appGroupIdentifier,
+           let appGroupURL = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
+            return (
+                appGroupURL.appendingPathComponent("AIChatStore", isDirectory: true),
+                "App Group storage"
+            )
+        }
+
         let baseURL = try? fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -80,7 +110,16 @@ actor ConversationRepository {
             create: true
         )
 
-        return (baseURL ?? fileManager.temporaryDirectory)
-            .appendingPathComponent("AIChatStore", isDirectory: true)
+        if let baseURL {
+            return (
+                baseURL.appendingPathComponent("AIChatStore", isDirectory: true),
+                "Local watch storage"
+            )
+        }
+
+        return (
+            fileManager.temporaryDirectory.appendingPathComponent("AIChatStore", isDirectory: true),
+            "Temporary storage fallback"
+        )
     }
 }

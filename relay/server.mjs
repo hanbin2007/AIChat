@@ -1,0 +1,189 @@
+import http from "node:http";
+import { TextDecoder } from "node:util";
+
+const port = Number(process.env.PORT || 8787);
+const geminiApiKey = process.env.GEMINI_API_KEY;
+const relayBearerToken = process.env.RELAY_BEARER_TOKEN;
+
+if (!geminiApiKey || !relayBearerToken) {
+  console.error("Missing GEMINI_API_KEY or RELAY_BEARER_TOKEN.");
+  process.exit(1);
+}
+
+const decoder = new TextDecoder();
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+
+function unauthorized(res) {
+  sendJson(res, 401, { message: "Unauthorized relay request." });
+}
+
+function toGeminiRequest(body) {
+  return {
+    systemInstruction: {
+      parts: [{ text: body.systemPrompt }]
+    },
+    contents: body.messages.map((message) => {
+      const parts = [];
+
+      if (message.text) {
+        parts.push({ text: message.text });
+      }
+
+      for (const attachment of message.attachments || []) {
+        parts.push({
+          inlineData: {
+            mimeType: attachment.mimeType,
+            data: attachment.base64Data
+          }
+        });
+      }
+
+      return {
+        role: message.role === "assistant" ? "model" : "user",
+        parts
+      };
+    }),
+    generationConfig: {
+      temperature: 0.65,
+      topP: 0.9,
+      maxOutputTokens: 512
+    }
+  };
+}
+
+function extractChunkText(chunk) {
+  return chunk?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || "")
+    .join("\n")
+    .trim();
+}
+
+async function streamGeminiResponse({ model, requestBody, res }) {
+  const geminiResponse = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "x-goog-api-key": geminiApiKey
+      },
+      body: JSON.stringify(requestBody)
+    }
+  );
+
+  if (!geminiResponse.ok) {
+    const errorText = await geminiResponse.text();
+    sendJson(res, geminiResponse.status, { message: errorText || "Gemini relay failed." });
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive"
+  });
+
+  let buffered = "";
+  let emittedText = "";
+
+  for await (const chunk of geminiResponse.body) {
+    buffered += decoder.decode(chunk, { stream: true });
+    const lines = buffered.split("\n");
+    buffered = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) {
+        continue;
+      }
+
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") {
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      const chunkText = extractChunkText(parsed);
+      if (!chunkText) {
+        continue;
+      }
+
+      let delta = chunkText;
+      if (chunkText.startsWith(emittedText)) {
+        delta = chunkText.slice(emittedText.length);
+        emittedText = chunkText;
+      } else if (emittedText.startsWith(chunkText)) {
+        delta = "";
+      } else {
+        emittedText += chunkText;
+      }
+
+      if (!delta) {
+        continue;
+      }
+
+      res.write(`event: delta\n`);
+      res.write(`data: ${JSON.stringify({ type: "delta", text: delta })}\n\n`);
+    }
+  }
+
+  res.write(`event: done\n`);
+  res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+  res.end();
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === "GET" && req.url === "/health") {
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method !== "POST" || req.url !== "/v1/chat/stream") {
+    sendJson(res, 404, { message: "Not found." });
+    return;
+  }
+
+  const authHeader = req.headers.authorization || "";
+  if (authHeader !== `Bearer ${relayBearerToken}`) {
+    unauthorized(res);
+    return;
+  }
+
+  let rawBody = "";
+  for await (const chunk of req) {
+    rawBody += chunk;
+  }
+
+  let body;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    sendJson(res, 400, { message: "Invalid JSON body." });
+    return;
+  }
+
+  try {
+    await streamGeminiResponse({
+      model: body.model || "gemini-2.5-flash",
+      requestBody: toGeminiRequest(body),
+      res
+    });
+  } catch (error) {
+    sendJson(res, 502, { message: error instanceof Error ? error.message : "Relay error." });
+  }
+});
+
+server.listen(port, () => {
+  console.log(`AIChat relay listening on http://127.0.0.1:${port}`);
+});

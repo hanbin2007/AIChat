@@ -25,16 +25,41 @@ struct ChatBubbleView: View {
                     AttachmentGridView(attachments: message.attachments)
                 }
 
-                if message.cleanedText.isEmpty == false {
+                if message.status == .streaming, message.cleanedText.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.white.opacity(0.8))
+                        Text("Streaming...")
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                } else if message.status == .failed, message.cleanedText.isEmpty {
+                    Text("Reply interrupted")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                } else if message.cleanedText.isEmpty == false {
                     Text(message.cleanedText)
                         .font(.body)
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.leading)
                 }
 
-                Text(message.createdAt, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.68))
+                HStack(spacing: 6) {
+                    Text(message.createdAt, style: .time)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    if message.status == .streaming {
+                        Label("Live", systemImage: "waveform.and.magnifyingglass")
+                            .labelStyle(.iconOnly)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.68))
+                    } else if message.status == .failed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                    }
+                }
             }
             .padding(10)
             .background(bubbleBackground)
