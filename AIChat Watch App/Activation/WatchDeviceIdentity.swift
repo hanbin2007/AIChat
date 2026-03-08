@@ -6,28 +6,42 @@
 //
 
 import Foundation
+#if os(watchOS)
 import WatchKit
+#elseif os(iOS)
+import UIKit
+#endif
 
-nonisolated struct WatchDeviceIdentity: Equatable, Sendable {
+nonisolated struct CompanionDeviceIdentity: Equatable, Sendable {
     let rawIdentifier: String
     let deviceToken: UInt64
     let displayToken: String
 }
 
-nonisolated enum WatchDeviceIdentityProvider {
-    private static let fallbackIdentifierKey = "watch_activation_fallback_identifier"
+nonisolated enum CompanionDeviceIdentityProvider {
+    private static let fallbackIdentifierKey = "device_activation_fallback_identifier"
 
-    static func current(defaults: UserDefaults = .standard) -> WatchDeviceIdentity {
-        let rawIdentifier =
-            WKInterfaceDevice.current().identifierForVendor?.uuidString ??
-            storedFallbackIdentifier(defaults: defaults)
+    @MainActor
+    static func current(defaults: UserDefaults = .standard) -> CompanionDeviceIdentity {
+        let rawIdentifier = currentVendorIdentifier() ?? storedFallbackIdentifier(defaults: defaults)
         let deviceToken = OfflineActivation.deviceToken(for: rawIdentifier)
 
-        return WatchDeviceIdentity(
+        return CompanionDeviceIdentity(
             rawIdentifier: rawIdentifier,
             deviceToken: deviceToken,
             displayToken: OfflineActivation.displayToken(for: deviceToken)
         )
+    }
+
+    @MainActor
+    private static func currentVendorIdentifier() -> String? {
+        #if os(watchOS)
+        return WKInterfaceDevice.current().identifierForVendor?.uuidString
+        #elseif os(iOS)
+        return UIDevice.current.identifierForVendor?.uuidString
+        #else
+        return nil
+        #endif
     }
 
     private static func storedFallbackIdentifier(defaults: UserDefaults) -> String {
@@ -41,3 +55,6 @@ nonisolated enum WatchDeviceIdentityProvider {
         return generated
     }
 }
+
+typealias WatchDeviceIdentity = CompanionDeviceIdentity
+typealias WatchDeviceIdentityProvider = CompanionDeviceIdentityProvider

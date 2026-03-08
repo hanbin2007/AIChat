@@ -132,7 +132,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
     private var systemPrompt: String {
         """
-        You transcribe short Apple Watch voice prompts for a chat app.
+        You transcribe short voice prompts for AIChat on Apple devices.
         Return only the final transcript text.
         Do not answer the user.
         Use the provided conversation context only to disambiguate names, references, and homophones.

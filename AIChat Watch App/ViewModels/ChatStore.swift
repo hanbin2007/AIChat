@@ -62,6 +62,10 @@ final class ChatStore: ObservableObject {
             self?.syncStatusDescription = status.description
         }
 
+        syncBridge.setSnapshotProvider { [weak self] in
+            self?.conversations ?? []
+        }
+
         syncBridge.setEventHandler { [weak self] event in
             Task { @MainActor in
                 await self?.handleSyncEvent(event)
@@ -102,7 +106,7 @@ final class ChatStore: ObservableObject {
     var activationStatusMessage: String {
         switch activationStatus {
         case .inactive:
-            return "当前只能查看历史消息。发新消息前，需要在 Apple Watch 上完成离线激活。"
+            return "当前只能查看历史消息。发新消息前，需要先完成当前设备的离线激活。"
         case .pending(let state):
             return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
         case .active(let state, let remainingMessages):
@@ -688,6 +692,17 @@ final class ChatStore: ObservableObject {
             await persist(conversation, sync: false)
         case .delete(let conversationID):
             await deleteConversation(id: conversationID, sync: false)
+        case .snapshot(let conversations):
+            for remoteConversation in conversations {
+                if let localConversation = conversation(id: remoteConversation.id),
+                   localConversation.updatedAt > remoteConversation.updatedAt {
+                    syncBridge.pushConversation(localConversation)
+                    continue
+                }
+
+                upsertConversation(remoteConversation)
+                await persist(remoteConversation, sync: false)
+            }
         }
     }
 }

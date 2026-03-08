@@ -86,7 +86,11 @@ struct AppConfiguration: Equatable {
             return "App Group requested: \(appGroupIdentifier)"
         }
 
+        #if os(watchOS)
         return "Local watch storage"
+        #else
+        return "Local iPhone storage"
+        #endif
     }
 
     var configurationMessage: String {

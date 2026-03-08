@@ -40,13 +40,14 @@ struct ActivationStatusCard: View {
 
                 Text(title)
                     .font(.headline)
+                    .foregroundStyle(.white)
 
                 Spacer(minLength: 0)
             }
 
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.78))
 
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
@@ -54,6 +55,7 @@ struct ActivationStatusCard: View {
                     .tint(accentColor)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)

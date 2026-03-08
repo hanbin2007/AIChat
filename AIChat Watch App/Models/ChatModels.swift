@@ -162,7 +162,7 @@ nonisolated enum AttachmentProcessingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedImage:
-            return "这张图片无法在 Apple Watch 上解析。"
+            return "这张图片暂时无法在当前设备上解析。"
         case .unsupportedAudio:
             return "录音文件无法处理，请重试。"
         case .imageTooLarge(let maximumBytes):

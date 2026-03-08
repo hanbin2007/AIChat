@@ -181,7 +181,7 @@ nonisolated enum OfflineActivation {
         }
 
         guard state.license.deviceToken == deviceToken else {
-            return .invalid("当前授权不属于这块 Apple Watch。")
+            return .invalid("当前授权不属于这台设备。")
         }
 
         if now < state.license.validFrom {
@@ -642,7 +642,7 @@ nonisolated enum OfflineActivationError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .invalidRequest:
-            return "请求码无效，请在手表上重新生成。"
+            return "请求码无效，请在当前设备上重新生成。"
         case .invalidActivationCode:
             return "激活码格式不正确。"
         case .invalidSignature:
@@ -650,11 +650,11 @@ nonisolated enum OfflineActivationError: LocalizedError, Equatable, Sendable {
         case .unsupportedVersion:
             return "激活码版本不受支持。"
         case .deviceMismatch:
-            return "这个激活码不属于当前 Apple Watch。"
+            return "这个激活码不属于当前设备。"
         case .requestExpired:
-            return "请求码已超过 30 分钟，请在手表上刷新后重新生成。"
+            return "请求码已超过 30 分钟，请在当前设备上刷新后重新生成。"
         case .requestFromFuture:
-            return "请求时间异常，请检查手表系统时间。"
+            return "请求时间异常，请检查当前设备系统时间。"
         case .licenseExpired:
             return "当前授权已过期。"
         case .messageLimitReached:
@@ -662,7 +662,7 @@ nonisolated enum OfflineActivationError: LocalizedError, Equatable, Sendable {
         case .modelNotAllowed:
             return "当前授权不允许使用这个模型。"
         case .notActivated:
-            return "请先在 Apple Watch 上完成激活。"
+            return "请先在当前设备上完成激活。"
         case .notYetActive(let startDate):
             return "授权将在 \(startDate.formatted(date: .abbreviated, time: .shortened)) 生效。"
         case .invalidMessageLimit:

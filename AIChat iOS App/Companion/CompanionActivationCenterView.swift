@@ -1,14 +1,15 @@
+#if COMPANION_APP
 //
-//  ActivationCenterView.swift
-//  AIChat Watch App
+//  CompanionActivationCenterView.swift
+//  AIChat
 //
 //  Created by Codex on 2026/3/8.
 //
 
 import SwiftUI
+import UIKit
 
-#if os(watchOS)
-struct ActivationCenterView: View {
+struct CompanionActivationCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -20,52 +21,58 @@ struct ActivationCenterView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ActivationStatusCard(
-                    title: chatStore.activationStatusTitle,
-                    message: feedbackMessage ?? chatStore.activationStatusMessage,
-                    iconName: statusIconName,
-                    accentColor: statusTintColor
-                )
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                .listRowBackground(Color.clear)
+            Form {
+                Section {
+                    ActivationStatusCard(
+                        title: chatStore.activationStatusTitle,
+                        message: feedbackMessage ?? chatStore.activationStatusMessage,
+                        iconName: statusIconName,
+                        accentColor: statusTintColor
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                    .listRowBackground(Color.clear)
+                }
 
                 Section("当前设备") {
                     LabeledContent("设备码", value: chatStore.deviceIdentity.displayToken)
                     LabeledContent("请求有效", value: "30 分钟")
+                    LabeledContent("生成时间", value: requestIssuedAt.formatted(date: .omitted, time: .shortened))
 
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("请求码")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
 
                         Text(requestCode)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
+                            .padding(12)
                             .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color.black.opacity(0.28))
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(Color(uiColor: .secondarySystemBackground))
                             )
+                    }
 
-                        Text("生成于 \(requestIssuedAt.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    Button("复制请求码") {
+                        UIPasteboard.general.string = requestCode
                     }
 
                     Button("刷新请求码") {
                         refreshRequestCode()
                     }
+                }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("输入激活码", text: $draftActivationCode, axis: .vertical)
+                Section("输入激活码") {
+                    TextField("输入激活码", text: $draftActivationCode, axis: .vertical)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .disabled(isSubmitting)
 
-                        Button("应用激活码") {
-                            Task {
-                                await applyActivationCode(draftActivationCode)
-                            }
+                    Button("应用激活码") {
+                        Task {
+                            await applyActivationCode(draftActivationCode)
                         }
-                        .buttonStyle(.borderedProminent)
                     }
                     .disabled(isSubmitting)
                 }
@@ -91,7 +98,7 @@ struct ActivationCenterView: View {
                     }
                 }
             }
-            .navigationTitle("离线激活")
+            .navigationTitle("设备激活")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

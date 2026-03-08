@@ -11,7 +11,11 @@ import SwiftUI
 struct AIChatRegistrationApp: App {
     var body: some Scene {
         WindowGroup {
+            #if COMPANION_APP
+            CompanionRootView()
+            #else
             OfflineActivationKeygenView()
+            #endif
         }
     }
 }

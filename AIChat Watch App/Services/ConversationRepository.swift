@@ -113,7 +113,7 @@ actor ConversationRepository {
         if let baseURL {
             return (
                 baseURL.appendingPathComponent("AIChatStore", isDirectory: true),
-                "Local watch storage"
+                localStorageDescription
             )
         }
 
@@ -121,5 +121,13 @@ actor ConversationRepository {
             fileManager.temporaryDirectory.appendingPathComponent("AIChatStore", isDirectory: true),
             "Temporary storage fallback"
         )
+    }
+
+    private static var localStorageDescription: String {
+        #if os(watchOS)
+        return "Local watch storage"
+        #else
+        return "Local iPhone storage"
+        #endif
     }
 }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+#if os(watchOS)
 @main
 struct AIChat_Watch_AppApp: App {
     @StateObject private var chatStore: ChatStore
@@ -35,3 +36,4 @@ struct AIChat_Watch_AppApp: App {
         }
     }
 }
+#endif

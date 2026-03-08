@@ -1,14 +1,14 @@
+#if COMPANION_APP
 //
-//  ConversationSettingsView.swift
-//  AIChat Watch App
+//  CompanionConversationSettingsView.swift
+//  AIChat
 //
-//  Created by Codex on 2026/3/7.
+//  Created by Codex on 2026/3/8.
 //
 
 import SwiftUI
 
-#if os(watchOS)
-struct ConversationSettingsView: View {
+struct CompanionConversationSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -18,12 +18,12 @@ struct ConversationSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section("Conversation") {
-                    TextField("Title", text: $draftTitle)
+            Form {
+                Section("会话") {
+                    TextField("标题", text: $draftTitle)
                         .disabled(chatStore.isReadOnlyMode)
 
-                    Button("Save Title") {
+                    Button("保存标题") {
                         Task {
                             await chatStore.renameConversation(id: conversationID, title: draftTitle)
                             dismiss()
@@ -31,7 +31,7 @@ struct ConversationSettingsView: View {
                     }
                     .disabled(chatStore.isReadOnlyMode || draftTitle.trimmed.isEmpty)
 
-                    Button("Clear Messages", role: .destructive) {
+                    Button("清空消息", role: .destructive) {
                         Task {
                             await chatStore.clearConversation(id: conversationID)
                             dismiss()
@@ -40,7 +40,7 @@ struct ConversationSettingsView: View {
                     .disabled(chatStore.isReadOnlyMode)
                 }
 
-                Section("Runtime") {
+                Section("运行时") {
                     LabeledContent("Backend", value: chatStore.configuration.backendSummary)
                     LabeledContent("Storage", value: chatStore.storageDescription)
                     LabeledContent("Sync", value: chatStore.syncStatusDescription)
@@ -51,7 +51,7 @@ struct ConversationSettingsView: View {
                     let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
                     Section("AI") {
-                        LabeledContent("Model", value: AIModelCatalog.displayName(for: aiConfiguration.model))
+                        LabeledContent("模型", value: AIModelCatalog.displayName(for: aiConfiguration.model))
                         LabeledContent("Thinking", value: aiConfiguration.thinkingIntensity.displayName)
                         LabeledContent("Prompt", value: aiConfiguration.systemPromptMode.displayName)
 
@@ -64,8 +64,8 @@ struct ConversationSettingsView: View {
                     }
                 }
 
-                Section("Danger Zone") {
-                    Button("Delete Conversation", role: .destructive) {
+                Section("危险操作") {
+                    Button("删除会话", role: .destructive) {
                         Task {
                             await chatStore.deleteConversation(id: conversationID)
                             dismiss()
@@ -74,8 +74,15 @@ struct ConversationSettingsView: View {
                     .disabled(chatStore.isReadOnlyMode)
                 }
             }
-            .navigationTitle("Manage Chat")
+            .navigationTitle("会话设置")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") {
+                        dismiss()
+                    }
+                }
+            }
             .onAppear {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
             }

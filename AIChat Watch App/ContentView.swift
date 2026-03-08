@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+#if os(watchOS)
 struct ContentView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @State private var navigationPath: [UUID] = []
@@ -23,3 +24,4 @@ struct ContentView: View {
         }
     }
 }
+#endif

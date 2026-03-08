@@ -9,6 +9,7 @@
 - Gemini thinking 摘要展示与会话级思考强度切换
 - 会话内快速模型切换，支持 `Gemini 3 Flash` / `Gemini 3.1 Pro`
 - 可切换 `Direct Gemini` 和 `Relay Gateway`
+- 新增 `AIChat Relay` macOS 原生桌面服务端，带 UI、日志、LAN 地址展示和一键启动
 - 为未来 iPhone 伴生端准备的共享存储与 `WatchConnectivity` 同步桥
 
 ## 目录
@@ -25,6 +26,8 @@
   Xcode 构建配置与本地 secrets
 - `relay`
   一个最小可运行的 Node relay 示例
+- `AIChat Relay`
+  macOS 原生 relay app，推荐本地开发和自托管时直接使用
 
 ## 本地配置
 
@@ -73,9 +76,24 @@ xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS" bu
 xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS Simulator" build-for-testing
 ```
 
+构建 macOS relay：
+
+```bash
+xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build
+```
+
 ## Relay
 
-中继示例见 `relay/server.mjs` 和 `relay/README.md`。
+优先使用新的 `AIChat Relay` macOS app。
+
+它提供：
+
+- 原生 SwiftUI 桌面 UI，不依赖单独安装 Node
+- 内置本地 HTTP 服务，直接兼容客户端当前的 `/v1/chat/stream` 协议
+- Bearer 鉴权、Gemini SSE 转发、请求日志、LAN / localhost 地址展示
+- 可直接复制 `Config/Secrets.xcconfig` 片段，把 Watch / iPhone 客户端切到 relay
+
+Node 中继示例仍保留在 `relay/server.mjs` 和 `relay/README.md`，适合作为无 UI 的备用方案。
 
 它做三件事：
 

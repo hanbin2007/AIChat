@@ -5,6 +5,7 @@
 //  Created by Codex on 2026/3/7.
 //
 
+#if os(watchOS)
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -292,13 +293,7 @@ struct ConversationDetailView: View {
             }
 
             HStack(spacing: hasAttachments ? ComposerLayout.compactInputRowSpacing : ComposerLayout.regularInputRowSpacing) {
-                TextFieldLink(prompt: Text("Ask Gemini")) {
-                    Text(draftText.nonEmptyTrimmed ?? "Ask Gemini")
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                } onSubmit: { submittedText in
-                    chatStore.updateDraftText(submittedText, for: conversationID)
-                }
+                TextField("Ask Gemini", text: draftTextBinding())
                 .frame(maxWidth: .infinity, minHeight: inputRowHeight, alignment: .leading)
                 .accessibilityLabel("Compose message")
                 .disabled(voiceRecorder.isRecording || isTranscribing)
@@ -579,6 +574,17 @@ struct ConversationDetailView: View {
 
     private func isPredominantlyVertical(_ translation: CGSize) -> Bool {
         abs(translation.height) > abs(translation.width)
+    }
+
+    private func draftTextBinding() -> Binding<String> {
+        Binding(
+            get: {
+                chatStore.draftText(for: conversationID)
+            },
+            set: { newValue in
+                chatStore.updateDraftText(newValue, for: conversationID)
+            }
+        )
     }
 }
 
@@ -883,7 +889,11 @@ private struct ConversationDetailPreviewContainer: View {
     }
 }
 
-#Preview("Conversation Detail") {
-    ConversationDetailPreviewContainer()
+struct ConversationDetailView_Previews: PreviewProvider {
+    static var previews: some View {
+        ConversationDetailPreviewContainer()
+            .previewDisplayName("Conversation Detail")
+    }
 }
+#endif
 #endif

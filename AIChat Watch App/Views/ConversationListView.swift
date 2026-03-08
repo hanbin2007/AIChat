@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+#if os(watchOS)
 struct ConversationListView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
@@ -154,6 +155,7 @@ struct ConversationListView: View {
         )
     }
 }
+#endif
 
 private struct ConversationRowView: View {
     let conversation: ConversationThread
