@@ -116,7 +116,7 @@ struct ConversationDetailView: View {
             }
         }
         .confirmationDialog("Thinking Mode", isPresented: $isShowingThinkingPicker) {
-            ForEach(AIThinkingIntensity.allCases) { intensity in
+            ForEach(chatStore.availableThinkingIntensities(for: conversationID)) { intensity in
                 Button(intensity.displayName) {
                     Task {
                         await chatStore.updateThinkingIntensity(intensity, for: conversationID)
@@ -198,7 +198,7 @@ struct ConversationDetailView: View {
             Text(
                 chatStore.isReadOnlyMode ?
                 "你现在可以查看历史消息。完成离线激活后，才能在手表上发新消息和传图。" :
-                "Ask a question, record a voice prompt that will be transcribed automatically, or attach a photo for visual analysis."
+                "Ask a question, record a voice prompt, review the transcript before sending, or attach a photo for visual analysis."
             )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -251,7 +251,7 @@ struct ConversationDetailView: View {
             isTranscribing == false &&
             voiceRecorder.isInteractive &&
             hasDraftContent
-        let voiceButtonLabel = voiceRecorder.isRecording ? "Stop & Send" : "Voice"
+        let voiceButtonLabel = voiceRecorder.isRecording ? "Stop & Transcribe" : "Voice"
 
         return VStack(alignment: .leading, spacing: hasAttachments ? ComposerLayout.compactComposerSpacing : ComposerLayout.regularComposerSpacing) {
             compactControlBar(
@@ -343,7 +343,7 @@ struct ConversationDetailView: View {
                         hasDraftContent
                     )
                 )
-                .accessibilityLabel(voiceRecorder.isRecording ? "Stop recording and send" : "Record voice message")
+                .accessibilityLabel(voiceRecorder.isRecording ? "Stop recording and transcribe" : "Record voice message")
 
                 PhotosPicker(
                     selection: $selectedPhotoItems,

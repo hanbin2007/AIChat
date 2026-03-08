@@ -151,7 +151,7 @@ struct RelayAIClient: AIStreamingService {
 
         return RelayChatRequest(
             model: runtimeConfiguration.model,
-            systemPrompt: AIContextBuilder.systemPrompt,
+            systemPrompt: AIContextBuilder.systemPrompt(for: runtimeConfiguration),
             thinkingIntensity: runtimeConfiguration.thinkingIntensity,
             maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
             includeThoughts: true,
@@ -194,7 +194,7 @@ struct RelayAIClient: AIStreamingService {
 
 struct RelayChatRequest: Codable, Equatable {
     var model: String
-    var systemPrompt: String
+    var systemPrompt: String?
     var thinkingIntensity: AIThinkingIntensity
     var maxOutputTokens: Int
     var includeThoughts: Bool

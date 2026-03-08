@@ -8,12 +8,22 @@
 import Foundation
 
 enum AIContextBuilder {
-    static let systemPrompt =
+    static let conciseSystemPrompt =
         """
         You are AIChat on Apple Watch.
         Keep answers clear, concise, and easy to scan on a small screen unless the user explicitly asks for detail.
         If a user turn includes audio attachments, treat the speech in the audio as the user's request and answer it directly instead of only describing or transcribing the audio.
         """
+
+    static func systemPrompt(for configuration: ConversationAIConfiguration) -> String? {
+        switch configuration.systemPromptMode {
+        case .concise:
+            return conciseSystemPrompt
+        case .default:
+            // Match AI Studio's out-of-box behavior by not sending extra system instructions.
+            return nil
+        }
+    }
 
     static func selectedMessages(
         from messages: [ChatMessage],

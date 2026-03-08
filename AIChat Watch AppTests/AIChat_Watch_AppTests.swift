@@ -113,10 +113,39 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let requestBody = client.makeRequestBody(for: conversation)
 
+        XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextBuilder.conciseSystemPrompt)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
         XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
+    }
+
+    func testDefaultPromptModeOmitsSystemInstruction() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Summarize this thread")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3.1-pro-preview",
+                thinkingIntensity: .balanced,
+                systemPromptMode: .default
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertNil(requestBody.systemInstruction)
     }
 
     func testGemini25RequestUsesThinkingBudget() {
@@ -147,6 +176,35 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, 8_192)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
         XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
+    }
+
+    func testGemini31ProExtremeUsesDynamicMaximumThinking() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Think as deeply as possible")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3.1-pro-preview",
+                thinkingIntensity: .extreme
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertNil(requestBody.generationConfig.thinkingConfig?.thinkingLevel)
+        XCTAssertNil(requestBody.generationConfig.thinkingConfig?.thinkingBudget)
+        XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
     }
 
     func testNormalizedDeltaHandlesCumulativeChunks() {
@@ -184,6 +242,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let request = client.makeRelayRequest(for: conversation)
 
         XCTAssertEqual(request.maxOutputTokens, 65_536)
+        XCTAssertEqual(request.systemPrompt, AIContextBuilder.conciseSystemPrompt)
     }
 
     func testModelCatalogUsesDesktopScaleOutputBudgetForSupportedGeminiModels() {
@@ -191,6 +250,21 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-3.1-pro-preview"), 65_536)
         XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "gemini-2.5-flash"), 65_536)
         XCTAssertEqual(AIModelCatalog.maxOutputTokens(for: "custom-model"), 8_192)
+    }
+
+    func testModelCatalogLimitsExtremeThinkingToGemini31Pro() {
+        XCTAssertEqual(
+            AIModelCatalog.availableThinkingIntensities(for: "gemini-3.1-pro-preview"),
+            [.fast, .balanced, .deep, .extreme]
+        )
+        XCTAssertEqual(
+            AIModelCatalog.availableThinkingIntensities(for: "gemini-3-flash-preview"),
+            [.fast, .balanced, .deep]
+        )
+        XCTAssertEqual(
+            AIModelCatalog.normalizedThinkingIntensity(.extreme, for: "gemini-3-flash-preview"),
+            .deep
+        )
     }
 
     func testGeminiCompletionErrorRequiresTerminalFinishReason() {
@@ -251,7 +325,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordedAudioIsTranscribedIntoDisplayedAndForwardedText() async throws {
+    func testRecordedAudioIsTranscribedIntoDraftWithoutSending() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
             backendMode: .direct,
             geminiAPIKey: "test",
@@ -274,6 +349,16 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
         let conversationID = await store.createConversation()
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
@@ -284,11 +369,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         await store.sendRecordedAudio(audioAttachment, in: conversationID)
 
         let conversation = try XCTUnwrap(store.conversation(id: conversationID))
-        XCTAssertEqual(conversation.messages.count, 2)
-        XCTAssertEqual(conversation.messages[0].role, .user)
-        XCTAssertEqual(conversation.messages[0].text, "Book me a train to Hangzhou tomorrow morning")
-        XCTAssertTrue(conversation.messages[0].attachments.isEmpty)
-        XCTAssertEqual(conversation.messages[1].text, "Echo: Book me a train to Hangzhou tomorrow morning")
+        XCTAssertTrue(conversation.messages.isEmpty)
+        XCTAssertEqual(store.draftText(for: conversationID), "Book me a train to Hangzhou tomorrow morning")
         XCTAssertNil(store.errorMessage(for: conversationID))
     }
 }

@@ -214,6 +214,11 @@ final class ChatStore: ObservableObject {
         )
     }
 
+    func availableThinkingIntensities(for conversationID: UUID) -> [AIThinkingIntensity] {
+        let configuration = aiConfiguration(for: conversationID)
+        return AIModelCatalog.availableThinkingIntensities(for: configuration.model)
+    }
+
     func updateModel(_ model: String, for conversationID: UUID) async {
         if let activationMessage = activationFailureMessage(for: model) {
             conversationErrors[conversationID] = activationMessage
@@ -222,6 +227,10 @@ final class ChatStore: ObservableObject {
 
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.model = model
+            configuration.thinkingIntensity = AIModelCatalog.normalizedThinkingIntensity(
+                configuration.thinkingIntensity,
+                for: model
+            )
         }
     }
 
@@ -232,7 +241,21 @@ final class ChatStore: ObservableObject {
         }
 
         await updateAIConfiguration(for: conversationID) { configuration in
-            configuration.thinkingIntensity = thinkingIntensity
+            configuration.thinkingIntensity = AIModelCatalog.normalizedThinkingIntensity(
+                thinkingIntensity,
+                for: configuration.model
+            )
+        }
+    }
+
+    func updateSystemPromptMode(_ systemPromptMode: AISystemPromptMode, for conversationID: UUID) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.systemPromptMode = systemPromptMode
         }
     }
 
@@ -404,11 +427,9 @@ final class ChatStore: ObservableObject {
             )
 
             transcribingConversationIDs.remove(conversationID)
-            await send(
-                draft: ConversationDraft(text: transcription.text, attachments: []),
-                in: conversationID,
-                clearStoredDraft: false
-            )
+            var draft = drafts[conversationID] ?? ConversationDraft()
+            draft.text = transcription.text
+            drafts[conversationID] = draft
         } catch {
             transcribingConversationIDs.remove(conversationID)
             conversationErrors[conversationID] = error.localizedDescription

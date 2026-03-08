@@ -25,10 +25,17 @@ function thinkingConfigFor(model, thinkingIntensity = "balanced", includeThought
   const normalizedIntensity = typeof thinkingIntensity === "string" ? thinkingIntensity : "balanced";
 
   if (String(model || "").startsWith("gemini-3")) {
+    if (String(model || "").startsWith("gemini-3.1-pro") && normalizedIntensity === "extreme") {
+      return {
+        includeThoughts
+      };
+    }
+
     const thinkingLevelByIntensity = {
       fast: "minimal",
       balanced: "medium",
-      deep: "high"
+      deep: "high",
+      extreme: "high"
     };
 
     return {
@@ -40,7 +47,8 @@ function thinkingConfigFor(model, thinkingIntensity = "balanced", includeThought
   const thinkingBudgetByIntensity = {
     fast: 0,
     balanced: 8192,
-    deep: 24576
+    deep: 24576,
+    extreme: -1
   };
 
   return {
@@ -59,9 +67,11 @@ function maxOutputTokensForModel(model = "") {
 
 function toGeminiRequest(body) {
   return {
-    systemInstruction: {
-      parts: [{ text: body.systemPrompt }]
-    },
+    systemInstruction: body.systemPrompt
+      ? {
+          parts: [{ text: body.systemPrompt }]
+        }
+      : undefined,
     contents: body.messages.map((message) => {
       const parts = [];
 

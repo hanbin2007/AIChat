@@ -139,7 +139,7 @@ struct GeminiAPIClient: AIStreamingService {
         let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
 
         return GeminiGenerateContentRequest(
-            systemInstruction: GeminiContent.systemPrompt(AIContextBuilder.systemPrompt),
+            systemInstruction: AIContextBuilder.systemPrompt(for: runtimeConfiguration).map(GeminiContent.systemPrompt),
             contents: contextWindow(from: conversation.messages),
             generationConfig: GeminiGenerationConfig(
                 temperature: 0.65,
@@ -226,7 +226,7 @@ struct GeminiAPIClient: AIStreamingService {
         if AIModelCatalog.usesThinkingLevel(model: runtimeConfiguration.model) {
             return GeminiThinkingConfig(
                 thinkingBudget: nil,
-                thinkingLevel: runtimeConfiguration.thinkingIntensity.gemini3ThinkingLevel,
+                thinkingLevel: runtimeConfiguration.thinkingIntensity.gemini3ThinkingLevel(for: runtimeConfiguration.model),
                 includeThoughts: true
             )
         }
@@ -279,7 +279,7 @@ func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
 }
 
 struct GeminiGenerateContentRequest: Encodable {
-    var systemInstruction: GeminiContent
+    var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
     var generationConfig: GeminiGenerationConfig
 }
@@ -301,7 +301,7 @@ struct GeminiContent: Codable, Equatable {
     var role: String?
     var parts: [GeminiPart]
 
-    static func systemPrompt(_ text: String) -> GeminiContent {
+    nonisolated static func systemPrompt(_ text: String) -> GeminiContent {
         GeminiContent(role: nil, parts: [GeminiPart(text: text, inlineData: nil)])
     }
 }
@@ -311,7 +311,7 @@ struct GeminiPart: Codable, Equatable {
     var inlineData: GeminiInlineData?
     var thought: Bool?
 
-    init(
+    nonisolated init(
         text: String?,
         inlineData: GeminiInlineData?,
         thought: Bool? = nil

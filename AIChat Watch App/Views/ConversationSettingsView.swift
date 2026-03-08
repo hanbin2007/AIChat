@@ -52,6 +52,14 @@ struct ConversationSettingsView: View {
                     Section("AI") {
                         LabeledContent("Model", value: AIModelCatalog.displayName(for: aiConfiguration.model))
                         LabeledContent("Thinking", value: aiConfiguration.thinkingIntensity.displayName)
+                        LabeledContent("Prompt", value: aiConfiguration.systemPromptMode.displayName)
+
+                        Picker("System Prompt", selection: systemPromptModeBinding(for: conversation.id)) {
+                            ForEach(AISystemPromptMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .disabled(chatStore.isReadOnlyMode)
                     }
                 }
 
@@ -71,5 +79,18 @@ struct ConversationSettingsView: View {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
             }
         }
+    }
+
+    private func systemPromptModeBinding(for conversationID: UUID) -> Binding<AISystemPromptMode> {
+        Binding(
+            get: {
+                chatStore.aiConfiguration(for: conversationID).systemPromptMode
+            },
+            set: { newValue in
+                Task {
+                    await chatStore.updateSystemPromptMode(newValue, for: conversationID)
+                }
+            }
+        )
     }
 }

@@ -31,10 +31,29 @@ nonisolated enum ChatMessageStatus: String, Codable, Hashable {
     case failed
 }
 
+nonisolated enum AISystemPromptMode: String, Codable, CaseIterable, Hashable, Identifiable {
+    case concise
+    case `default`
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .concise:
+            return "简洁"
+        case .default:
+            return "默认"
+        }
+    }
+}
+
 nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, Identifiable {
     case fast
     case balanced
     case deep
+    case extreme
 
     var id: String {
         rawValue
@@ -48,6 +67,8 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
             return "Balanced"
         case .deep:
             return "Deep"
+        case .extreme:
+            return "Extreme"
         }
     }
 
@@ -59,10 +80,12 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
             return "MID"
         case .deep:
             return "HI"
+        case .extreme:
+            return "MAX"
         }
     }
 
-    var gemini3ThinkingLevel: String {
+    func gemini3ThinkingLevel(for model: String) -> String? {
         switch self {
         case .fast:
             return "minimal"
@@ -70,6 +93,8 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
             return "medium"
         case .deep:
             return "high"
+        case .extreme:
+            return AIModelCatalog.supportsExtremeThinking(model: model) ? nil : "high"
         }
     }
 
@@ -81,21 +106,45 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
             return 8_192
         case .deep:
             return 24_576
+        case .extreme:
+            return -1
         }
     }
-
 }
 
 nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
     var model: String
     var thinkingIntensity: AIThinkingIntensity
+    var systemPromptMode: AISystemPromptMode
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case thinkingIntensity
+        case systemPromptMode
+    }
 
     init(
         model: String,
-        thinkingIntensity: AIThinkingIntensity = .balanced
+        thinkingIntensity: AIThinkingIntensity = .balanced,
+        systemPromptMode: AISystemPromptMode = .concise
     ) {
         self.model = model
         self.thinkingIntensity = thinkingIntensity
+        self.systemPromptMode = systemPromptMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.model = try container.decode(String.self, forKey: .model)
+        self.thinkingIntensity = try container.decodeIfPresent(AIThinkingIntensity.self, forKey: .thinkingIntensity) ?? .balanced
+        self.systemPromptMode = try container.decodeIfPresent(AISystemPromptMode.self, forKey: .systemPromptMode) ?? .concise
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(model, forKey: .model)
+        try container.encode(thinkingIntensity, forKey: .thinkingIntensity)
+        try container.encode(systemPromptMode, forKey: .systemPromptMode)
     }
 }
 

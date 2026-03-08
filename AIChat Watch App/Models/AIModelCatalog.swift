@@ -26,7 +26,7 @@ nonisolated struct AIModelOption: Identifiable, Hashable {
     }
 }
 
-enum AIModelCatalog {
+nonisolated enum AIModelCatalog {
     static let builtInOptions: [AIModelOption] = LicensedModelCatalog.supportedModels.map { definition in
         AIModelOption(
             id: definition.id,
@@ -70,6 +70,23 @@ enum AIModelCatalog {
 
     static func usesThinkingLevel(model: String) -> Bool {
         model.hasPrefix("gemini-3")
+    }
+
+    static func supportsExtremeThinking(model: String) -> Bool {
+        model.hasPrefix("gemini-3.1-pro")
+    }
+
+    static func availableThinkingIntensities(for model: String) -> [AIThinkingIntensity] {
+        let standardOptions: [AIThinkingIntensity] = [.fast, .balanced, .deep]
+        return supportsExtremeThinking(model: model) ? standardOptions + [.extreme] : standardOptions
+    }
+
+    static func normalizedThinkingIntensity(_ intensity: AIThinkingIntensity, for model: String) -> AIThinkingIntensity {
+        guard intensity == .extreme, supportsExtremeThinking(model: model) == false else {
+            return intensity
+        }
+
+        return .deep
     }
 
     static func maxOutputTokens(for model: String) -> Int {
