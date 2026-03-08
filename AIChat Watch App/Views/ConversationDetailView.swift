@@ -52,7 +52,7 @@ struct ConversationDetailView: View {
                         messagesView(conversation: conversation)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                        if chatStore.isReadOnlyMode || isComposerExpanded {
+                        if isComposerExpanded {
                             Group {
                                 if chatStore.isReadOnlyMode {
                                     lockedComposerView
@@ -67,7 +67,7 @@ struct ConversationDetailView: View {
                     .padding(.horizontal, 6)
                     .padding(.bottom, ComposerLayout.containerBottomPadding)
 
-                    if isComposerExpanded == false, chatStore.isReadOnlyMode == false {
+                    if isComposerExpanded == false {
                         collapsedComposerButton
                             .padding(.trailing, 10)
                             .padding(.bottom, ComposerLayout.collapsedButtonBottomPadding)
@@ -405,6 +405,19 @@ struct ConversationDetailView: View {
         ) {
             isShowingActivationCenter = true
         }
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    guard isPredominantlyVertical(value.translation) else {
+                        return
+                    }
+
+                    if value.translation.height > 24 {
+                        collapseComposer()
+                    }
+                }
+        )
     }
 
     private var collapsedComposerButton: some View {
@@ -552,10 +565,6 @@ struct ConversationDetailView: View {
     }
 
     private func collapseComposer() {
-        guard chatStore.isReadOnlyMode == false else {
-            return
-        }
-
         guard isComposerExpanded else {
             return
         }

@@ -11,8 +11,24 @@ import Foundation
 nonisolated enum OfflineActivation {
     static let requestWindow: TimeInterval = 30 * 60
     static let requestVersion: UInt8 = 1
-    static let licenseVersion: UInt8 = 1
-    static let licenseTagLength = 10
+    static let legacyLicenseVersion: UInt8 = 1
+    static let compactLicenseVersionMarker: UInt8 = 0b0100_0000
+    static let compactLicenseVersionMask: UInt8 = 0b1100_0000
+    static let compactLicenseSecondMask: UInt8 = 0b0011_1111
+    static let legacyLicenseTagLength = 10
+    static let compactLicenseTagLength = 6
+    static let compactActivationPayloadLength = 21
+    static let compactActivationCodeLength = 46
+
+    private static let compactEpoch: Date = {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = 2025
+        components.month = 1
+        components.day = 1
+        return components.date ?? Date(timeIntervalSince1970: 1_735_689_600)
+    }()
 
     // Replace this seed before shipping. The same seed must remain in the
     // watch verifier and the offline key generator.
@@ -53,7 +69,7 @@ nonisolated enum OfflineActivation {
     }
 
     static func decodeRequestCode(_ rawCode: String) throws -> OfflineActivationRequest {
-        let normalized = normalize(rawCode)
+        let normalized = normalizeRequestCode(rawCode)
         let data = try CrockfordBase32.decode(normalized)
         var reader = ActivationBinaryReader(data: data)
 
@@ -90,62 +106,28 @@ nonisolated enum OfflineActivation {
         policy: OfflineActivationPolicy
     ) throws -> String {
         let request = try decodeRequestCode(requestCode)
-        let payload = try encodeLicensePayload(
+        let payload = try encodeCompactLicensePayload(
             deviceToken: request.deviceToken,
             requestIssuedAt: request.issuedAt,
             policy: policy
         )
-        let tag = authenticationTag(for: payload)
-        return format(CrockfordBase32.encode(payload + tag), groupSize: 5)
+        let tag = compactAuthenticationTag(for: payload)
+        return LetterBase26.encode(
+            payload + tag,
+            paddedToLength: compactActivationCodeLength
+        )
     }
 
     static func decodeActivationCode(_ rawCode: String) throws -> OfflineActivationLicense {
-        let normalized = normalize(rawCode)
-        let data = try CrockfordBase32.decode(normalized)
+        let compactNormalized = normalizeActivationCode(rawCode)
+        let shouldTryCompact = rawCode.contains(where: \.isNumber) == false &&
+            compactNormalized.count == compactActivationCodeLength
 
-        guard data.count == 35 else {
-            throw OfflineActivationError.invalidActivationCode
+        if shouldTryCompact {
+            return try decodeCompactActivationCode(compactNormalized)
         }
 
-        let payload = Data(data.prefix(25))
-        let actualTag = Data(data.suffix(licenseTagLength))
-        let expectedTag = authenticationTag(for: payload)
-        guard actualTag == expectedTag else {
-            throw OfflineActivationError.invalidSignature
-        }
-
-        var reader = ActivationBinaryReader(data: payload)
-        let version = try reader.readUInt8()
-        guard version == licenseVersion else {
-            throw OfflineActivationError.unsupportedVersion
-        }
-
-        let deviceToken = try reader.readUInt64()
-        let requestIssuedAt = date(from: try reader.readUInt32())
-        let validFrom = date(from: try reader.readUInt32())
-        let rawValidUntil = try reader.readUInt32()
-        let rawMessageLimit = try reader.readUInt16()
-        let modelMask = try reader.readUInt16()
-
-        guard reader.isAtEnd else {
-            throw OfflineActivationError.invalidActivationCode
-        }
-
-        let validUntil = rawValidUntil == 0 ? nil : date(from: rawValidUntil)
-        let messageLimit = rawMessageLimit == 0 ? nil : Int(rawMessageLimit)
-
-        guard validUntil == nil || validUntil! >= validFrom else {
-            throw OfflineActivationError.invalidActivationCode
-        }
-
-        return OfflineActivationLicense(
-            deviceToken: deviceToken,
-            requestIssuedAt: requestIssuedAt,
-            validFrom: validFrom,
-            validUntil: validUntil,
-            messageLimit: messageLimit,
-            modelMask: modelMask
-        )
+        return try decodeLegacyActivationCode(rawCode)
     }
 
     static func activate(
@@ -157,7 +139,9 @@ nonisolated enum OfflineActivation {
         let license = try decodeActivationCode(rawCode)
         try validateForActivation(license: license, deviceToken: deviceToken, now: now)
 
-        let fingerprint = Data(SHA256.hash(data: Data(normalize(rawCode).utf8))).hexString
+        let fingerprint = Data(
+            SHA256.hash(data: Data(normalizeActivationInput(rawCode).utf8))
+        ).hexString
         let preservedUsage = currentState?.activationCodeFingerprint == fingerprint ? currentState?.usedMessageCount ?? 0 : 0
 
         return OfflineActivationState(
@@ -296,7 +280,240 @@ nonisolated enum OfflineActivation {
         }
     }
 
+    static func normalizeRequestCode(_ rawCode: String) -> String {
+        normalizeLegacyBase32Code(rawCode)
+    }
+
+    static func normalizeActivationCode(_ rawCode: String) -> String {
+        rawCode
+            .uppercased()
+            .filter(\.isLetter)
+    }
+
+    static func normalizeActivationInput(_ rawCode: String) -> String {
+        if rawCode.contains(where: \.isNumber) {
+            return normalizeLegacyBase32Code(rawCode)
+        }
+
+        return normalizeActivationCode(rawCode)
+    }
+
+    static func formatForDisplay(_ rawCode: String, groupSize: Int = 5) -> String {
+        format(normalizeRequestCode(rawCode), groupSize: groupSize)
+    }
+
+    static func formatActivationCodeForDisplay(_ rawCode: String) -> String {
+        if rawCode.contains(where: \.isNumber) {
+            return format(normalizeLegacyBase32Code(rawCode), groupSize: 5)
+        }
+
+        return normalizeActivationCode(rawCode)
+    }
+
     static func normalize(_ rawCode: String) -> String {
+        normalizeRequestCode(rawCode)
+    }
+
+    private static func decodeCompactActivationCode(_ normalizedCode: String) throws -> OfflineActivationLicense {
+        let data = try LetterBase26.decode(
+            normalizedCode,
+            outputByteCount: compactActivationPayloadLength + compactLicenseTagLength
+        )
+
+        let payload = Data(data.prefix(compactActivationPayloadLength))
+        let actualTag = Data(data.suffix(compactLicenseTagLength))
+        let expectedTag = compactAuthenticationTag(for: payload)
+        guard actualTag == expectedTag else {
+            throw OfflineActivationError.invalidSignature
+        }
+
+        var reader = ActivationBinaryReader(data: payload)
+        let versionAndSecond = try reader.readUInt8()
+        let requestSecond = try compactSecond(from: versionAndSecond)
+
+        let deviceToken = try reader.readUInt64()
+        let requestIssuedAt = compactDate(
+            from: try reader.readUInt24(),
+            second: requestSecond
+        )
+        let validFromValue = try reader.readUInt24()
+        let validFrom = compactDate(from: validFromValue)
+        let rawValidUntilDelta = try reader.readUInt24()
+        let rawMessageLimit = try reader.readUInt16()
+        let modelMask = UInt16(try reader.readUInt8())
+
+        guard reader.isAtEnd else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        let validUntil: Date?
+        if rawValidUntilDelta == 0 {
+            validUntil = nil
+        } else {
+            let validUntilValue = validFromValue + rawValidUntilDelta - 1
+            validUntil = compactDate(from: validUntilValue)
+        }
+
+        let messageLimit = rawMessageLimit == 0 ? nil : Int(rawMessageLimit)
+
+        guard validUntil == nil || validUntil! >= validFrom else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        return OfflineActivationLicense(
+            deviceToken: deviceToken,
+            requestIssuedAt: requestIssuedAt,
+            validFrom: validFrom,
+            validUntil: validUntil,
+            messageLimit: messageLimit,
+            modelMask: modelMask
+        )
+    }
+
+    private static func decodeLegacyActivationCode(_ rawCode: String) throws -> OfflineActivationLicense {
+        let normalized = normalizeLegacyBase32Code(rawCode)
+        let data = try CrockfordBase32.decode(normalized)
+
+        guard data.count == 35 else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        let payload = Data(data.prefix(25))
+        let actualTag = Data(data.suffix(legacyLicenseTagLength))
+        let expectedTag = legacyAuthenticationTag(for: payload)
+        guard actualTag == expectedTag else {
+            throw OfflineActivationError.invalidSignature
+        }
+
+        var reader = ActivationBinaryReader(data: payload)
+        let version = try reader.readUInt8()
+        guard version == legacyLicenseVersion else {
+            throw OfflineActivationError.unsupportedVersion
+        }
+
+        let deviceToken = try reader.readUInt64()
+        let requestIssuedAt = date(from: try reader.readUInt32())
+        let validFrom = date(from: try reader.readUInt32())
+        let rawValidUntil = try reader.readUInt32()
+        let rawMessageLimit = try reader.readUInt16()
+        let modelMask = try reader.readUInt16()
+
+        guard reader.isAtEnd else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        let validUntil = rawValidUntil == 0 ? nil : date(from: rawValidUntil)
+        let messageLimit = rawMessageLimit == 0 ? nil : Int(rawMessageLimit)
+
+        guard validUntil == nil || validUntil! >= validFrom else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        return OfflineActivationLicense(
+            deviceToken: deviceToken,
+            requestIssuedAt: requestIssuedAt,
+            validFrom: validFrom,
+            validUntil: validUntil,
+            messageLimit: messageLimit,
+            modelMask: modelMask
+        )
+    }
+
+    private static func encodeCompactLicensePayload(
+        deviceToken: UInt64,
+        requestIssuedAt: Date,
+        policy: OfflineActivationPolicy
+    ) throws -> Data {
+        if let validUntil = policy.validUntil, validUntil < policy.validFrom {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        if let messageLimit = policy.messageLimit, messageLimit <= 0 || messageLimit > Int(UInt16.max) {
+            throw OfflineActivationError.invalidMessageLimit
+        }
+
+        let requestIssuedAtValue = try compactMinuteValue(from: requestIssuedAt)
+        let requestSecond = compactSecondValue(from: requestIssuedAt)
+        let validFromValue = try compactMinuteValue(from: policy.validFrom)
+        let validUntilDeltaValue: UInt32
+        if let validUntil = policy.validUntil {
+            let validUntilValue = try compactMinuteValue(from: validUntil)
+            guard validUntilValue >= validFromValue else {
+                throw OfflineActivationError.invalidActivationCode
+            }
+
+            let delta = validUntilValue - validFromValue
+            guard delta < 0xFF_FFFF else {
+                throw OfflineActivationError.invalidActivationCode
+            }
+
+            validUntilDeltaValue = delta + 1
+        } else {
+            validUntilDeltaValue = 0
+        }
+
+        let modelMask = LicensedModelCatalog.mask(for: policy.allowedModelIDs)
+        guard modelMask <= UInt16(UInt8.max) else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        var writer = ActivationBinaryWriter()
+        writer.append(compactVersionByte(with: requestSecond))
+        writer.append(deviceToken)
+        writer.appendUInt24(requestIssuedAtValue)
+        writer.appendUInt24(validFromValue)
+        writer.appendUInt24(validUntilDeltaValue)
+        writer.append(UInt16(policy.messageLimit ?? 0))
+        writer.append(UInt8(truncatingIfNeeded: modelMask))
+        return writer.data
+    }
+
+    private static func legacyAuthenticationTag(for payload: Data) -> Data {
+        let mac = HMAC<SHA256>.authenticationCode(for: payload, using: signingKey)
+        return Data(mac.prefix(legacyLicenseTagLength))
+    }
+
+    private static func compactAuthenticationTag(for payload: Data) -> Data {
+        let mac = HMAC<SHA256>.authenticationCode(for: payload, using: signingKey)
+        return Data(mac.prefix(compactLicenseTagLength))
+    }
+
+    private static func compactMinuteValue(from date: Date) throws -> UInt32 {
+        let minuteOffset = Int(floor(date.timeIntervalSince(compactEpoch) / 60))
+        guard minuteOffset >= 0, minuteOffset <= 0xFF_FFFF else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        return UInt32(minuteOffset)
+    }
+
+    private static func compactSecondValue(from date: Date) -> UInt8 {
+        let secondsSinceUnixEpoch = max(0, Int(date.timeIntervalSince1970.rounded(.down)))
+        return UInt8(secondsSinceUnixEpoch % 60)
+    }
+
+    private static func compactVersionByte(with requestSecond: UInt8) -> UInt8 {
+        compactLicenseVersionMarker | requestSecond
+    }
+
+    private static func compactSecond(from versionByte: UInt8) throws -> UInt8 {
+        guard versionByte & compactLicenseVersionMask == compactLicenseVersionMarker else {
+            throw OfflineActivationError.unsupportedVersion
+        }
+
+        let second = versionByte & compactLicenseSecondMask
+        guard second < 60 else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        return second
+    }
+
+    private static func compactDate(from minuteValue: UInt32, second: UInt8 = 0) -> Date {
+        compactEpoch.addingTimeInterval(TimeInterval(minuteValue) * 60 + TimeInterval(second))
+    }
+
+    private static func normalizeLegacyBase32Code(_ rawCode: String) -> String {
         rawCode
             .uppercased()
             .filter { $0.isLetter || $0.isNumber }
@@ -313,39 +530,6 @@ nonisolated enum OfflineActivation {
             .reduce(into: String()) { partialResult, character in
                 partialResult.append(character)
             }
-    }
-
-    static func formatForDisplay(_ rawCode: String, groupSize: Int = 5) -> String {
-        format(normalize(rawCode), groupSize: groupSize)
-    }
-
-    private static func encodeLicensePayload(
-        deviceToken: UInt64,
-        requestIssuedAt: Date,
-        policy: OfflineActivationPolicy
-    ) throws -> Data {
-        if let validUntil = policy.validUntil, validUntil < policy.validFrom {
-            throw OfflineActivationError.invalidActivationCode
-        }
-
-        if let messageLimit = policy.messageLimit, messageLimit <= 0 || messageLimit > Int(UInt16.max) {
-            throw OfflineActivationError.invalidMessageLimit
-        }
-
-        var writer = ActivationBinaryWriter()
-        writer.append(licenseVersion)
-        writer.append(deviceToken)
-        writer.append(timestamp(from: requestIssuedAt))
-        writer.append(timestamp(from: policy.validFrom))
-        writer.append(timestamp(from: policy.validUntil))
-        writer.append(UInt16(policy.messageLimit ?? 0))
-        writer.append(LicensedModelCatalog.mask(for: policy.allowedModelIDs))
-        return writer.data
-    }
-
-    private static func authenticationTag(for payload: Data) -> Data {
-        let mac = HMAC<SHA256>.authenticationCode(for: payload, using: signingKey)
-        return Data(mac.prefix(licenseTagLength))
     }
 
     private static func timestamp(from date: Date?) -> UInt32 {
@@ -510,6 +694,12 @@ private nonisolated struct ActivationBinaryWriter {
         var value = value.bigEndian
         withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
     }
+
+    mutating func appendUInt24(_ value: UInt32) {
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8(value & 0xFF))
+    }
 }
 
 private nonisolated struct ActivationBinaryReader {
@@ -547,6 +737,13 @@ private nonisolated struct ActivationBinaryReader {
         let data = try read(count: 8)
         return data.reduce(into: UInt64.zero) { partialResult, byte in
             partialResult = (partialResult << 8) | UInt64(byte)
+        }
+    }
+
+    mutating func readUInt24() throws -> UInt32 {
+        let data = try read(count: 3)
+        return data.reduce(into: UInt32.zero) { partialResult, byte in
+            partialResult = (partialResult << 8) | UInt32(byte)
         }
     }
 
@@ -624,6 +821,84 @@ private nonisolated enum CrockfordBase32 {
         }
 
         return output
+    }
+}
+
+private nonisolated enum LetterBase26 {
+    private static let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    private static let values: [Character: UInt8] = {
+        var values: [Character: UInt8] = [:]
+        for (index, character) in alphabet.enumerated() {
+            values[character] = UInt8(index)
+        }
+        return values
+    }()
+
+    static func encode(_ data: Data, paddedToLength length: Int) -> String {
+        guard data.isEmpty == false else {
+            return String(repeating: "A", count: length)
+        }
+
+        var bytes = Array(data)
+        var encodedReversed: [Character] = []
+
+        while bytes.isEmpty == false && bytes.contains(where: { $0 != 0 }) {
+            var quotient: [UInt8] = []
+            quotient.reserveCapacity(bytes.count)
+            var remainder = 0
+
+            for byte in bytes {
+                let accumulator = (remainder << 8) | Int(byte)
+                let digit = accumulator / 26
+                remainder = accumulator % 26
+
+                if quotient.isEmpty == false || digit != 0 {
+                    quotient.append(UInt8(digit))
+                }
+            }
+
+            encodedReversed.append(alphabet[remainder])
+            bytes = quotient
+        }
+
+        let encoded = String(encodedReversed.reversed())
+        return encoded.leftPadding(toLength: length, withPad: "A")
+    }
+
+    static func decode(_ string: String, outputByteCount: Int) throws -> Data {
+        guard string.isEmpty == false else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        var bytes: [UInt8] = []
+
+        for character in string {
+            guard let value = values[character] else {
+                throw OfflineActivationError.invalidActivationCode
+            }
+
+            var carry = Int(value)
+
+            if bytes.isEmpty == false {
+                for index in stride(from: bytes.count - 1, through: 0, by: -1) {
+                    let accumulator = Int(bytes[index]) * 26 + carry
+                    bytes[index] = UInt8(accumulator & 0xFF)
+                    carry = accumulator >> 8
+                }
+            }
+
+            while carry > 0 {
+                bytes.insert(UInt8(carry & 0xFF), at: 0)
+                carry >>= 8
+            }
+        }
+
+        guard bytes.count <= outputByteCount else {
+            throw OfflineActivationError.invalidActivationCode
+        }
+
+        let leadingZeroCount = outputByteCount - bytes.count
+        return Data(repeating: 0, count: leadingZeroCount) + Data(bytes)
     }
 }
 

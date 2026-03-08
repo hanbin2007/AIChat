@@ -147,7 +147,7 @@ struct ActivationCenterView: View {
     }
 
     private func applyActivationCode(_ rawCode: String) async {
-        let normalizedCode = OfflineActivation.normalize(rawCode)
+        let normalizedCode = OfflineActivation.normalizeActivationInput(rawCode)
         guard normalizedCode.isEmpty == false else {
             feedbackMessage = "请输入激活码。"
             return
@@ -158,7 +158,7 @@ struct ActivationCenterView: View {
 
         do {
             try await chatStore.applyActivationCode(normalizedCode)
-            draftActivationCode = OfflineActivation.formatForDisplay(normalizedCode)
+            draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
             refreshRequestCode()
             feedbackMessage = "激活成功，当前 Apple Watch 已解锁发送权限。"
         } catch {

@@ -22,13 +22,16 @@ struct OfflineActivationKeygenView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 requestSection
                 policySection
                 modelsSection
                 actionSection
                 outputSection
                 errorSection
+                }
+                .padding(16)
             }
             .navigationTitle("离线注册机")
             .onChange(of: requestCode) { _ in clearGeneratedState() }
@@ -43,10 +46,15 @@ struct OfflineActivationKeygenView: View {
     }
 
     private var requestSection: some View {
-        Section("手表请求码") {
+        cardSection("手表请求码") {
             TextEditor(text: $requestCode)
                 .frame(minHeight: 88)
                 .font(.system(.body, design: .monospaced))
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                )
 
             if let decodedRequest {
                 LabeledContent("设备码", value: decodedRequest.displayDeviceToken)
@@ -60,7 +68,7 @@ struct OfflineActivationKeygenView: View {
     }
 
     private var policySection: some View {
-        Section("授权策略") {
+        cardSection("授权策略") {
             DatePicker("生效时间", selection: $validFrom)
 
             Toggle("包含到期时间", isOn: $hasExpiry)
@@ -78,7 +86,7 @@ struct OfflineActivationKeygenView: View {
     }
 
     private var modelsSection: some View {
-        Section("模型范围") {
+        cardSection("模型范围") {
             Toggle("全部模型", isOn: $useAllModels)
                 .onChange(of: useAllModels) { useAll in
                     if useAll {
@@ -102,18 +110,20 @@ struct OfflineActivationKeygenView: View {
     }
 
     private var actionSection: some View {
-        Section {
+        cardSection("操作") {
             Button("生成激活码") {
                 generateActivationCode()
             }
             .disabled(canGenerate == false)
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     @ViewBuilder
     private var outputSection: some View {
         if generatedCode.isEmpty == false {
-            Section("激活码") {
+            cardSection("激活码") {
                 Text(generatedCode)
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
@@ -121,6 +131,7 @@ struct OfflineActivationKeygenView: View {
                 Button("复制激活码") {
                     UIPasteboard.general.string = generatedCode
                 }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -128,11 +139,36 @@ struct OfflineActivationKeygenView: View {
     @ViewBuilder
     private var errorSection: some View {
         if let errorMessage, generatedCode.isEmpty {
-            Section("错误") {
+            cardSection("错误") {
                 Text(errorMessage)
                     .foregroundStyle(.red)
             }
         }
+    }
+
+    private func cardSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 12) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(uiColor: .systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(uiColor: .separator).opacity(0.18), lineWidth: 1)
+        )
     }
 
     private var normalizedRequestCode: String {

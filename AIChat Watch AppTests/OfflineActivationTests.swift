@@ -9,8 +9,10 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class OfflineActivationTests: XCTestCase {
+    private let alignedNow = Date(timeIntervalSince1970: 1_762_399_980)
+
     func testRequestCodeRoundTripsDeviceAndTimestamp() throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_000)
+        let now = alignedNow
         let deviceToken = OfflineActivation.deviceToken(for: "WATCH-DEVICE-001")
 
         let requestCode = OfflineActivation.makeRequestCode(deviceToken: deviceToken, now: now)
@@ -21,7 +23,7 @@ final class OfflineActivationTests: XCTestCase {
     }
 
     func testActivationCodeCarriesPolicyFields() throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_000)
+        let now = alignedNow
         let deviceToken = OfflineActivation.deviceToken(for: "WATCH-DEVICE-002")
         let requestCode = OfflineActivation.makeRequestCode(deviceToken: deviceToken, now: now)
         let validUntil = now.addingTimeInterval(7 * 24 * 60 * 60)
@@ -38,6 +40,8 @@ final class OfflineActivationTests: XCTestCase {
         )
         let license = try OfflineActivation.decodeActivationCode(activationCode)
 
+        XCTAssertEqual(activationCode.count, OfflineActivation.compactActivationCodeLength)
+        XCTAssertTrue(activationCode.allSatisfy { $0 >= "A" && $0 <= "Z" })
         XCTAssertEqual(license.deviceToken, deviceToken)
         XCTAssertEqual(license.requestIssuedAt, now)
         XCTAssertEqual(license.validFrom, now)
@@ -47,7 +51,7 @@ final class OfflineActivationTests: XCTestCase {
     }
 
     func testActivationRejectsExpiredRequestWindow() throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_000)
+        let now = alignedNow
         let deviceToken = OfflineActivation.deviceToken(for: "WATCH-DEVICE-003")
         let requestCode = OfflineActivation.makeRequestCode(deviceToken: deviceToken, now: now)
         let activationCode = try OfflineActivation.makeActivationCode(
@@ -72,8 +76,26 @@ final class OfflineActivationTests: XCTestCase {
         }
     }
 
+    func testActivationCodePreservesRequestTimestampSeconds() throws {
+        let now = alignedNow.addingTimeInterval(37)
+        let deviceToken = OfflineActivation.deviceToken(for: "WATCH-DEVICE-005")
+        let requestCode = OfflineActivation.makeRequestCode(deviceToken: deviceToken, now: now)
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: requestCode,
+            policy: OfflineActivationPolicy(
+                validFrom: alignedNow,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+
+        let license = try OfflineActivation.decodeActivationCode(activationCode)
+        XCTAssertEqual(license.requestIssuedAt, now)
+    }
+
     func testConsumeMessageHonorsMessageLimit() throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_000)
+        let now = alignedNow
         let deviceToken = OfflineActivation.deviceToken(for: "WATCH-DEVICE-004")
         let requestCode = OfflineActivation.makeRequestCode(deviceToken: deviceToken, now: now)
         let activationCode = try OfflineActivation.makeActivationCode(
@@ -118,5 +140,10 @@ final class OfflineActivationTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? OfflineActivationError, .messageLimitReached)
         }
+    }
+
+    func testActivationInputNormalizationKeepsCompactLettersOnly() {
+        let normalized = OfflineActivation.normalizeActivationInput("ab cd-ef")
+        XCTAssertEqual(normalized, "ABCDEF")
     }
 }
