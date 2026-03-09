@@ -24,7 +24,8 @@ protocol AIStreamingService {
 protocol AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult
 }
 

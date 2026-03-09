@@ -31,6 +31,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var syncStatusDescription: String
     @Published private(set) var activationState: OfflineActivationState?
     @Published private(set) var sendFailureRetryLimit: Int
+    @Published private(set) var transcriptionModel: String
 
     let configuration: AppConfiguration
     let storageDescription: String
@@ -45,6 +46,7 @@ final class ChatStore: ObservableObject {
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
+    private var sendTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         repository: ConversationRepository,
@@ -70,6 +72,10 @@ final class ChatStore: ObservableObject {
         self.storageDescription = repository.storageDescription
         self.syncStatusDescription = syncBridge.currentStatus.description
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
+        self.transcriptionModel = Self.loadTranscriptionModel(
+            from: resolvedDefaults,
+            fallbackModel: configuration.geminiTranscriptionModel
+        )
 
         syncBridge.setStatusHandler { [weak self] status in
             self?.syncStatusDescription = status.description
@@ -231,6 +237,14 @@ final class ChatStore: ObservableObject {
         )
     }
 
+    var selectedTranscriptionModel: String {
+        transcriptionModel
+    }
+
+    func availableTranscriptionModelOptions() -> [AITranscriptionModelOption] {
+        AITranscriptionModelCatalog.options(defaultModel: configuration.geminiTranscriptionModel)
+    }
+
     func availableThinkingIntensities(for conversationID: UUID) -> [AIThinkingIntensity] {
         let configuration = aiConfiguration(for: conversationID)
         return AIModelCatalog.availableThinkingIntensities(for: configuration.model)
@@ -281,6 +295,8 @@ final class ChatStore: ObservableObject {
             return
         }
 
+        sendTasks[id]?.cancel()
+        sendTasks[id] = nil
         conversation.clearMessages()
         drafts[id] = ConversationDraft()
         conversationErrors[id] = nil
@@ -396,6 +412,19 @@ final class ChatStore: ObservableObject {
         conversationErrors[conversationID] = message
     }
 
+    func canRetryLatestReply(in conversationID: UUID) -> Bool {
+        guard isReadOnlyMode == false,
+              configuration.isAIConfigured,
+              isSending(conversationID: conversationID) == false,
+              isTranscribing(conversationID: conversationID) == false,
+              let conversation = conversation(id: conversationID)
+        else {
+            return false
+        }
+
+        return conversation.messages.lastIndex(where: { $0.role == .user }) != nil
+    }
+
     func updateSendFailureRetryLimit(_ limit: Int) {
         let normalizedLimit = Self.normalizedSendFailureRetryLimit(limit)
         guard normalizedLimit != sendFailureRetryLimit else {
@@ -406,9 +435,35 @@ final class ChatStore: ObservableObject {
         defaults.set(normalizedLimit, forKey: DefaultsKeys.sendFailureRetryLimit)
     }
 
+    func updateTranscriptionModel(_ model: String) {
+        let normalizedModel = AITranscriptionModelCatalog.normalizedModel(
+            model,
+            defaultModel: configuration.geminiTranscriptionModel
+        )
+        guard normalizedModel != transcriptionModel else {
+            return
+        }
+
+        transcriptionModel = normalizedModel
+        defaults.set(normalizedModel, forKey: DefaultsKeys.transcriptionModel)
+    }
+
     func sendMessage(in conversationID: UUID) async {
         let draft = drafts[conversationID] ?? ConversationDraft()
-        await send(draft: draft, in: conversationID, clearStoredDraft: true)
+        await runSendTask(for: conversationID) { store in
+            await store.send(draft: draft, in: conversationID, clearStoredDraft: true)
+        }
+    }
+
+    func retryLatestReply(in conversationID: UUID) async {
+        await runSendTask(for: conversationID) { store in
+            await store.retryLatestAssistantReply(in: conversationID)
+        }
+    }
+
+    func stopSending(in conversationID: UUID) {
+        conversationErrors[conversationID] = nil
+        sendTasks[conversationID]?.cancel()
     }
 
     func sendRecordedAudio(_ audioAttachment: ChatAttachment, in conversationID: UUID) async {
@@ -447,6 +502,7 @@ final class ChatStore: ObservableObject {
         conversationErrors[conversationID] = nil
         transcribingConversationIDs.insert(conversationID)
 
+        let transcriptionModel = selectedTranscriptionModel
         let maximumRetryCount = sendFailureRetryLimit
         var finalError: Error?
         var attemptCount = 0
@@ -464,7 +520,8 @@ final class ChatStore: ObservableObject {
             do {
                 let transcription = try await transcriptionService.transcribeUserAudio(
                     audioAttachment,
-                    in: currentConversation
+                    in: currentConversation,
+                    using: transcriptionModel
                 )
 
                 transcribingConversationIDs.remove(conversationID)
@@ -527,15 +584,7 @@ final class ChatStore: ObservableObject {
         }
 
         do {
-            let nextActivationState = try OfflineActivation.consumeMessage(
-                from: activationState,
-                deviceToken: deviceIdentity.deviceToken,
-                modelID: effectiveAIConfiguration.model
-            )
-            if nextActivationState != activationState {
-                try await activationRepository.saveState(nextActivationState)
-                activationState = nextActivationState
-            }
+            try await consumeActivationMessage(for: effectiveAIConfiguration.model)
         } catch {
             conversationErrors[conversationID] = error.localizedDescription
             return
@@ -556,129 +605,7 @@ final class ChatStore: ObservableObject {
         await persist(currentConversation, sync: true)
 
         let requestConversation = currentConversation
-        let assistantMessageID = UUID()
-        currentConversation.append(
-            ChatMessage(
-                id: assistantMessageID,
-                role: .assistant,
-                text: "",
-                status: .streaming
-            )
-        )
-        upsertConversation(currentConversation)
-        sendingConversationIDs.insert(conversationID)
-
-        let assistantMessageCreatedAt = Date.now
-        upsertAssistantMessage(
-            id: assistantMessageID,
-            in: conversationID,
-            text: "",
-            thoughtSummary: "",
-            status: .streaming,
-            fallbackCreatedAt: assistantMessageCreatedAt
-        )
-
-        let maximumRetryCount = sendFailureRetryLimit
-        var finalError: Error?
-        var finalStreamedText = ""
-        var finalStreamedThoughtSummary = ""
-        var attemptCount = 0
-
-        for attempt in 0...maximumRetryCount {
-            attemptCount = attempt + 1
-
-            if attempt > 0 {
-                upsertAssistantMessage(
-                    id: assistantMessageID,
-                    in: conversationID,
-                    text: "",
-                    thoughtSummary: "",
-                    status: .streaming,
-                    fallbackCreatedAt: assistantMessageCreatedAt
-                )
-
-                let delay = sendRetryDelayNanoseconds(attempt)
-                if delay > 0 {
-                    try? await Task.sleep(nanoseconds: delay)
-                }
-            }
-
-            var streamedText = ""
-            var streamedThoughtSummary = ""
-
-            do {
-                for try await event in aiService.streamReply(for: requestConversation) {
-                    switch event {
-                    case .answerDelta(let delta):
-                        streamedText.append(delta)
-                    case .thoughtDelta(let delta):
-                        streamedThoughtSummary.append(delta)
-                    }
-
-                    upsertAssistantMessage(
-                        id: assistantMessageID,
-                        in: conversationID,
-                        text: streamedText,
-                        thoughtSummary: streamedThoughtSummary,
-                        status: .streaming,
-                        fallbackCreatedAt: assistantMessageCreatedAt
-                    )
-                }
-
-                upsertAssistantMessage(
-                    id: assistantMessageID,
-                    in: conversationID,
-                    text: streamedText,
-                    thoughtSummary: streamedThoughtSummary,
-                    status: .sent,
-                    fallbackCreatedAt: assistantMessageCreatedAt
-                )
-                sendingConversationIDs.remove(conversationID)
-
-                if let finalizedConversation = conversation(id: conversationID) {
-                    await persist(finalizedConversation, sync: true)
-                }
-                return
-            } catch {
-                finalError = error
-                finalStreamedText = streamedText
-                finalStreamedThoughtSummary = streamedThoughtSummary
-
-                let hasRemainingRetries = attempt < maximumRetryCount
-                guard hasRemainingRetries, shouldRetrySend(after: error) else {
-                    break
-                }
-            }
-        }
-
-        sendingConversationIDs.remove(conversationID)
-        if let finalError {
-            conversationErrors[conversationID] = failureMessage(
-                from: finalError,
-                automaticRetryCount: max(0, attemptCount - 1)
-            )
-
-            mutateConversation(id: conversationID) { conversation in
-                if finalStreamedText.isEmpty, finalStreamedThoughtSummary.isEmpty {
-                    conversation.removeMessage(id: assistantMessageID)
-                } else {
-                    conversation.upsertMessage(
-                        ChatMessage(
-                            id: assistantMessageID,
-                            role: .assistant,
-                            text: finalStreamedText,
-                            thoughtSummary: finalStreamedThoughtSummary.nonEmptyTrimmed,
-                            createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? assistantMessageCreatedAt,
-                            status: .failed
-                        )
-                    )
-                }
-            }
-
-            if let failedConversation = conversation(id: conversationID) {
-                await persist(failedConversation, sync: true)
-            }
-        }
+        await streamAssistantReply(for: requestConversation, in: conversationID)
     }
 
     private func persist(_ conversation: ConversationThread, sync: Bool) async {
@@ -693,6 +620,8 @@ final class ChatStore: ObservableObject {
     }
 
     private func deleteConversation(id: UUID, sync: Bool) async {
+        sendTasks[id]?.cancel()
+        sendTasks[id] = nil
         conversations.removeAll { $0.id == id }
         drafts[id] = nil
         conversationErrors[id] = nil
@@ -827,6 +756,255 @@ final class ChatStore: ObservableObject {
         return shouldRetrySend(after: error)
     }
 
+    private func runSendTask(
+        for conversationID: UUID,
+        operation: @escaping @MainActor (ChatStore) async -> Void
+    ) async {
+        guard sendTasks[conversationID] == nil else {
+            return
+        }
+
+        sendingConversationIDs.insert(conversationID)
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.sendTasks[conversationID] = nil
+                self.sendingConversationIDs.remove(conversationID)
+            }
+
+            await operation(self)
+        }
+
+        sendTasks[conversationID] = task
+        await task.value
+    }
+
+    private func retryLatestAssistantReply(in conversationID: UUID) async {
+        guard configuration.isAIConfigured else {
+            conversationErrors[conversationID] = configuration.configurationMessage
+            return
+        }
+
+        guard var currentConversation = conversation(id: conversationID) else {
+            return
+        }
+
+        let effectiveAIConfiguration = licensedConfiguration(
+            from: currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        )
+        if let activationMessage = activationFailureMessage(for: effectiveAIConfiguration.model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        let currentConfiguration = currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        if currentConfiguration != effectiveAIConfiguration {
+            currentConversation.updateAIConfiguration(effectiveAIConfiguration)
+            upsertConversation(currentConversation)
+            await persist(currentConversation, sync: true)
+        }
+
+        guard let requestConversation = latestReplyRequestConversation(from: currentConversation) else {
+            return
+        }
+
+        do {
+            try await consumeActivationMessage(for: effectiveAIConfiguration.model)
+        } catch {
+            conversationErrors[conversationID] = error.localizedDescription
+            return
+        }
+
+        conversationErrors[conversationID] = nil
+        upsertConversation(requestConversation)
+        await persist(requestConversation, sync: true)
+        await streamAssistantReply(for: requestConversation, in: conversationID)
+    }
+
+    private func latestReplyRequestConversation(from conversation: ConversationThread) -> ConversationThread? {
+        guard let lastUserIndex = conversation.messages.lastIndex(where: { $0.role == .user }) else {
+            return nil
+        }
+
+        var requestConversation = conversation
+        requestConversation.messages = Array(conversation.messages.prefix(lastUserIndex + 1))
+        requestConversation.updatedAt = .now
+        return requestConversation
+    }
+
+    private func consumeActivationMessage(for modelID: String) async throws {
+        let nextActivationState = try OfflineActivation.consumeMessage(
+            from: activationState,
+            deviceToken: deviceIdentity.deviceToken,
+            modelID: modelID
+        )
+
+        if nextActivationState != activationState {
+            try await activationRepository.saveState(nextActivationState)
+            activationState = nextActivationState
+        }
+    }
+
+    private func streamAssistantReply(
+        for requestConversation: ConversationThread,
+        in conversationID: UUID
+    ) async {
+        guard var currentConversation = conversation(id: conversationID) else {
+            return
+        }
+
+        let assistantMessageID = UUID()
+        currentConversation.append(
+            ChatMessage(
+                id: assistantMessageID,
+                role: .assistant,
+                text: "",
+                status: .streaming
+            )
+        )
+        upsertConversation(currentConversation)
+
+        let assistantMessageCreatedAt = Date.now
+        upsertAssistantMessage(
+            id: assistantMessageID,
+            in: conversationID,
+            text: "",
+            thoughtSummary: "",
+            status: .streaming,
+            fallbackCreatedAt: assistantMessageCreatedAt
+        )
+
+        let maximumRetryCount = sendFailureRetryLimit
+        var finalError: Error?
+        var finalStreamedText = ""
+        var finalStreamedThoughtSummary = ""
+        var attemptCount = 0
+
+        for attempt in 0...maximumRetryCount {
+            attemptCount = attempt + 1
+
+            do {
+                if attempt > 0 {
+                    upsertAssistantMessage(
+                        id: assistantMessageID,
+                        in: conversationID,
+                        text: "",
+                        thoughtSummary: "",
+                        status: .streaming,
+                        fallbackCreatedAt: assistantMessageCreatedAt
+                    )
+
+                    let delay = sendRetryDelayNanoseconds(attempt)
+                    if delay > 0 {
+                        try await Task.sleep(nanoseconds: delay)
+                    }
+                }
+
+                try Task.checkCancellation()
+
+                let streamTask = Task { @MainActor () throws -> (String, String) in
+                    var streamedText = ""
+                    var streamedThoughtSummary = ""
+
+                    for try await event in aiService.streamReply(for: requestConversation) {
+                        try Task.checkCancellation()
+
+                        switch event {
+                        case .answerDelta(let delta):
+                            streamedText.append(delta)
+                        case .thoughtDelta(let delta):
+                            streamedThoughtSummary.append(delta)
+                        }
+
+                        upsertAssistantMessage(
+                            id: assistantMessageID,
+                            in: conversationID,
+                            text: streamedText,
+                            thoughtSummary: streamedThoughtSummary,
+                            status: .streaming,
+                            fallbackCreatedAt: assistantMessageCreatedAt
+                        )
+                    }
+
+                    return (streamedText, streamedThoughtSummary)
+                }
+
+                let (streamedText, streamedThoughtSummary) = try await withTaskCancellationHandler {
+                    try await streamTask.value
+                } onCancel: {
+                    streamTask.cancel()
+                }
+
+                try Task.checkCancellation()
+
+                upsertAssistantMessage(
+                    id: assistantMessageID,
+                    in: conversationID,
+                    text: streamedText,
+                    thoughtSummary: streamedThoughtSummary,
+                    status: .sent,
+                    fallbackCreatedAt: assistantMessageCreatedAt
+                )
+
+                if let finalizedConversation = conversation(id: conversationID) {
+                    await persist(finalizedConversation, sync: true)
+                }
+                return
+            } catch {
+                finalError = error
+                finalStreamedText = conversation(id: conversationID)?
+                    .messages
+                    .first(where: { $0.id == assistantMessageID })?
+                    .text ?? ""
+                finalStreamedThoughtSummary = conversation(id: conversationID)?
+                    .messages
+                    .first(where: { $0.id == assistantMessageID })?
+                    .thoughtSummary ?? ""
+
+                let hasRemainingRetries = attempt < maximumRetryCount
+                guard hasRemainingRetries, shouldRetrySend(after: error) else {
+                    break
+                }
+            }
+        }
+
+        guard let finalError else {
+            return
+        }
+
+        if finalError is CancellationError == false {
+            conversationErrors[conversationID] = failureMessage(
+                from: finalError,
+                automaticRetryCount: max(0, attemptCount - 1)
+            )
+        }
+
+        mutateConversation(id: conversationID) { conversation in
+            if finalStreamedText.isEmpty, finalStreamedThoughtSummary.isEmpty {
+                conversation.removeMessage(id: assistantMessageID)
+            } else {
+                conversation.upsertMessage(
+                    ChatMessage(
+                        id: assistantMessageID,
+                        role: .assistant,
+                        text: finalStreamedText,
+                        thoughtSummary: finalStreamedThoughtSummary.nonEmptyTrimmed,
+                        createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? assistantMessageCreatedAt,
+                        status: .failed
+                    )
+                )
+            }
+        }
+
+        if let failedConversation = conversation(id: conversationID) {
+            await persist(failedConversation, sync: true)
+        }
+    }
+
     private func failureMessage(
         from error: Error,
         automaticRetryCount: Int,
@@ -894,6 +1072,20 @@ final class ChatStore: ObservableObject {
         return normalizedValue
     }
 
+    private static func loadTranscriptionModel(
+        from defaults: UserDefaults,
+        fallbackModel: String
+    ) -> String {
+        let storedModel = defaults.string(forKey: DefaultsKeys.transcriptionModel)
+        let resolvedModel = AITranscriptionModelCatalog.normalizedModel(
+            storedModel ?? fallbackModel,
+            defaultModel: fallbackModel
+        )
+
+        defaults.set(resolvedModel, forKey: DefaultsKeys.transcriptionModel)
+        return resolvedModel
+    }
+
     private static func normalizedSendFailureRetryLimit(_ value: Int) -> Int {
         min(max(value, minimumSendFailureRetryLimit), maximumSendFailureRetryLimit)
     }
@@ -906,6 +1098,7 @@ final class ChatStore: ObservableObject {
 
 private enum DefaultsKeys {
     static let sendFailureRetryLimit = "chat.send_failure_retry_limit"
+    static let transcriptionModel = "chat.transcription_model"
 }
 
 #if DEBUG
@@ -922,11 +1115,12 @@ private struct PreviewAIStreamingService: AIStreamingService {
 private struct PreviewAITranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult {
         VoiceTranscriptionResult(
             text: "This is a preview voice transcript.",
-            model: "gemini-3-flash-preview"
+            model: model
         )
     }
 }

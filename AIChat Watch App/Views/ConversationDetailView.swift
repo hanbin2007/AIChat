@@ -176,6 +176,13 @@ struct ConversationDetailView: View {
                 }
                 .padding(.horizontal, 4)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if chatStore.canRetryLatestReply(in: conversationID) {
+                    retryButton
+                        .padding(.trailing, 8)
+                        .padding(.bottom, isComposerExpanded ? 12 : 62)
+                }
+            }
             .onAppear {
                 scrollToBottom(with: proxy, animated: false)
             }
@@ -245,10 +252,11 @@ struct ConversationDetailView: View {
         let hasAttachments = attachments.isEmpty == false
         let hasDraftContent = draftText.nonEmptyTrimmed != nil || hasAttachments
         let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
+        let isSendingReply = chatStore.isSending(conversationID: conversationID)
         let inputRowHeight = hasAttachments ? ComposerLayout.compactInputRowHeight : ComposerLayout.regularInputRowHeight
         let sendButtonSize = hasAttachments ? ComposerLayout.compactActionButtonSize : ComposerLayout.regularActionButtonSize
         let sendEnabled =
-            chatStore.isSending(conversationID: conversationID) == false &&
+            isSendingReply == false &&
             isTranscribing == false &&
             voiceRecorder.isInteractive &&
             hasDraftContent
@@ -287,7 +295,7 @@ struct ConversationDetailView: View {
             } else if isTranscribing {
                 RecordingStatusBanner(
                     iconName: "waveform.and.magnifyingglass",
-                    title: "Transcribing with \(AIModelCatalog.shortLabel(for: chatStore.configuration.geminiTranscriptionModel))...",
+                    title: "Transcribing with \(AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel))...",
                     tint: .cyan
                 )
             }
@@ -299,13 +307,19 @@ struct ConversationDetailView: View {
                 .disabled(voiceRecorder.isRecording || isTranscribing)
 
                 Button {
-                    sendCurrentDraft()
+                    if isSendingReply {
+                        stopCurrentReply()
+                    } else {
+                        sendCurrentDraft()
+                    }
                 } label: {
                     ComposerActionButtonLabel(
-                        systemName: "arrow.up.circle.fill",
+                        systemName: isSendingReply ? "stop.fill" : "arrow.up.circle.fill",
                         dimension: sendButtonSize,
-                        fillStyle: AnyShapeStyle(Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)),
-                        strokeColor: Color.white.opacity(sendEnabled ? 0.10 : 0.05)
+                        fillStyle: AnyShapeStyle(
+                            isSendingReply ? Color.red.opacity(0.94) : Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)
+                        ),
+                        strokeColor: Color.white.opacity(isSendingReply ? 0.16 : (sendEnabled ? 0.10 : 0.05))
                     )
                 }
                 .buttonStyle(.plain)
@@ -313,8 +327,8 @@ struct ConversationDetailView: View {
                     width: sendButtonSize,
                     height: sendButtonSize
                 )
-                .disabled(sendEnabled == false)
-                .accessibilityLabel("Send")
+                .disabled(isSendingReply ? false : sendEnabled == false)
+                .accessibilityLabel(isSendingReply ? "Stop response" : "Send")
             }
 
             HStack(spacing: ComposerLayout.flatActionRowSpacing) {
@@ -430,6 +444,28 @@ struct ConversationDetailView: View {
         .accessibilityLabel("Open composer")
     }
 
+    private var retryButton: some View {
+        Button {
+            retryLatestReply()
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(Color.black.opacity(0.68))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Retry last reply")
+    }
+
     private func compactControlBar(configuration: ConversationAIConfiguration, isDense: Bool) -> some View {
         HStack(spacing: 6) {
             Button {
@@ -541,15 +577,32 @@ struct ConversationDetailView: View {
             return
         }
 
-        if chatStore.configuration.isAIConfigured {
-            collapseComposer()
-        }
-
         chatStore.clearError(for: conversationID)
 
         Task {
             await chatStore.sendMessage(in: conversationID)
         }
+    }
+
+    private func retryLatestReply() {
+        guard chatStore.isReadOnlyMode == false else {
+            isShowingActivationCenter = true
+            return
+        }
+
+        guard chatStore.canRetryLatestReply(in: conversationID) else {
+            return
+        }
+
+        chatStore.clearError(for: conversationID)
+
+        Task {
+            await chatStore.retryLatestReply(in: conversationID)
+        }
+    }
+
+    private func stopCurrentReply() {
+        chatStore.stopSending(in: conversationID)
     }
 
     private func collapseComposer() {

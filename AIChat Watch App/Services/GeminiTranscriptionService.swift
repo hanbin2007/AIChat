@@ -78,7 +78,8 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult {
         guard audioAttachment.isAudio else {
             throw VoiceTranscriptionError.invalidAudio
@@ -88,11 +89,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
             throw GeminiAPIError.missingAPIKey
         }
 
-        var request = URLRequest(
-            url: URL(
-                string: "https://generativelanguage.googleapis.com/v1beta/models/\(configuration.geminiTranscriptionModel):generateContent"
-            )!
-        )
+        var request = URLRequest(url: requestURL(for: model))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
@@ -133,8 +130,14 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: configuration.geminiTranscriptionModel
+            model: model
         )
+    }
+
+    func requestURL(for model: String) -> URL {
+        URL(
+            string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+        )!
     }
 
     func makeRequestBody(

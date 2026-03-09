@@ -39,6 +39,8 @@ enum RelayServerEvent: Sendable {
     case didStart(port: UInt16)
     case didStop
     case didReceiveRequest(path: String, remoteAddress: String?)
+    case didCompleteRequest(path: String, remoteAddress: String?)
+    case didFailRequest(path: String, remoteAddress: String?, statusCode: Int, message: String)
     case log(level: RelayLogLevel, message: String)
     case listenerFailed(message: String)
 }

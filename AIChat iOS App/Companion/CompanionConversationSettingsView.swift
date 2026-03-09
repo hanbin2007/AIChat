@@ -59,6 +59,12 @@ struct CompanionConversationSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    Picker("语音识别模型", selection: transcriptionModelBinding()) {
+                        ForEach(chatStore.availableTranscriptionModelOptions()) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
                 }
 
                 if let conversation = chatStore.conversation(id: conversationID) {
@@ -123,6 +129,17 @@ struct CompanionConversationSettingsView: View {
             },
             set: { newValue in
                 chatStore.updateSendFailureRetryLimit(newValue)
+            }
+        )
+    }
+
+    private func transcriptionModelBinding() -> Binding<String> {
+        Binding(
+            get: {
+                chatStore.selectedTranscriptionModel
+            },
+            set: { newValue in
+                chatStore.updateTranscriptionModel(newValue)
             }
         )
     }

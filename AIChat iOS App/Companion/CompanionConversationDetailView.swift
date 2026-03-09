@@ -306,7 +306,7 @@ struct CompanionConversationDetailView: View {
                 } else if isTranscribing {
                     CompanionInlineStatus(
                         iconName: "waveform.and.magnifyingglass",
-                        title: "正在用 \(AIModelCatalog.shortLabel(for: chatStore.configuration.geminiTranscriptionModel)) 转录语音"
+                        title: "正在用 \(AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel)) 转录语音"
                     )
                 }
 

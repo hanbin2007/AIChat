@@ -42,7 +42,7 @@ struct RelayAIClient: AIStreamingService {
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let streamTask = Task {
                 do {
                     guard let url = configuration.relayStreamURL,
                           let bearerToken = configuration.relayBearerToken
@@ -137,6 +137,10 @@ struct RelayAIClient: AIStreamingService {
                     continuation.finish(throwing: error)
                 }
             }
+
+            continuation.onTermination = { _ in
+                streamTask.cancel()
+            }
         }
     }
 
@@ -196,7 +200,8 @@ struct RelayTranscriptionService: AITranscriptionService {
 
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult {
         guard audioAttachment.isAudio else {
             throw VoiceTranscriptionError.invalidAudio
@@ -218,7 +223,8 @@ struct RelayTranscriptionService: AITranscriptionService {
         request.httpBody = try encoder.encode(
             makeRelayRequest(
                 for: audioAttachment,
-                in: conversation
+                in: conversation,
+                using: model
             )
         )
 
@@ -242,16 +248,17 @@ struct RelayTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: relayResponse.model.nonEmptyTrimmed ?? configuration.geminiTranscriptionModel
+            model: relayResponse.model.nonEmptyTrimmed ?? model
         )
     }
 
     func makeRelayRequest(
         for audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) -> RelayTranscriptionRequest {
         RelayTranscriptionRequest(
-            model: configuration.geminiTranscriptionModel,
+            model: model,
             systemPrompt: VoiceTranscriptionPromptBuilder.systemPrompt,
             prompt: VoiceTranscriptionPromptBuilder.prompt(
                 for: conversation,

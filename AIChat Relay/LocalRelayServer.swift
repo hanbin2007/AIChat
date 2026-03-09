@@ -127,22 +127,27 @@ actor LocalRelayServer {
                     payload: ["ok": true],
                     on: connection
                 )
+                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 return
             }
 
             guard request.method == "POST" else {
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: 404,
-                    payload: RelayErrorEnvelope(message: "Not found."),
+                    message: "Not found.",
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
                 return
             }
 
             guard path == "/v1/chat/stream" || path == "/v1/audio/transcribe" else {
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: 404,
-                    payload: RelayErrorEnvelope(message: "Not found."),
+                    message: "Not found.",
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
                 return
@@ -150,18 +155,22 @@ actor LocalRelayServer {
 
             let configuration = await configurationProvider()
             guard configuration.geminiAPIKey.isEmpty == false else {
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: RelayHTTPError.missingConfiguration("Gemini API key is missing.").statusCode,
-                    payload: RelayErrorEnvelope(message: "Gemini API key is missing."),
+                    message: "Gemini API key is missing.",
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
                 return
             }
 
             guard configuration.relayBearerToken.isEmpty == false else {
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: RelayHTTPError.missingConfiguration("Relay bearer token is missing.").statusCode,
-                    payload: RelayErrorEnvelope(message: "Relay bearer token is missing."),
+                    message: "Relay bearer token is missing.",
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
                 return
@@ -169,9 +178,11 @@ actor LocalRelayServer {
 
             let authorization = request.headers["authorization"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard authorization == "Bearer \(configuration.relayBearerToken)" else {
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: RelayHTTPError.unauthorized.statusCode,
-                    payload: RelayErrorEnvelope(message: RelayHTTPError.unauthorized.message),
+                    message: RelayHTTPError.unauthorized.message,
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
                 return
@@ -186,9 +197,11 @@ actor LocalRelayServer {
                 do {
                     relayRequest = try decoder.decode(RelayChatRequest.self, from: request.body)
                 } catch {
-                    try await sendJSON(
+                    try await sendFailureResponse(
                         statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
-                        payload: RelayErrorEnvelope(message: "Invalid JSON body."),
+                        message: "Invalid JSON body.",
+                        path: path,
+                        remoteAddress: remoteAddress,
                         on: connection
                     )
                     return
@@ -208,7 +221,14 @@ actor LocalRelayServer {
                             try await self.send(event.data(), on: connection)
                         }
                     )
+                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
+                    await markFailedRequest(
+                        path: path,
+                        remoteAddress: remoteAddress,
+                        statusCode: error.statusCode,
+                        message: error.message
+                    )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(error.message).data(), on: connection)
                     } else {
@@ -220,6 +240,12 @@ actor LocalRelayServer {
                     }
                 } catch {
                     let relayError = RelayHTTPError.internalError(error.localizedDescription)
+                    await markFailedRequest(
+                        path: path,
+                        remoteAddress: remoteAddress,
+                        statusCode: relayError.statusCode,
+                        message: relayError.message
+                    )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(relayError.message).data(), on: connection)
                     } else {
@@ -235,9 +261,11 @@ actor LocalRelayServer {
                 do {
                     relayRequest = try decoder.decode(RelayTranscriptionRequest.self, from: request.body)
                 } catch {
-                    try await sendJSON(
+                    try await sendFailureResponse(
                         statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
-                        payload: RelayErrorEnvelope(message: "Invalid JSON body."),
+                        message: "Invalid JSON body.",
+                        path: path,
+                        remoteAddress: remoteAddress,
                         on: connection
                     )
                     return
@@ -254,24 +282,31 @@ actor LocalRelayServer {
                         payload: relayResponse,
                         on: connection
                     )
+                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
-                    try await sendJSON(
+                    try await sendFailureResponse(
                         statusCode: error.statusCode,
-                        payload: RelayErrorEnvelope(message: error.message),
+                        message: error.message,
+                        path: path,
+                        remoteAddress: remoteAddress,
                         on: connection
                     )
                 } catch {
                     let relayError = RelayHTTPError.internalError(error.localizedDescription)
-                    try await sendJSON(
+                    try await sendFailureResponse(
                         statusCode: relayError.statusCode,
-                        payload: RelayErrorEnvelope(message: relayError.message),
+                        message: relayError.message,
+                        path: path,
+                        remoteAddress: remoteAddress,
                         on: connection
                     )
                 }
             default:
-                try await sendJSON(
+                try await sendFailureResponse(
                     statusCode: 404,
-                    payload: RelayErrorEnvelope(message: "Not found."),
+                    message: "Not found.",
+                    path: path,
+                    remoteAddress: remoteAddress,
                     on: connection
                 )
             }
@@ -436,6 +471,27 @@ actor LocalRelayServer {
         try await send(data, on: connection)
     }
 
+    private func sendFailureResponse(
+        statusCode: Int,
+        message: String,
+        path: String,
+        remoteAddress: String?,
+        on connection: NWConnection
+    ) async throws {
+        await markFailedRequest(
+            path: path,
+            remoteAddress: remoteAddress,
+            statusCode: statusCode,
+            message: message
+        )
+
+        try await sendJSON(
+            statusCode: statusCode,
+            payload: RelayErrorEnvelope(message: message),
+            on: connection
+        )
+    }
+
     private func send(_ data: Data, on connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
@@ -475,6 +531,29 @@ actor LocalRelayServer {
         }
 
         return nil
+    }
+
+    private func markSuccessfulRequest(
+        path: String,
+        remoteAddress: String?
+    ) async {
+        await eventHandler(.didCompleteRequest(path: path, remoteAddress: remoteAddress))
+    }
+
+    private func markFailedRequest(
+        path: String,
+        remoteAddress: String?,
+        statusCode: Int,
+        message: String
+    ) async {
+        await eventHandler(
+            .didFailRequest(
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: statusCode,
+                message: message
+            )
+        )
     }
 }
 

@@ -93,6 +93,12 @@ struct ConversationSettingsView: View {
                             .disabled(chatStore.sendFailureRetryLimit >= ChatStore.maximumSendFailureRetryLimit)
                         }
                     }
+
+                    Picker("Voice Model", selection: transcriptionModelBinding()) {
+                        ForEach(chatStore.availableTranscriptionModelOptions()) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
                 }
 
                 if let conversation = chatStore.conversation(id: conversationID) {
@@ -142,6 +148,18 @@ struct ConversationSettingsView: View {
             }
         )
     }
+
+    private func transcriptionModelBinding() -> Binding<String> {
+        Binding(
+            get: {
+                chatStore.selectedTranscriptionModel
+            },
+            set: { newValue in
+                chatStore.updateTranscriptionModel(newValue)
+            }
+        )
+    }
+
     private func retryAdjustmentButton(systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)

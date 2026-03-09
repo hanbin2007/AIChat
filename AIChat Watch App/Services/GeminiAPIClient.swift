@@ -42,7 +42,7 @@ struct GeminiAPIClient: AIStreamingService {
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let streamTask = Task {
                 do {
                     guard let apiKey = configuration.geminiAPIKey else {
                         throw GeminiAPIError.missingAPIKey
@@ -131,6 +131,10 @@ struct GeminiAPIClient: AIStreamingService {
                 } catch {
                     continuation.finish(throwing: error)
                 }
+            }
+
+            continuation.onTermination = { _ in
+                streamTask.cancel()
             }
         }
     }

@@ -214,11 +214,20 @@ final class RelayServerController: ObservableObject {
         case .didReceiveRequest(let path, let remoteAddress):
             requestCount += 1
             lastRequestAt = .now
-            if let remoteAddress {
-                appendLog(level: .success, message: "Handled \(path) from \(remoteAddress).")
-            } else {
-                appendLog(level: .success, message: "Handled \(path).")
-            }
+            appendLog(level: .info, message: requestLogMessage(prefix: "Received", path: path, remoteAddress: remoteAddress))
+        case .didCompleteRequest(let path, let remoteAddress):
+            appendLog(level: .success, message: requestLogMessage(prefix: "Completed", path: path, remoteAddress: remoteAddress))
+        case .didFailRequest(let path, let remoteAddress, let statusCode, let message):
+            let level: RelayLogLevel = statusCode >= 500 ? .error : .warning
+            appendLog(
+                level: level,
+                message: requestLogMessage(
+                    prefix: "Failed [\(statusCode)]",
+                    path: path,
+                    remoteAddress: remoteAddress,
+                    suffix: message
+                )
+            )
         case .log(let level, let message):
             appendLog(level: level, message: message)
         case .listenerFailed(let message):
@@ -239,6 +248,26 @@ final class RelayServerController: ObservableObject {
         if logEntries.count > 200 {
             logEntries.removeFirst(logEntries.count - 200)
         }
+    }
+
+    private func requestLogMessage(
+        prefix: String,
+        path: String,
+        remoteAddress: String?,
+        suffix: String? = nil
+    ) -> String {
+        var message = "\(prefix) \(path)"
+
+        if let remoteAddress {
+            message.append(" from \(remoteAddress)")
+        }
+
+        if let suffix, suffix.isEmpty == false {
+            message.append(" • \(suffix)")
+        }
+
+        message.append(".")
+        return message
     }
 
     private static func makeConfigurationProvider(

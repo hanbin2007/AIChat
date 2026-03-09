@@ -325,7 +325,11 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
 
-        let request = service.makeRelayRequest(for: audioAttachment, in: conversation)
+        let request = service.makeRelayRequest(
+            for: audioAttachment,
+            in: conversation,
+            using: "gemini-3-flash-preview"
+        )
 
         XCTAssertEqual(request.model, "gemini-3-flash-preview")
         XCTAssertEqual(request.systemPrompt, VoiceTranscriptionPromptBuilder.systemPrompt)
@@ -560,6 +564,119 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testTranscriptionModelDefaultsToConfiguredValueAndPersistsSelection() async throws {
+        let suiteName = "AIChatTests.TranscriptionModel.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repositoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: repositoryURL
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults
+        )
+
+        XCTAssertEqual(store.selectedTranscriptionModel, "gemini-3-flash-preview")
+
+        store.updateTranscriptionModel("gemini-3.1-pro-preview")
+        XCTAssertEqual(store.selectedTranscriptionModel, "gemini-3.1-pro-preview")
+
+        let reloadedStore = ChatStore(
+            repository: ConversationRepository(
+                configuration: configuration,
+                rootURL: repositoryURL.appendingPathComponent("reload", isDirectory: true)
+            ),
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults
+        )
+
+        XCTAssertEqual(reloadedStore.selectedTranscriptionModel, "gemini-3.1-pro-preview")
+    }
+
+    @MainActor
+    func testRecordedAudioUsesSelectedTranscriptionModel() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let suiteName = "AIChatTests.TranscriptionSelection.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let transcriptionService = CapturingTranscriptionService(
+            transcript: "Use Gemini 3.1 Pro for this transcript"
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: transcriptionService,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x01, 0x02, 0x03]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.0
+        )
+
+        store.updateTranscriptionModel("gemini-3.1-pro-preview")
+        await store.sendRecordedAudio(audioAttachment, in: conversationID)
+
+        XCTAssertEqual(transcriptionService.requestedModels, ["gemini-3.1-pro-preview"])
+        XCTAssertEqual(store.draftText(for: conversationID), "Use Gemini 3.1 Pro for this transcript")
+        XCTAssertNil(store.errorMessage(for: conversationID))
+    }
+
+    @MainActor
     func testSendMessageRetriesBeforeReportingFailure() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let suiteName = "AIChatTests.SendRetry.\(UUID().uuidString)"
@@ -618,6 +735,147 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(conversation.messages.last?.status, .sent)
         XCTAssertNil(store.errorMessage(for: conversationID))
     }
+
+    @MainActor
+    func testRetryLatestReplyReplacesLatestAssistantMessage() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let aiService = SequentialReplyAIStreamingService(replies: ["First answer", "Second answer"])
+        let store = ChatStore(
+            repository: repository,
+            aiService: aiService,
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Retry this answer", for: conversationID)
+
+        await store.sendMessage(in: conversationID)
+        await store.retryLatestReply(in: conversationID)
+
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(aiService.callCount, 2)
+        XCTAssertEqual(conversation.messages.count, 2)
+        XCTAssertEqual(conversation.messages.first?.role, .user)
+        XCTAssertEqual(conversation.messages.first?.text, "Retry this answer")
+        XCTAssertEqual(conversation.messages.last?.role, .assistant)
+        XCTAssertEqual(conversation.messages.last?.text, "Second answer")
+        XCTAssertEqual(conversation.messages.last?.status, .sent)
+        XCTAssertNil(store.errorMessage(for: conversationID))
+    }
+
+    @MainActor
+    func testStopSendingKeepsPartialAssistantReplyWithoutErrorBanner() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: CancellableStreamingAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Stop this answer", for: conversationID)
+
+        let sendTask = Task {
+            await store.sendMessage(in: conversationID)
+        }
+
+        let didStartSending = await waitUntil {
+            store.isSending(conversationID: conversationID)
+        }
+        XCTAssertTrue(didStartSending)
+
+        let didStreamPartialReply = await waitUntil {
+            store.conversation(id: conversationID)?
+                .messages
+                .last(where: { $0.role == .assistant })?
+                .text == "Partial reply"
+        }
+        XCTAssertTrue(didStreamPartialReply)
+
+        store.stopSending(in: conversationID)
+        await sendTask.value
+
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertFalse(store.isSending(conversationID: conversationID))
+        XCTAssertNil(store.errorMessage(for: conversationID))
+        XCTAssertEqual(conversation.messages.count, 2)
+        XCTAssertEqual(conversation.messages.first?.role, .user)
+        XCTAssertEqual(conversation.messages.first?.text, "Stop this answer")
+        XCTAssertEqual(conversation.messages.last?.role, .assistant)
+        XCTAssertEqual(conversation.messages.last?.text, "Partial reply")
+        XCTAssertEqual(conversation.messages.last?.status, .failed)
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeoutNanoseconds: UInt64 = 2_000_000_000,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if condition() {
+                return true
+            }
+
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        return condition()
+    }
 }
 
 private struct MockTranscriptionService: AITranscriptionService {
@@ -625,11 +883,12 @@ private struct MockTranscriptionService: AITranscriptionService {
 
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult {
         VoiceTranscriptionResult(
             text: transcript,
-            model: "gemini-3-flash-preview"
+            model: model
         )
     }
 }
@@ -659,14 +918,13 @@ private final class FailingThenSuccessTranscriptionService: AITranscriptionServi
 
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using model: String
     ) async throws -> VoiceTranscriptionResult {
-        let attemptNumber: Int = {
-            lock.lock()
-            defer { lock.unlock() }
+        let attemptNumber = lock.withLock {
             callCount += 1
             return callCount
-        }()
+        }
 
         if attemptNumber <= failuresBeforeSuccess {
             throw URLError(.networkConnectionLost, userInfo: [
@@ -676,7 +934,33 @@ private final class FailingThenSuccessTranscriptionService: AITranscriptionServi
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: "gemini-3-flash-preview"
+            model: model
+        )
+    }
+}
+
+private final class CapturingTranscriptionService: AITranscriptionService {
+    private let transcript: String
+    private let lock = NSLock()
+
+    private(set) var requestedModels: [String] = []
+
+    init(transcript: String) {
+        self.transcript = transcript
+    }
+
+    func transcribeUserAudio(
+        _ audioAttachment: ChatAttachment,
+        in conversation: ConversationThread,
+        using model: String
+    ) async throws -> VoiceTranscriptionResult {
+        lock.withLock {
+            requestedModels.append(model)
+        }
+
+        return VoiceTranscriptionResult(
+            text: transcript,
+            model: model
         )
     }
 }
@@ -712,6 +996,54 @@ private final class FailingThenSuccessAIStreamingService: AIStreamingService {
 
             continuation.yield(.answerDelta("Echo: \(latestUserText)"))
             continuation.finish()
+        }
+    }
+}
+
+private final class SequentialReplyAIStreamingService: AIStreamingService {
+    private let replies: [String]
+    private let lock = NSLock()
+
+    private(set) var callCount = 0
+
+    init(replies: [String]) {
+        self.replies = replies
+    }
+
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        let replyIndex: Int = {
+            lock.lock()
+            defer { lock.unlock() }
+            let index = min(callCount, replies.count - 1)
+            callCount += 1
+            return index
+        }()
+
+        let reply = replies[replyIndex]
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.answerDelta(reply))
+            continuation.finish()
+        }
+    }
+}
+
+private struct CancellableStreamingAIStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let streamTask = Task {
+                continuation.yield(.answerDelta("Partial reply"))
+
+                do {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                streamTask.cancel()
+            }
         }
     }
 }
