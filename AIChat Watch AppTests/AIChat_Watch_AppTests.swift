@@ -114,6 +114,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let requestBody = client.makeRequestBody(for: conversation)
 
         XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextBuilder.conciseSystemPrompt)
+        XCTAssertEqual(requestBody.generationConfig.temperature, 1)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
@@ -202,6 +203,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let requestBody = client.makeRequestBody(for: conversation)
 
+        XCTAssertEqual(requestBody.generationConfig.temperature, 0.65)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, 8_192)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
@@ -455,6 +457,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
 
         XCTAssertEqual(request.contents.count, 1)
+        XCTAssertEqual(request.generationConfig.temperature, 1)
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Expect the product name AIChat Pro.") == true)
@@ -501,6 +504,41 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("The codename may be Lighthouse.") == true)
         XCTAssertFalse(request.contents[0].parts.first?.text?.contains("Recent conversation context:") == true)
+    }
+
+    func testGemini25TranscriptionKeepsFallbackTemperature() {
+        let audioData = Data([0xAA, 0xBB, 0xCC])
+        let audioAttachment = try! ChatAttachment.makeRecordedAudio(
+            from: audioData,
+            suggestedFilename: "voice.wav",
+            durationSeconds: 4.5
+        )
+        let conversation = ConversationThread(messages: [])
+
+        let service = GeminiTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = service.makeRequestBody(
+            for: audioAttachment,
+            in: conversation,
+            using: VoiceTranscriptionConfiguration(
+                model: "gemini-2.5-flash",
+                customPrompt: "",
+                includesContext: false
+            )
+        )
+
+        XCTAssertEqual(request.generationConfig.temperature, 0.1)
     }
 
     @MainActor

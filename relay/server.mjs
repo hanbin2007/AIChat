@@ -65,7 +65,11 @@ function maxOutputTokensForModel(model = "") {
   return 8192;
 }
 
-function toGeminiRequest(body) {
+function temperatureForModel(model, fallbackTemperature) {
+  return String(model || "").startsWith("gemini-3") ? 1 : fallbackTemperature;
+}
+
+function toGeminiRequest(body, model) {
   return {
     systemInstruction: body.systemPrompt
       ? {
@@ -94,18 +98,18 @@ function toGeminiRequest(body) {
       };
     }),
     generationConfig: {
-      temperature: 0.65,
+      temperature: temperatureForModel(model, 0.65),
       topP: 0.9,
       maxOutputTokens:
         Number.isFinite(body.maxOutputTokens) && body.maxOutputTokens > 0
           ? Math.floor(body.maxOutputTokens)
-          : maxOutputTokensForModel(body.model),
-      thinkingConfig: thinkingConfigFor(body.model, body.thinkingIntensity, body.includeThoughts !== false)
+          : maxOutputTokensForModel(model),
+      thinkingConfig: thinkingConfigFor(model, body.thinkingIntensity, body.includeThoughts !== false)
     }
   };
 }
 
-function toGeminiTranscriptionRequest(body) {
+function toGeminiTranscriptionRequest(body, model) {
   return {
     systemInstruction: body.systemPrompt
       ? {
@@ -127,7 +131,7 @@ function toGeminiTranscriptionRequest(body) {
       }
     ],
     generationConfig: {
-      temperature: 0.1,
+      temperature: temperatureForModel(model, 0.1),
       topP: 0.95,
       maxOutputTokens: 1024
     }
@@ -427,9 +431,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.url === "/v1/chat/stream") {
     try {
+      const model = body.model || "gemini-3-flash-preview";
       await streamGeminiResponse({
-        model: body.model || "gemini-3-flash-preview",
-        requestBody: toGeminiRequest(body),
+        model,
+        requestBody: toGeminiRequest(body, model),
         res
       });
     } catch (error) {
@@ -439,9 +444,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    const model = body.model || "gemini-3-flash-preview";
     const response = await transcribeGeminiResponse({
-      model: body.model || "gemini-3-flash-preview",
-      requestBody: toGeminiTranscriptionRequest(body)
+      model,
+      requestBody: toGeminiTranscriptionRequest(body, model)
     });
     sendJson(res, 200, response);
   } catch (error) {

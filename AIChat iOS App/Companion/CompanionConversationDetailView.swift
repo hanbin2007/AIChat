@@ -505,7 +505,8 @@ private struct CompanionHeaderMetric: View {
                 font: .caption.weight(.semibold),
                 color: .white,
                 gap: 18,
-                speed: 24
+                speed: 24,
+                expandsHorizontally: true
             )
         }
         .padding(.horizontal, 12)
@@ -533,7 +534,8 @@ private struct CompanionComposerMenuLabel: View {
                 font: .caption.weight(.semibold),
                 color: .white,
                 gap: 18,
-                speed: 24
+                speed: 24,
+                expandsHorizontally: true
             )
 
             Spacer(minLength: 0)
@@ -569,7 +571,8 @@ private struct CompanionInlineStatus: View {
                 font: .subheadline,
                 color: .white.opacity(0.88),
                 gap: 18,
-                speed: 24
+                speed: 24,
+                expandsHorizontally: true
             )
         }
         .padding(.horizontal, 14)
@@ -631,7 +634,8 @@ private struct CompanionDraftAttachmentCard: View {
                 font: .caption,
                 color: .white.opacity(0.82),
                 gap: 18,
-                speed: 22
+                speed: 22,
+                expandsHorizontally: true
             )
         }
     }

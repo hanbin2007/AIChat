@@ -191,12 +191,16 @@ struct GeminiTranscriptionService: AITranscriptionService {
                 )
             ],
             generationConfig: GeminiGenerationConfig(
-                temperature: 0.1,
+                temperature: requestTemperature(for: transcriptionConfiguration.model, fallback: 0.1),
                 topP: 0.95,
                 maxOutputTokens: 1_024,
                 thinkingConfig: nil
             )
         )
+    }
+
+    private func requestTemperature(for model: String, fallback: Double) -> Double {
+        model.hasPrefix("gemini-3") ? 1 : fallback
     }
 
     private func extractTranscript(from responseEnvelope: GeminiGenerateContentResponse) -> String {

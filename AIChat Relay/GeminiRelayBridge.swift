@@ -144,7 +144,7 @@ struct GeminiRelayBridge {
 
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        let requestBody = try encoder.encode(makeGeminiTranscriptionRequest(from: relayRequest))
+        let requestBody = try encoder.encode(makeGeminiTranscriptionRequest(from: relayRequest, model: model))
         request.httpBody = requestBody
 
         if let debugLog {
@@ -241,7 +241,7 @@ struct GeminiRelayBridge {
                 )
             },
             generationConfig: GeminiGenerationConfig(
-                temperature: 0.65,
+                temperature: temperature(for: model, fallback: 0.65),
                 topP: 0.9,
                 maxOutputTokens: request.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil } ?? maxOutputTokens(for: model),
                 thinkingConfig: thinkingConfig(
@@ -253,7 +253,10 @@ struct GeminiRelayBridge {
         )
     }
 
-    private func makeGeminiTranscriptionRequest(from request: RelayTranscriptionRequest) -> GeminiGenerateContentRequest {
+    private func makeGeminiTranscriptionRequest(
+        from request: RelayTranscriptionRequest,
+        model: String
+    ) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
                 GeminiContent(role: nil, parts: [GeminiPart(text: $0, inlineData: nil)])
@@ -274,12 +277,16 @@ struct GeminiRelayBridge {
                 )
             ],
             generationConfig: GeminiGenerationConfig(
-                temperature: 0.1,
+                temperature: temperature(for: model, fallback: 0.1),
                 topP: 0.95,
                 maxOutputTokens: 1_024,
                 thinkingConfig: nil
             )
         )
+    }
+
+    private func temperature(for model: String, fallback: Double) -> Double {
+        model.hasPrefix("gemini-3") ? 1 : fallback
     }
 
     private func thinkingConfig(

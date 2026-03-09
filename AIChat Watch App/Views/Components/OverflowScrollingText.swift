@@ -13,6 +13,7 @@ struct OverflowScrollingText: View {
     var color: Color = .primary
     var gap: CGFloat = 20
     var speed: CGFloat = 28
+    var expandsHorizontally: Bool = false
 
     @State private var textWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
@@ -22,52 +23,53 @@ struct OverflowScrollingText: View {
     }
 
     var body: some View {
-        Group {
-            if shouldScroll {
-                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                    let cycleDistance = textWidth + gap
-                    let cycleDuration = max(Double(cycleDistance / max(speed, 1)), 0.1)
-                    let elapsed = context.date.timeIntervalSinceReferenceDate
-                        .truncatingRemainder(dividingBy: cycleDuration)
-                    let progress = elapsed / cycleDuration
-                    let offset = -CGFloat(progress) * cycleDistance
+        widthBehavior {
+            Group {
+                if shouldScroll {
+                    TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+                        let cycleDistance = textWidth + gap
+                        let cycleDuration = max(Double(cycleDistance / max(speed, 1)), 0.1)
+                        let elapsed = context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: cycleDuration)
+                        let progress = elapsed / cycleDuration
+                        let offset = -CGFloat(progress) * cycleDistance
 
-                    HStack(spacing: gap) {
-                        textView(fixed: true)
-                        textView(fixed: true)
+                        HStack(spacing: gap) {
+                            textView(fixed: true)
+                            textView(fixed: true)
+                        }
+                        .offset(x: offset)
                     }
-                    .offset(x: offset)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    textView(fixed: false)
                 }
-            } else {
-                textView(fixed: false)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .background(
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: OverflowScrollingTextContainerWidthPreferenceKey.self,
-                    value: geometry.size.width
-                )
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: OverflowScrollingTextContainerWidthPreferenceKey.self,
+                        value: geometry.size.width
+                    )
+                }
+            )
+            .overlay(alignment: .leading) {
+                textView(fixed: true)
+                    .hidden()
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: OverflowScrollingTextWidthPreferenceKey.self,
+                                value: geometry.size.width
+                            )
+                        }
+                    )
+                    .allowsHitTesting(false)
             }
-        )
-        .overlay(alignment: .leading) {
-            textView(fixed: true)
-                .hidden()
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: OverflowScrollingTextWidthPreferenceKey.self,
-                            value: geometry.size.width
-                        )
-                    }
-                )
+            .onPreferenceChange(OverflowScrollingTextWidthPreferenceKey.self) { textWidth = $0 }
+            .onPreferenceChange(OverflowScrollingTextContainerWidthPreferenceKey.self) { containerWidth = $0 }
+            .clipped()
+            .accessibilityLabel(text)
         }
-        .onPreferenceChange(OverflowScrollingTextWidthPreferenceKey.self) { textWidth = $0 }
-        .onPreferenceChange(OverflowScrollingTextContainerWidthPreferenceKey.self) { containerWidth = $0 }
-        .clipped()
-        .accessibilityLabel(text)
     }
 
     @ViewBuilder
@@ -81,6 +83,16 @@ struct OverflowScrollingText: View {
             view.fixedSize(horizontal: true, vertical: false)
         } else {
             view
+        }
+    }
+
+    @ViewBuilder
+    private func widthBehavior<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if expandsHorizontally {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            content()
         }
     }
 }
