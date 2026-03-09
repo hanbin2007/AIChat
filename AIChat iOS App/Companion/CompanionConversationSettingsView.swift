@@ -15,6 +15,7 @@ struct CompanionConversationSettingsView: View {
     let conversationID: UUID
 
     @State private var draftTitle = ""
+    @State private var draftSystemPrompt = ""
 
     var body: some View {
         NavigationStack {
@@ -47,40 +48,51 @@ struct CompanionConversationSettingsView: View {
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
                 }
 
-                Section("请求") {
-                    Stepper(
-                        value: sendFailureRetryLimitBinding(),
-                        in: ChatStore.minimumSendFailureRetryLimit...ChatStore.maximumSendFailureRetryLimit
-                    ) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("请求失败自动重试")
-                            Text("发送和语音转录失败后最多重试 \(chatStore.sendFailureRetryLimit) 次，最高 10 次。")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Picker("语音识别模型", selection: transcriptionModelBinding()) {
-                        ForEach(chatStore.availableTranscriptionModelOptions()) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-                }
-
                 if let conversation = chatStore.conversation(id: conversationID) {
                     let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
                     Section("AI") {
                         LabeledContent("模型", value: AIModelCatalog.displayName(for: aiConfiguration.model))
                         LabeledContent("Thinking", value: aiConfiguration.thinkingIntensity.displayName)
-                        LabeledContent("Prompt", value: aiConfiguration.systemPromptMode.displayName)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("系统提示词")
+                                .font(.headline)
 
-                        Picker("System Prompt", selection: systemPromptModeBinding(for: conversation.id)) {
-                            ForEach(AISystemPromptMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
+                            TextField(
+                                "留空则使用默认系统提示词",
+                                text: $draftSystemPrompt,
+                                axis: .vertical
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(chatStore.isReadOnlyMode)
+
+                            Text(systemPromptHint(for: aiConfiguration))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+
+                            Button("保存系统提示词") {
+                                Task {
+                                    await chatStore.updateCustomSystemPrompt(
+                                        draftSystemPrompt,
+                                        for: conversation.id
+                                    )
+                                }
+                            }
+                            .disabled(chatStore.isReadOnlyMode)
+
+                            if draftSystemPrompt.trimmed.isEmpty == false {
+                                Button("清空系统提示词", role: .destructive) {
+                                    draftSystemPrompt = ""
+                                    Task {
+                                        await chatStore.updateCustomSystemPrompt(
+                                            "",
+                                            for: conversation.id
+                                        )
+                                    }
+                                }
+                                .disabled(chatStore.isReadOnlyMode)
                             }
                         }
-                        .disabled(chatStore.isReadOnlyMode)
                     }
                 }
 
@@ -105,43 +117,18 @@ struct CompanionConversationSettingsView: View {
             }
             .onAppear {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
+                draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
             }
         }
     }
 
-    private func systemPromptModeBinding(for conversationID: UUID) -> Binding<AISystemPromptMode> {
-        Binding(
-            get: {
-                chatStore.aiConfiguration(for: conversationID).systemPromptMode
-            },
-            set: { newValue in
-                Task {
-                    await chatStore.updateSystemPromptMode(newValue, for: conversationID)
-                }
-            }
-        )
-    }
+    private func systemPromptHint(for configuration: ConversationAIConfiguration) -> String {
+        if configuration.systemPromptMode == .default,
+           configuration.customSystemPrompt == nil {
+            return "留空时当前会话不会发送系统提示词；输入内容后会改为使用自定义系统提示词。"
+        }
 
-    private func sendFailureRetryLimitBinding() -> Binding<Int> {
-        Binding(
-            get: {
-                chatStore.sendFailureRetryLimit
-            },
-            set: { newValue in
-                chatStore.updateSendFailureRetryLimit(newValue)
-            }
-        )
-    }
-
-    private func transcriptionModelBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.selectedTranscriptionModel
-            },
-            set: { newValue in
-                chatStore.updateTranscriptionModel(newValue)
-            }
-        )
+        return "留空时继续使用内置系统提示词。"
     }
 }
 #endif

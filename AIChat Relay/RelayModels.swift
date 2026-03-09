@@ -21,6 +21,13 @@ struct RelayLogEntry: Identifiable, Equatable, Sendable {
     let message: String
 }
 
+struct RelayDebugEntry: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let timestamp: Date
+    let title: String
+    let body: String
+}
+
 struct RelayEndpoint: Identifiable, Equatable, Sendable {
     let id = UUID()
     let title: String
@@ -41,6 +48,7 @@ enum RelayServerEvent: Sendable {
     case didReceiveRequest(path: String, remoteAddress: String?)
     case didCompleteRequest(path: String, remoteAddress: String?)
     case didFailRequest(path: String, remoteAddress: String?, statusCode: Int, message: String)
+    case debug(title: String, body: String)
     case log(level: RelayLogLevel, message: String)
     case listenerFailed(message: String)
 }

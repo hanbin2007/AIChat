@@ -494,10 +494,13 @@ private struct CompanionHeaderMetric: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.56))
 
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(2)
+            OverflowScrollingText(
+                text: value,
+                font: .caption.weight(.semibold),
+                color: .white,
+                gap: 18,
+                speed: 24
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -519,9 +522,13 @@ private struct CompanionComposerMenuLabel: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.cyan.opacity(0.92))
 
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+            OverflowScrollingText(
+                text: title,
+                font: .caption.weight(.semibold),
+                color: .white,
+                gap: 18,
+                speed: 24
+            )
 
             Spacer(minLength: 0)
 
@@ -551,9 +558,13 @@ private struct CompanionInlineStatus: View {
         HStack(spacing: 10) {
             Image(systemName: iconName)
                 .foregroundStyle(.cyan)
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.88))
+            OverflowScrollingText(
+                text: title,
+                font: .subheadline,
+                color: .white.opacity(0.88),
+                gap: 18,
+                speed: 24
+            )
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -609,10 +620,13 @@ private struct CompanionDraftAttachmentCard: View {
                 .offset(x: 6, y: -6)
             }
 
-            Text(attachment.filename)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.82))
-                .lineLimit(1)
+            OverflowScrollingText(
+                text: attachment.filename,
+                font: .caption,
+                color: .white.opacity(0.82),
+                gap: 18,
+                speed: 22
+            )
         }
     }
 }

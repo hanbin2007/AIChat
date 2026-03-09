@@ -40,6 +40,7 @@ struct RelayDashboardView: View {
                     }
 
                     activityCard
+                    debugCard
                 }
                 .padding(28)
             }
@@ -150,6 +151,7 @@ struct RelayDashboardView: View {
             }
 
             Toggle("Start relay when the app launches", isOn: $settings.autoStartOnLaunch)
+            Toggle("Capture request/response debug logs", isOn: $settings.debugLoggingEnabled)
 
             if let configurationIssue = controller.configurationIssue {
                 Label(configurationIssue, systemImage: "exclamationmark.triangle.fill")
@@ -298,6 +300,78 @@ struct RelayDashboardView: View {
                 }
             }
             .frame(minHeight: 240)
+        }
+        .padding(24)
+        .background(cardBackground)
+    }
+
+    private var debugCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Debug")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+
+                Spacer()
+
+                Button("Clear") {
+                    controller.clearDebugEntries()
+                }
+                .buttonStyle(.bordered)
+                .disabled(controller.debugEntries.isEmpty)
+            }
+
+            if settings.debugLoggingEnabled == false {
+                Text("Enable debug capture to inspect client requests, Gemini upstream requests, and returned payloads.")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            } else if controller.debugEntries.isEmpty {
+                Text("No debug traffic yet. Send a request through the relay to populate this view.")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(controller.debugEntries.reversed())) { entry in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(entry.title)
+                                            .font(.system(size: 13, weight: .bold, design: .rounded))
+
+                                        Text(entry.timestamp.formatted(date: .omitted, time: .standard))
+                                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Button("Copy") {
+                                        controller.copyToPasteboard(entry.body, label: "debug entry")
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+
+                                TextEditor(text: .constant(entry.body))
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .scrollContentBackground(.hidden)
+                                    .frame(minHeight: 140, maxHeight: 200)
+                                    .padding(10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .fill(Color.black.opacity(0.88))
+                                    )
+                                    .foregroundStyle(Color.green.opacity(0.94))
+                            }
+                            .padding(16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(Color.white.opacity(0.72))
+                            )
+                        }
+                    }
+                }
+                .frame(minHeight: 280)
+            }
         }
         .padding(24)
         .background(cardBackground)

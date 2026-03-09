@@ -13,6 +13,7 @@ struct RelayRuntimeConfiguration: Equatable, Sendable {
     var relayBearerToken: String
     var port: UInt16
     var allowNetworkClients: Bool
+    var debugLoggingEnabled: Bool
 }
 
 @MainActor
@@ -37,6 +38,10 @@ final class RelaySettingsStore: ObservableObject {
         didSet { defaults.set(autoStartOnLaunch, forKey: Keys.autoStartOnLaunch) }
     }
 
+    @Published var debugLoggingEnabled: Bool {
+        didSet { defaults.set(debugLoggingEnabled, forKey: Keys.debugLoggingEnabled) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -59,6 +64,12 @@ final class RelaySettingsStore: ObservableObject {
             self.autoStartOnLaunch = defaults.bool(forKey: Keys.autoStartOnLaunch)
         }
 
+        if defaults.object(forKey: Keys.debugLoggingEnabled) == nil {
+            self.debugLoggingEnabled = false
+        } else {
+            self.debugLoggingEnabled = defaults.bool(forKey: Keys.debugLoggingEnabled)
+        }
+
         defaults.set(self.relayBearerToken, forKey: Keys.relayBearerToken)
     }
 
@@ -67,7 +78,8 @@ final class RelaySettingsStore: ObservableObject {
             geminiAPIKey: geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines),
             relayBearerToken: relayBearerToken.trimmingCharacters(in: .whitespacesAndNewlines),
             port: validatedPort ?? 8787,
-            allowNetworkClients: allowNetworkClients
+            allowNetworkClients: allowNetworkClients,
+            debugLoggingEnabled: debugLoggingEnabled
         )
     }
 
@@ -112,4 +124,5 @@ private enum Keys {
     static let portText = "relay.port_text"
     static let allowNetworkClients = "relay.allow_network_clients"
     static let autoStartOnLaunch = "relay.auto_start_on_launch"
+    static let debugLoggingEnabled = "relay.debug_logging_enabled"
 }

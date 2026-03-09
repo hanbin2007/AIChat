@@ -13,6 +13,7 @@ struct GeminiRelayBridge {
     func streamChat(
         relayRequest: RelayChatRequest,
         apiKey: String,
+        debugLog: (@Sendable (String, String) async -> Void)? = nil,
         onOpen: @escaping @Sendable () async throws -> Void,
         onEvent: @escaping @Sendable (RelayOutboundEvent) async throws -> Void
     ) async throws {
@@ -30,7 +31,20 @@ struct GeminiRelayBridge {
 
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(makeGeminiRequest(from: relayRequest, model: model))
+        let requestBody = try encoder.encode(makeGeminiRequest(from: relayRequest, model: model))
+        request.httpBody = requestBody
+
+        if let debugLog {
+            await debugLog(
+                "Gemini Request • Chat",
+                RelayDebugFormatter.httpRequest(
+                    method: request.httpMethod ?? "POST",
+                    url: request.url?.absoluteString ?? "",
+                    headers: request.allHTTPHeaderFields ?? [:],
+                    body: requestBody
+                )
+            )
+        }
 
         let (bytes, response) = try await session.bytes(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -39,6 +53,16 @@ struct GeminiRelayBridge {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             let errorData = try await readAllBytes(from: bytes)
+            if let debugLog {
+                await debugLog(
+                    "Gemini Response • Chat Error",
+                    RelayDebugFormatter.httpResponse(
+                        statusCode: httpResponse.statusCode,
+                        headers: httpHeaders(from: httpResponse),
+                        body: errorData
+                    )
+                )
+            }
             throw upstreamError(statusCode: httpResponse.statusCode, data: errorData)
         }
 
@@ -85,12 +109,27 @@ struct GeminiRelayBridge {
             throw RelayHTTPError.internalError("Relay stream ended before Gemini sent a terminal chunk.")
         }
 
+        if let debugLog {
+            await debugLog(
+                "Gemini Response • Chat",
+                RelayDebugFormatter.prettyJSON(
+                    [
+                        "status_code": httpResponse.statusCode,
+                        "finish_reason": finishReason,
+                        "answer_text": emittedAnswerText,
+                        "thought_text": emittedThoughtText
+                    ]
+                )
+            )
+        }
+
         try await onEvent(.done(finishReason))
     }
 
     func transcribeAudio(
         relayRequest: RelayTranscriptionRequest,
-        apiKey: String
+        apiKey: String,
+        debugLog: (@Sendable (String, String) async -> Void)? = nil
     ) async throws -> RelayTranscriptionResponse {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
@@ -105,7 +144,20 @@ struct GeminiRelayBridge {
 
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(makeGeminiTranscriptionRequest(from: relayRequest))
+        let requestBody = try encoder.encode(makeGeminiTranscriptionRequest(from: relayRequest))
+        request.httpBody = requestBody
+
+        if let debugLog {
+            await debugLog(
+                "Gemini Request • Transcription",
+                RelayDebugFormatter.httpRequest(
+                    method: request.httpMethod ?? "POST",
+                    url: request.url?.absoluteString ?? "",
+                    headers: request.allHTTPHeaderFields ?? [:],
+                    body: requestBody
+                )
+            )
+        }
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -113,6 +165,16 @@ struct GeminiRelayBridge {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            if let debugLog {
+                await debugLog(
+                    "Gemini Response • Transcription Error",
+                    RelayDebugFormatter.httpResponse(
+                        statusCode: httpResponse.statusCode,
+                        headers: httpHeaders(from: httpResponse),
+                        body: data
+                    )
+                )
+            }
             throw upstreamError(statusCode: httpResponse.statusCode, data: data)
         }
 
@@ -130,6 +192,17 @@ struct GeminiRelayBridge {
 
         guard transcript.isEmpty == false else {
             throw RelayHTTPError.internalError("Gemini did not return a usable transcript.")
+        }
+
+        if let debugLog {
+            await debugLog(
+                "Gemini Response • Transcription",
+                RelayDebugFormatter.httpResponse(
+                    statusCode: httpResponse.statusCode,
+                    headers: httpHeaders(from: httpResponse),
+                    body: data
+                )
+            )
         }
 
         return RelayTranscriptionResponse(
@@ -344,6 +417,16 @@ struct GeminiRelayBridge {
         }
 
         return .upstream(statusCode: statusCode, message: "Gemini relay failed.")
+    }
+
+    private func httpHeaders(from response: HTTPURLResponse) -> [String: String] {
+        response.allHeaderFields.reduce(into: [String: String]()) { partialResult, pair in
+            guard let key = pair.key as? String else {
+                return
+            }
+
+            partialResult[key] = String(describing: pair.value)
+        }
     }
 }
 

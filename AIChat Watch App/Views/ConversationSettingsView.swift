@@ -15,6 +15,7 @@ struct ConversationSettingsView: View {
     let conversationID: UUID
 
     @State private var draftTitle = ""
+    @State private var draftSystemPrompt = ""
 
     var body: some View {
         NavigationStack {
@@ -47,74 +48,51 @@ struct ConversationSettingsView: View {
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
                 }
 
-                Section("Requests") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Auto Retry")
-                                .font(.headline)
-                                .lineLimit(1)
-
-                            Text("Retry failed sends and voice transcriptions up to \(chatStore.sendFailureRetryLimit) times.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        HStack(spacing: 10) {
-                            retryAdjustmentButton(
-                                systemImage: "minus",
-                                action: {
-                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit - 1)
-                                }
-                            )
-                            .disabled(chatStore.sendFailureRetryLimit <= ChatStore.minimumSendFailureRetryLimit)
-
-                            Spacer(minLength: 0)
-
-                            Text("\(chatStore.sendFailureRetryLimit)")
-                                .font(.system(.title3, design: .rounded).weight(.semibold))
-                                .monospacedDigit()
-                                .frame(minWidth: 36)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.white.opacity(0.08))
-                                )
-
-                            Spacer(minLength: 0)
-
-                            retryAdjustmentButton(
-                                systemImage: "plus",
-                                action: {
-                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit + 1)
-                                }
-                            )
-                            .disabled(chatStore.sendFailureRetryLimit >= ChatStore.maximumSendFailureRetryLimit)
-                        }
-                    }
-
-                    Picker("Voice Model", selection: transcriptionModelBinding()) {
-                        ForEach(chatStore.availableTranscriptionModelOptions()) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-                }
-
                 if let conversation = chatStore.conversation(id: conversationID) {
                     let aiConfiguration = chatStore.aiConfiguration(for: conversation.id)
 
                     Section("AI") {
                         LabeledContent("Model", value: AIModelCatalog.displayName(for: aiConfiguration.model))
                         LabeledContent("Thinking", value: aiConfiguration.thinkingIntensity.displayName)
-                        LabeledContent("Prompt", value: aiConfiguration.systemPromptMode.displayName)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("System Prompt")
+                                .font(.headline)
 
-                        Picker("System Prompt", selection: systemPromptModeBinding(for: conversation.id)) {
-                            ForEach(AISystemPromptMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
+                            TextField(
+                                "Use the built-in prompt",
+                                text: $draftSystemPrompt,
+                                axis: .vertical
+                            )
+                            .disabled(chatStore.isReadOnlyMode)
+
+                            Text(systemPromptHint(for: aiConfiguration))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button("Save Prompt") {
+                                Task {
+                                    await chatStore.updateCustomSystemPrompt(
+                                        draftSystemPrompt,
+                                        for: conversation.id
+                                    )
+                                }
+                            }
+                            .disabled(chatStore.isReadOnlyMode)
+
+                            if draftSystemPrompt.trimmed.isEmpty == false {
+                                Button("Clear Prompt", role: .destructive) {
+                                    draftSystemPrompt = ""
+                                    Task {
+                                        await chatStore.updateCustomSystemPrompt(
+                                            "",
+                                            for: conversation.id
+                                        )
+                                    }
+                                }
+                                .disabled(chatStore.isReadOnlyMode)
                             }
                         }
-                        .disabled(chatStore.isReadOnlyMode)
                     }
                 }
 
@@ -132,45 +110,18 @@ struct ConversationSettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
+                draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
             }
         }
     }
 
-    private func systemPromptModeBinding(for conversationID: UUID) -> Binding<AISystemPromptMode> {
-        Binding(
-            get: {
-                chatStore.aiConfiguration(for: conversationID).systemPromptMode
-            },
-            set: { newValue in
-                Task {
-                    await chatStore.updateSystemPromptMode(newValue, for: conversationID)
-                }
-            }
-        )
-    }
-
-    private func transcriptionModelBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.selectedTranscriptionModel
-            },
-            set: { newValue in
-                chatStore.updateTranscriptionModel(newValue)
-            }
-        )
-    }
-
-    private func retryAdjustmentButton(systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .frame(width: 34, height: 34)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.10))
-                )
+    private func systemPromptHint(for configuration: ConversationAIConfiguration) -> String {
+        if configuration.systemPromptMode == .default,
+           configuration.customSystemPrompt == nil {
+            return "Leave this empty to send no system prompt. Enter text here to use a custom system prompt."
         }
-        .buttonStyle(.plain)
+
+        return "Leave this empty to use the built-in system prompt for new replies."
     }
 }
 #endif

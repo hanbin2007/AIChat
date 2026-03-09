@@ -17,6 +17,22 @@ struct VoiceTranscriptionResult: Equatable {
     var model: String
 }
 
+struct VoiceTranscriptionConfiguration: Equatable {
+    var model: String
+    var customPrompt: String
+    var includesContext: Bool
+
+    init(
+        model: String,
+        customPrompt: String = "",
+        includesContext: Bool = true
+    ) {
+        self.model = model
+        self.customPrompt = customPrompt
+        self.includesContext = includesContext
+    }
+}
+
 protocol AIStreamingService {
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error>
 }
@@ -25,7 +41,7 @@ protocol AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using configuration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult
 }
 

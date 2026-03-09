@@ -15,6 +15,7 @@ struct CompanionConversationListView: View {
     let onCreateConversation: () -> Void
 
     @State private var isShowingActivationCenter = false
+    @State private var isShowingGlobalSettings = false
 
     var body: some View {
         ZStack {
@@ -105,14 +106,24 @@ struct CompanionConversationListView: View {
         .sheet(isPresented: $isShowingActivationCenter) {
             CompanionActivationCenterView()
         }
+        .sheet(isPresented: $isShowingGlobalSettings) {
+            CompanionGlobalSettingsView()
+        }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItemGroup(placement: .topBarLeading) {
                 Button {
                     isShowingActivationCenter = true
                 } label: {
                     Image(systemName: chatStore.isReadOnlyMode ? "key.fill" : "checkmark.seal")
                 }
                 .accessibilityLabel(chatStore.isReadOnlyMode ? "激活当前设备" : "管理授权")
+
+                Button {
+                    isShowingGlobalSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("全局设置")
             }
 
             ToolbarItem(placement: .topBarTrailing) {

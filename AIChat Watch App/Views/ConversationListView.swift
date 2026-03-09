@@ -12,6 +12,7 @@ struct ConversationListView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
+    @State private var isShowingGlobalSettings = false
 
     var body: some View {
         ZStack {
@@ -96,7 +97,19 @@ struct ConversationListView: View {
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
         }
+        .sheet(isPresented: $isShowingGlobalSettings) {
+            GlobalSettingsView()
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isShowingGlobalSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Global settings")
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {

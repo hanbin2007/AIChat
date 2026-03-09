@@ -201,7 +201,7 @@ struct RelayTranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         guard audioAttachment.isAudio else {
             throw VoiceTranscriptionError.invalidAudio
@@ -224,7 +224,7 @@ struct RelayTranscriptionService: AITranscriptionService {
             makeRelayRequest(
                 for: audioAttachment,
                 in: conversation,
-                using: model
+                using: transcriptionConfiguration
             )
         )
 
@@ -248,20 +248,22 @@ struct RelayTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: relayResponse.model.nonEmptyTrimmed ?? model
+            model: relayResponse.model.nonEmptyTrimmed ?? transcriptionConfiguration.model
         )
     }
 
     func makeRelayRequest(
         for audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) -> RelayTranscriptionRequest {
         RelayTranscriptionRequest(
-            model: model,
+            model: transcriptionConfiguration.model,
             systemPrompt: VoiceTranscriptionPromptBuilder.systemPrompt,
             prompt: VoiceTranscriptionPromptBuilder.prompt(
                 for: conversation,
+                customPrompt: transcriptionConfiguration.customPrompt,
+                includesContext: transcriptionConfiguration.includesContext,
                 maxContextMessages: maxContextMessages,
                 maxContextCharacters: maxContextCharacters
             ),

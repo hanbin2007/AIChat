@@ -119,7 +119,14 @@ actor LocalRelayServer {
             let request = try await readRequest(from: connection)
             let path = request.path
             let remoteAddress = remoteAddressDescription(for: connection)
+            let configuration = await configurationProvider()
             await eventHandler(.didReceiveRequest(path: path, remoteAddress: remoteAddress))
+            await logDebugRequestIfNeeded(
+                request,
+                path: path,
+                remoteAddress: remoteAddress,
+                configuration: configuration
+            )
 
             if request.method == "GET", path == "/health" {
                 try await sendJSON(
@@ -153,7 +160,6 @@ actor LocalRelayServer {
                 return
             }
 
-            let configuration = await configurationProvider()
             guard configuration.geminiAPIKey.isEmpty == false else {
                 try await sendFailureResponse(
                     statusCode: RelayHTTPError.missingConfiguration("Gemini API key is missing.").statusCode,
@@ -213,6 +219,7 @@ actor LocalRelayServer {
                     try await relayBridge.streamChat(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled),
                         onOpen: {
                             streamState.didOpen = true
                             try await self.sendSSEHeaders(on: connection)
@@ -274,13 +281,20 @@ actor LocalRelayServer {
                 do {
                     let relayResponse = try await relayBridge.transcribeAudio(
                         relayRequest: relayRequest,
-                        apiKey: configuration.geminiAPIKey
+                        apiKey: configuration.geminiAPIKey,
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
                     )
 
                     try await sendJSON(
                         statusCode: 200,
                         payload: relayResponse,
                         on: connection
+                    )
+                    await logDebugClientResponseIfNeeded(
+                        relayResponse,
+                        path: path,
+                        statusCode: 200,
+                        enabled: configuration.debugLoggingEnabled
                     )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
@@ -552,6 +566,67 @@ actor LocalRelayServer {
                 remoteAddress: remoteAddress,
                 statusCode: statusCode,
                 message: message
+            )
+        )
+    }
+
+    private func debugLogger(
+        enabled: Bool
+    ) -> (@Sendable (String, String) async -> Void)? {
+        guard enabled else {
+            return nil
+        }
+
+        return { [eventHandler] title, body in
+            await eventHandler(.debug(title: title, body: body))
+        }
+    }
+
+    private func logDebugRequestIfNeeded(
+        _ request: HTTPRequest,
+        path: String,
+        remoteAddress: String?,
+        configuration: RelayRuntimeConfiguration
+    ) async {
+        guard configuration.debugLoggingEnabled else {
+            return
+        }
+
+        let location = remoteAddress.map { " from \($0)" } ?? ""
+        await eventHandler(
+            .debug(
+                title: "Client Request • \(request.method) \(path)\(location)",
+                body: RelayDebugFormatter.httpRequest(
+                    method: request.method,
+                    url: path,
+                    headers: request.headers,
+                    body: request.body
+                )
+            )
+        )
+    }
+
+    private func logDebugClientResponseIfNeeded<T: Encodable>(
+        _ payload: T,
+        path: String,
+        statusCode: Int,
+        enabled: Bool
+    ) async {
+        guard enabled else {
+            return
+        }
+
+        let encoder = JSONEncoder()
+        let body = try? encoder.encode(payload)
+
+        await eventHandler(
+            .debug(
+                title: "Client Response • \(path)",
+                body: RelayDebugFormatter.httpResponse(
+                    statusCode: statusCode,
+                    headers: ["content-type": "application/json; charset=utf-8"],
+                    body: body
+                )
             )
         )
     }

@@ -95,14 +95,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		E1A0C0010000000000000003 /* Frameworks */ = {
+		B1C2D3E40100000000000007 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		B1C2D3E40100000000000007 /* Frameworks */ = {
+		E1A0C0010000000000000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -218,8 +218,8 @@
 				FD4A0A252F5C50E700E9D16E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				FD4A0A522F5C50E800E9D16E /* AIChat iOS App */,
 				FD4A0A262F5C50E700E9D16E /* AIChat Watch App */,
+				FD4A0A522F5C50E800E9D16E /* AIChat iOS App */,
 				FD4A0A532F5C50E800E9D16E /* Shared Licensing */,
 			);
 			name = AIChat;
@@ -423,14 +423,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		E1A0C0010000000000000006 /* Sources */ = {
+		B1C2D3E40100000000000006 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		B1C2D3E40100000000000006 /* Sources */ = {
+		E1A0C0010000000000000006 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (

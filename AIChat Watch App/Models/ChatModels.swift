@@ -116,21 +116,25 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
     var model: String
     var thinkingIntensity: AIThinkingIntensity
     var systemPromptMode: AISystemPromptMode
+    var customSystemPrompt: String?
 
     private enum CodingKeys: String, CodingKey {
         case model
         case thinkingIntensity
         case systemPromptMode
+        case customSystemPrompt
     }
 
     init(
         model: String,
         thinkingIntensity: AIThinkingIntensity = .balanced,
-        systemPromptMode: AISystemPromptMode = .concise
+        systemPromptMode: AISystemPromptMode = .concise,
+        customSystemPrompt: String? = nil
     ) {
         self.model = model
         self.thinkingIntensity = thinkingIntensity
         self.systemPromptMode = systemPromptMode
+        self.customSystemPrompt = customSystemPrompt?.nonEmptyTrimmed
     }
 
     init(from decoder: Decoder) throws {
@@ -138,6 +142,7 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         self.model = try container.decode(String.self, forKey: .model)
         self.thinkingIntensity = try container.decodeIfPresent(AIThinkingIntensity.self, forKey: .thinkingIntensity) ?? .balanced
         self.systemPromptMode = try container.decodeIfPresent(AISystemPromptMode.self, forKey: .systemPromptMode) ?? .concise
+        self.customSystemPrompt = try container.decodeIfPresent(String.self, forKey: .customSystemPrompt)?.nonEmptyTrimmed
     }
 
     func encode(to encoder: Encoder) throws {
@@ -145,6 +150,7 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         try container.encode(model, forKey: .model)
         try container.encode(thinkingIntensity, forKey: .thinkingIntensity)
         try container.encode(systemPromptMode, forKey: .systemPromptMode)
+        try container.encode(customSystemPrompt?.nonEmptyTrimmed, forKey: .customSystemPrompt)
     }
 }
 
@@ -420,8 +426,15 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         self.aiConfiguration = aiConfiguration
     }
 
-    static func empty(now: Date = .now) -> ConversationThread {
-        ConversationThread(createdAt: now, updatedAt: now)
+    static func empty(
+        now: Date = .now,
+        aiConfiguration: ConversationAIConfiguration? = nil
+    ) -> ConversationThread {
+        ConversationThread(
+            createdAt: now,
+            updatedAt: now,
+            aiConfiguration: aiConfiguration
+        )
     }
 
     var previewText: String {

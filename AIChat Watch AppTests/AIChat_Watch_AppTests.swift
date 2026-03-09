@@ -148,6 +148,36 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertNil(requestBody.systemInstruction)
     }
 
+    func testCustomSystemPromptOverridesBuiltInPrompt() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Summarize this thread")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3-flash-preview",
+                customSystemPrompt: "You are a strict proofreader. Return only corrected text."
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertEqual(
+            requestBody.systemInstruction?.parts.first?.text,
+            "You are a strict proofreader. Return only corrected text."
+        )
+    }
+
     func testGemini25RequestUsesThinkingBudget() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Summarize this thread")],
@@ -328,11 +358,16 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let request = service.makeRelayRequest(
             for: audioAttachment,
             in: conversation,
-            using: "gemini-3-flash-preview"
+            using: VoiceTranscriptionConfiguration(
+                model: "gemini-3-flash-preview",
+                customPrompt: "Product names may include Tokyo Skytree and Ginza Six.",
+                includesContext: true
+            )
         )
 
         XCTAssertEqual(request.model, "gemini-3-flash-preview")
         XCTAssertEqual(request.systemPrompt, VoiceTranscriptionPromptBuilder.systemPrompt)
+        XCTAssertTrue(request.prompt.contains("Product names may include Tokyo Skytree and Ginza Six."))
         XCTAssertTrue(request.prompt.contains("Assistant: Do you want the Tokyo or Osaka plan?"))
         XCTAssertTrue(request.prompt.contains("User: Use the Tokyo one and keep it short."))
         XCTAssertEqual(request.audio.mimeType, "audio/wav")
@@ -409,13 +444,63 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
 
-        let request = service.makeRequestBody(for: audioAttachment, in: conversation)
+        let request = service.makeRequestBody(
+            for: audioAttachment,
+            in: conversation,
+            using: VoiceTranscriptionConfiguration(
+                model: "gemini-3-flash-preview",
+                customPrompt: "Expect the product name AIChat Pro.",
+                includesContext: true
+            )
+        )
 
         XCTAssertEqual(request.contents.count, 1)
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
+        XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Expect the product name AIChat Pro.") == true)
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Assistant: Do you want the Tokyo or Osaka plan?") == true)
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("User: Use the Tokyo one and keep it short.") == true)
+    }
+
+    func testTranscriptionRequestCanExcludeConversationContext() {
+        let audioData = Data([0xAA, 0xBB, 0xCC])
+        let audioAttachment = try! ChatAttachment.makeRecordedAudio(
+            from: audioData,
+            suggestedFilename: "voice.wav",
+            durationSeconds: 4.5
+        )
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .assistant, text: "Reminder: the project codename is Lighthouse."),
+                ChatMessage(role: .user, text: "Keep that in mind.")
+            ]
+        )
+
+        let service = GeminiTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = service.makeRequestBody(
+            for: audioAttachment,
+            in: conversation,
+            using: VoiceTranscriptionConfiguration(
+                model: "gemini-3-flash-preview",
+                customPrompt: "The codename may be Lighthouse.",
+                includesContext: false
+            )
+        )
+
+        XCTAssertTrue(request.contents[0].parts.first?.text?.contains("The codename may be Lighthouse.") == true)
+        XCTAssertFalse(request.contents[0].parts.first?.text?.contains("Recent conversation context:") == true)
     }
 
     @MainActor
@@ -614,6 +699,50 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
 
         XCTAssertEqual(reloadedStore.selectedTranscriptionModel, "gemini-3.1-pro-preview")
+    }
+
+    @MainActor
+    func testCreateConversationUsesConfiguredDefaultParameters() async throws {
+        let suiteName = "AIChatTests.ConversationDefaults.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            defaults: defaults
+        )
+
+        store.updateDefaultConversationModel("gemini-3.1-pro-preview")
+        store.updateDefaultConversationThinkingIntensity(.deep)
+        store.updateDefaultConversationSystemPrompt("Answer like a release manager.")
+
+        let conversationID = await store.createConversation()
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+
+        XCTAssertEqual(conversation.aiConfiguration?.model, "gemini-3.1-pro-preview")
+        XCTAssertEqual(conversation.aiConfiguration?.thinkingIntensity, .deep)
+        XCTAssertEqual(conversation.aiConfiguration?.customSystemPrompt, "Answer like a release manager.")
     }
 
     @MainActor
@@ -884,11 +1013,11 @@ private struct MockTranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using configuration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         VoiceTranscriptionResult(
             text: transcript,
-            model: model
+            model: configuration.model
         )
     }
 }
@@ -919,7 +1048,7 @@ private final class FailingThenSuccessTranscriptionService: AITranscriptionServi
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using configuration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         let attemptNumber = lock.withLock {
             callCount += 1
@@ -934,7 +1063,7 @@ private final class FailingThenSuccessTranscriptionService: AITranscriptionServi
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: model
+            model: configuration.model
         )
     }
 }
@@ -952,15 +1081,15 @@ private final class CapturingTranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using configuration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         lock.withLock {
-            requestedModels.append(model)
+            requestedModels.append(configuration.model)
         }
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: model
+            model: configuration.model
         )
     }
 }

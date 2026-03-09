@@ -31,7 +31,10 @@ final class ChatStore: ObservableObject {
     @Published private(set) var syncStatusDescription: String
     @Published private(set) var activationState: OfflineActivationState?
     @Published private(set) var sendFailureRetryLimit: Int
+    @Published private(set) var defaultConversationConfiguration: ConversationAIConfiguration
     @Published private(set) var transcriptionModel: String
+    @Published private(set) var transcriptionCustomPrompt: String
+    @Published private(set) var transcriptionIncludesContext: Bool
 
     let configuration: AppConfiguration
     let storageDescription: String
@@ -72,10 +75,16 @@ final class ChatStore: ObservableObject {
         self.storageDescription = repository.storageDescription
         self.syncStatusDescription = syncBridge.currentStatus.description
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
+        self.defaultConversationConfiguration = Self.loadDefaultConversationConfiguration(
+            from: resolvedDefaults,
+            fallbackModel: configuration.geminiModel
+        )
         self.transcriptionModel = Self.loadTranscriptionModel(
             from: resolvedDefaults,
             fallbackModel: configuration.geminiTranscriptionModel
         )
+        self.transcriptionCustomPrompt = Self.loadTranscriptionCustomPrompt(from: resolvedDefaults)
+        self.transcriptionIncludesContext = Self.loadTranscriptionIncludesContext(from: resolvedDefaults)
 
         syncBridge.setStatusHandler { [weak self] status in
             self?.syncStatusDescription = status.description
@@ -204,7 +213,9 @@ final class ChatStore: ObservableObject {
     }
 
     func createConversation() async -> UUID {
-        let conversation = ConversationThread.empty()
+        let conversation = ConversationThread.empty(
+            aiConfiguration: defaultConversationConfiguration
+        )
         conversations.insert(conversation, at: 0)
         await persist(conversation, sync: true)
         return conversation.id
@@ -227,7 +238,7 @@ final class ChatStore: ObservableObject {
             )
         }
 
-        return licensedConfiguration(from: ConversationAIConfiguration(model: configuration.geminiModel))
+        return licensedConfiguration(from: defaultConversationConfiguration)
     }
 
     func availableModelOptions() -> [AIModelOption] {
@@ -248,6 +259,22 @@ final class ChatStore: ObservableObject {
     func availableThinkingIntensities(for conversationID: UUID) -> [AIThinkingIntensity] {
         let configuration = aiConfiguration(for: conversationID)
         return AIModelCatalog.availableThinkingIntensities(for: configuration.model)
+    }
+
+    func availableDefaultThinkingIntensities() -> [AIThinkingIntensity] {
+        AIModelCatalog.availableThinkingIntensities(for: defaultConversationConfiguration.model)
+    }
+
+    var defaultConversationSystemPrompt: String {
+        defaultConversationConfiguration.customSystemPrompt ?? ""
+    }
+
+    var selectedTranscriptionCustomPrompt: String {
+        transcriptionCustomPrompt
+    }
+
+    var isTranscriptionContextEnabled: Bool {
+        transcriptionIncludesContext
     }
 
     func updateModel(_ model: String, for conversationID: UUID) async {
@@ -287,6 +314,20 @@ final class ChatStore: ObservableObject {
 
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.systemPromptMode = systemPromptMode
+        }
+    }
+
+    func updateCustomSystemPrompt(
+        _ prompt: String,
+        for conversationID: UUID
+    ) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.customSystemPrompt = prompt.nonEmptyTrimmed
         }
     }
 
@@ -435,6 +476,47 @@ final class ChatStore: ObservableObject {
         defaults.set(normalizedLimit, forKey: DefaultsKeys.sendFailureRetryLimit)
     }
 
+    func updateDefaultConversationModel(_ model: String) {
+        let normalizedThinkingIntensity = AIModelCatalog.normalizedThinkingIntensity(
+            defaultConversationConfiguration.thinkingIntensity,
+            for: model
+        )
+
+        guard defaultConversationConfiguration.model != model ||
+                defaultConversationConfiguration.thinkingIntensity != normalizedThinkingIntensity
+        else {
+            return
+        }
+
+        defaultConversationConfiguration.model = model
+        defaultConversationConfiguration.thinkingIntensity = normalizedThinkingIntensity
+        persistDefaultConversationConfiguration()
+    }
+
+    func updateDefaultConversationThinkingIntensity(_ thinkingIntensity: AIThinkingIntensity) {
+        let normalizedThinkingIntensity = AIModelCatalog.normalizedThinkingIntensity(
+            thinkingIntensity,
+            for: defaultConversationConfiguration.model
+        )
+
+        guard defaultConversationConfiguration.thinkingIntensity != normalizedThinkingIntensity else {
+            return
+        }
+
+        defaultConversationConfiguration.thinkingIntensity = normalizedThinkingIntensity
+        persistDefaultConversationConfiguration()
+    }
+
+    func updateDefaultConversationSystemPrompt(_ prompt: String) {
+        let normalizedPrompt = prompt.nonEmptyTrimmed
+        guard defaultConversationConfiguration.customSystemPrompt != normalizedPrompt else {
+            return
+        }
+
+        defaultConversationConfiguration.customSystemPrompt = normalizedPrompt
+        persistDefaultConversationConfiguration()
+    }
+
     func updateTranscriptionModel(_ model: String) {
         let normalizedModel = AITranscriptionModelCatalog.normalizedModel(
             model,
@@ -446,6 +528,25 @@ final class ChatStore: ObservableObject {
 
         transcriptionModel = normalizedModel
         defaults.set(normalizedModel, forKey: DefaultsKeys.transcriptionModel)
+    }
+
+    func updateTranscriptionCustomPrompt(_ prompt: String) {
+        let normalizedPrompt = prompt
+        guard transcriptionCustomPrompt != normalizedPrompt else {
+            return
+        }
+
+        transcriptionCustomPrompt = normalizedPrompt
+        defaults.set(normalizedPrompt, forKey: DefaultsKeys.transcriptionCustomPrompt)
+    }
+
+    func updateTranscriptionIncludesContext(_ includesContext: Bool) {
+        guard transcriptionIncludesContext != includesContext else {
+            return
+        }
+
+        transcriptionIncludesContext = includesContext
+        defaults.set(includesContext, forKey: DefaultsKeys.transcriptionIncludesContext)
     }
 
     func sendMessage(in conversationID: UUID) async {
@@ -502,7 +603,11 @@ final class ChatStore: ObservableObject {
         conversationErrors[conversationID] = nil
         transcribingConversationIDs.insert(conversationID)
 
-        let transcriptionModel = selectedTranscriptionModel
+        let transcriptionConfiguration = VoiceTranscriptionConfiguration(
+            model: selectedTranscriptionModel,
+            customPrompt: selectedTranscriptionCustomPrompt,
+            includesContext: isTranscriptionContextEnabled
+        )
         let maximumRetryCount = sendFailureRetryLimit
         var finalError: Error?
         var attemptCount = 0
@@ -521,7 +626,7 @@ final class ChatStore: ObservableObject {
                 let transcription = try await transcriptionService.transcribeUserAudio(
                     audioAttachment,
                     in: currentConversation,
-                    using: transcriptionModel
+                    using: transcriptionConfiguration
                 )
 
                 transcribingConversationIDs.remove(conversationID)
@@ -699,6 +804,18 @@ final class ChatStore: ObservableObject {
             deviceToken: deviceIdentity.deviceToken
         )
         return resolvedConfiguration
+    }
+
+    private func persistDefaultConversationConfiguration() {
+        defaults.set(defaultConversationConfiguration.model, forKey: DefaultsKeys.defaultConversationModel)
+        defaults.set(
+            defaultConversationConfiguration.thinkingIntensity.rawValue,
+            forKey: DefaultsKeys.defaultConversationThinkingIntensity
+        )
+        defaults.set(
+            defaultConversationConfiguration.customSystemPrompt ?? "",
+            forKey: DefaultsKeys.defaultConversationSystemPrompt
+        )
     }
 
     private func activationFailureMessage(for modelID: String) -> String? {
@@ -1072,6 +1189,30 @@ final class ChatStore: ObservableObject {
         return normalizedValue
     }
 
+    private static func loadDefaultConversationConfiguration(
+        from defaults: UserDefaults,
+        fallbackModel: String
+    ) -> ConversationAIConfiguration {
+        let model = defaults.string(forKey: DefaultsKeys.defaultConversationModel)?.nonEmptyTrimmed ?? fallbackModel
+        let storedThinkingIntensity = defaults.string(forKey: DefaultsKeys.defaultConversationThinkingIntensity)
+            .flatMap(AIThinkingIntensity.init(rawValue:))
+        let thinkingIntensity = AIModelCatalog.normalizedThinkingIntensity(
+            storedThinkingIntensity ?? .balanced,
+            for: model
+        )
+        let customSystemPrompt = defaults.string(forKey: DefaultsKeys.defaultConversationSystemPrompt)?.nonEmptyTrimmed
+
+        defaults.set(model, forKey: DefaultsKeys.defaultConversationModel)
+        defaults.set(thinkingIntensity.rawValue, forKey: DefaultsKeys.defaultConversationThinkingIntensity)
+        defaults.set(customSystemPrompt ?? "", forKey: DefaultsKeys.defaultConversationSystemPrompt)
+
+        return ConversationAIConfiguration(
+            model: model,
+            thinkingIntensity: thinkingIntensity,
+            customSystemPrompt: customSystemPrompt
+        )
+    }
+
     private static func loadTranscriptionModel(
         from defaults: UserDefaults,
         fallbackModel: String
@@ -1086,6 +1227,25 @@ final class ChatStore: ObservableObject {
         return resolvedModel
     }
 
+    private static func loadTranscriptionCustomPrompt(from defaults: UserDefaults) -> String {
+        let prompt = defaults.string(forKey: DefaultsKeys.transcriptionCustomPrompt) ?? ""
+        defaults.set(prompt, forKey: DefaultsKeys.transcriptionCustomPrompt)
+        return prompt
+    }
+
+    private static func loadTranscriptionIncludesContext(from defaults: UserDefaults) -> Bool {
+        let includesContext: Bool
+
+        if defaults.object(forKey: DefaultsKeys.transcriptionIncludesContext) == nil {
+            includesContext = true
+        } else {
+            includesContext = defaults.bool(forKey: DefaultsKeys.transcriptionIncludesContext)
+        }
+
+        defaults.set(includesContext, forKey: DefaultsKeys.transcriptionIncludesContext)
+        return includesContext
+    }
+
     private static func normalizedSendFailureRetryLimit(_ value: Int) -> Int {
         min(max(value, minimumSendFailureRetryLimit), maximumSendFailureRetryLimit)
     }
@@ -1098,7 +1258,12 @@ final class ChatStore: ObservableObject {
 
 private enum DefaultsKeys {
     static let sendFailureRetryLimit = "chat.send_failure_retry_limit"
+    static let defaultConversationModel = "chat.default_conversation_model"
+    static let defaultConversationThinkingIntensity = "chat.default_conversation_thinking_intensity"
+    static let defaultConversationSystemPrompt = "chat.default_conversation_system_prompt"
     static let transcriptionModel = "chat.transcription_model"
+    static let transcriptionCustomPrompt = "chat.transcription_custom_prompt"
+    static let transcriptionIncludesContext = "chat.transcription_includes_context"
 }
 
 #if DEBUG
@@ -1116,11 +1281,11 @@ private struct PreviewAITranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using configuration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         VoiceTranscriptionResult(
             text: "This is a preview voice transcript.",
-            model: model
+            model: configuration.model
         )
     }
 }

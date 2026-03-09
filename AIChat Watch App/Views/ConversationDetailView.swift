@@ -671,12 +671,14 @@ private struct CompactMenuButtonLabel: View {
                 .frame(width: leadingIconFrameSize, height: leadingIconFrameSize)
                 .scaleEffect(leadingIconScale)
 
-            Text(title)
-                .font(.system(size: titlePointSize, weight: .semibold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .allowsTightening(true)
-                .layoutPriority(1)
+            OverflowScrollingText(
+                text: title,
+                font: .system(size: titlePointSize, weight: .semibold, design: .rounded),
+                color: .white,
+                gap: 16,
+                speed: 24
+            )
+            .layoutPriority(1)
 
             Spacer(minLength: 0)
 
@@ -739,11 +741,14 @@ private struct ComposerFlatActionButtonLabel: View {
                 HStack(spacing: 6) {
                     Image(systemName: systemName)
                         .font(.system(size: 12, weight: .semibold))
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
+                    OverflowScrollingText(
+                        text: title,
+                        font: .system(size: 12, weight: .semibold, design: .rounded),
+                        color: tintColor.opacity(isEnabled ? 1 : 0.42),
+                        gap: 12,
+                        speed: 22
+                    )
                 }
-                .foregroundStyle(tintColor.opacity(isEnabled ? 1 : 0.42))
             }
     }
 }
@@ -759,10 +764,13 @@ private struct RecordingStatusBanner: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(tint)
 
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.88))
-                .lineLimit(1)
+            OverflowScrollingText(
+                text: title,
+                font: .caption2.weight(.semibold),
+                color: .white.opacity(0.88),
+                gap: 14,
+                speed: 24
+            )
 
             Spacer(minLength: 0)
         }

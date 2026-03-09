@@ -14,6 +14,7 @@ import Foundation
 final class RelayServerController: ObservableObject {
     @Published private(set) var status: RelayServerStatus = .stopped
     @Published private(set) var logEntries: [RelayLogEntry] = []
+    @Published private(set) var debugEntries: [RelayDebugEntry] = []
     @Published private(set) var requestCount: Int = 0
     @Published private(set) var lastRequestAt: Date?
 
@@ -204,6 +205,11 @@ final class RelayServerController: ObservableObject {
         appendLog(level: .info, message: "Copied \(label) to the pasteboard.")
     }
 
+    func clearDebugEntries() {
+        debugEntries.removeAll()
+        appendLog(level: .info, message: "Cleared relay debug entries.")
+    }
+
     private func handleServerEvent(_ event: RelayServerEvent) {
         switch event {
         case .didStart:
@@ -228,6 +234,8 @@ final class RelayServerController: ObservableObject {
                     suffix: message
                 )
             )
+        case .debug(let title, let body):
+            appendDebug(title: title, body: body)
         case .log(let level, let message):
             appendLog(level: level, message: message)
         case .listenerFailed(let message):
@@ -247,6 +255,20 @@ final class RelayServerController: ObservableObject {
 
         if logEntries.count > 200 {
             logEntries.removeFirst(logEntries.count - 200)
+        }
+    }
+
+    private func appendDebug(title: String, body: String) {
+        debugEntries.append(
+            RelayDebugEntry(
+                timestamp: .now,
+                title: title,
+                body: body
+            )
+        )
+
+        if debugEntries.count > 60 {
+            debugEntries.removeFirst(debugEntries.count - 60)
         }
     }
 

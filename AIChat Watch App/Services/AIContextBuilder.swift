@@ -16,6 +16,10 @@ enum AIContextBuilder {
         """
 
     static func systemPrompt(for configuration: ConversationAIConfiguration) -> String? {
+        if let customSystemPrompt = configuration.customSystemPrompt?.nonEmptyTrimmed {
+            return customSystemPrompt
+        }
+
         switch configuration.systemPromptMode {
         case .concise:
             return conciseSystemPrompt

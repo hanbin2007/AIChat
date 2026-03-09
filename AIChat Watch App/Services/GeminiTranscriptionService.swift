@@ -20,24 +20,42 @@ enum VoiceTranscriptionPromptBuilder {
 
     static func prompt(
         for conversation: ConversationThread,
+        customPrompt: String,
+        includesContext: Bool,
         maxContextMessages: Int,
         maxContextCharacters: Int
     ) -> String {
         prompt(
-            contextSummary: AIContextBuilder.transcriptionContextSummary(
-                from: conversation.messages,
-                maxContextMessages: maxContextMessages,
-                maxCharacterBudget: maxContextCharacters
-            )
+            customPrompt: customPrompt,
+            contextSummary: includesContext ?
+                AIContextBuilder.transcriptionContextSummary(
+                    from: conversation.messages,
+                    maxContextMessages: maxContextMessages,
+                    maxCharacterBudget: maxContextCharacters
+                ) :
+                nil
         )
     }
 
-    static func prompt(contextSummary: String?) -> String {
+    static func prompt(
+        customPrompt: String,
+        contextSummary: String?
+    ) -> String {
         var prompt =
             """
             Transcribe the attached audio as the user's next chat message.
             Output only the transcript text.
             """
+
+        if let customPrompt = customPrompt.nonEmptyTrimmed {
+            prompt.append(
+                """
+
+                Extra transcription instructions:
+                \(customPrompt)
+                """
+            )
+        }
 
         if let contextSummary {
             prompt.append(
@@ -79,7 +97,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
-        using model: String
+        using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
         guard audioAttachment.isAudio else {
             throw VoiceTranscriptionError.invalidAudio
@@ -89,7 +107,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
             throw GeminiAPIError.missingAPIKey
         }
 
-        var request = URLRequest(url: requestURL(for: model))
+        var request = URLRequest(url: requestURL(for: transcriptionConfiguration.model))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
@@ -99,7 +117,8 @@ struct GeminiTranscriptionService: AITranscriptionService {
         request.httpBody = try encoder.encode(
             makeRequestBody(
                 for: audioAttachment,
-                in: conversation
+                in: conversation,
+                using: transcriptionConfiguration
             )
         )
 
@@ -130,7 +149,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: model
+            model: transcriptionConfiguration.model
         )
     }
 
@@ -142,7 +161,8 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
     func makeRequestBody(
         for audioAttachment: ChatAttachment,
-        in conversation: ConversationThread
+        in conversation: ConversationThread,
+        using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: GeminiContent.systemPrompt(VoiceTranscriptionPromptBuilder.systemPrompt),
@@ -153,6 +173,8 @@ struct GeminiTranscriptionService: AITranscriptionService {
                         GeminiPart(
                             text: VoiceTranscriptionPromptBuilder.prompt(
                                 for: conversation,
+                                customPrompt: transcriptionConfiguration.customPrompt,
+                                includesContext: transcriptionConfiguration.includesContext,
                                 maxContextMessages: maxContextMessages,
                                 maxContextCharacters: maxContextCharacters
                             ),
