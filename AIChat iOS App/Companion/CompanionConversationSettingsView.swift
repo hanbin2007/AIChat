@@ -16,6 +16,7 @@ struct CompanionConversationSettingsView: View {
 
     @State private var draftTitle = ""
     @State private var draftSystemPrompt = ""
+    @State private var promptSaveTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -70,27 +71,10 @@ struct CompanionConversationSettingsView: View {
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
 
-                            Button("保存系统提示词") {
-                                Task {
-                                    await chatStore.updateCustomSystemPrompt(
-                                        draftSystemPrompt,
-                                        for: conversation.id
-                                    )
-                                }
-                            }
-                            .disabled(chatStore.isReadOnlyMode)
-
-                            if draftSystemPrompt.trimmed.isEmpty == false {
+                            if chatStore.isReadOnlyMode == false, draftSystemPrompt.trimmed.isEmpty == false {
                                 Button("清空系统提示词", role: .destructive) {
                                     draftSystemPrompt = ""
-                                    Task {
-                                        await chatStore.updateCustomSystemPrompt(
-                                            "",
-                                            for: conversation.id
-                                        )
-                                    }
                                 }
-                                .disabled(chatStore.isReadOnlyMode)
                             }
                         }
                     }
@@ -119,6 +103,15 @@ struct CompanionConversationSettingsView: View {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
                 draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
             }
+            .onChange(of: draftSystemPrompt) { newValue in
+                schedulePromptSave(newValue)
+            }
+            .onDisappear {
+                promptSaveTask?.cancel()
+                Task {
+                    await chatStore.updateCustomSystemPrompt(draftSystemPrompt, for: conversationID)
+                }
+            }
         }
     }
 
@@ -129,6 +122,22 @@ struct CompanionConversationSettingsView: View {
         }
 
         return "留空时继续使用内置系统提示词。"
+    }
+
+    private func schedulePromptSave(_ prompt: String) {
+        promptSaveTask?.cancel()
+        guard chatStore.isReadOnlyMode == false else {
+            return
+        }
+
+        promptSaveTask = Task { [conversationID, prompt] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
+        }
     }
 }
 #endif

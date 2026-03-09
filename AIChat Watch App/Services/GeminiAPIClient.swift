@@ -146,7 +146,7 @@ struct GeminiAPIClient: AIStreamingService {
             systemInstruction: AIContextBuilder.systemPrompt(for: runtimeConfiguration).map(GeminiContent.systemPrompt),
             contents: contextWindow(from: conversation.messages),
             generationConfig: GeminiGenerationConfig(
-                temperature: 0.65,
+                temperature: requestTemperature(for: runtimeConfiguration.model, fallback: 0.65),
                 topP: 0.9,
                 maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
                 thinkingConfig: thinkingConfiguration(for: runtimeConfiguration)
@@ -224,6 +224,10 @@ struct GeminiAPIClient: AIStreamingService {
         }
 
         return "Listen to the attached audio, infer the user's request, and answer it directly."
+    }
+
+    private func requestTemperature(for model: String, fallback: Double) -> Double {
+        AIModelCatalog.usesThinkingLevel(model: model) ? 1 : fallback
     }
 
     private func thinkingConfiguration(for runtimeConfiguration: ConversationAIConfiguration) -> GeminiThinkingConfig {

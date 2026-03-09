@@ -677,7 +677,8 @@ private struct CompactMenuButtonLabel: View {
                 font: .system(size: titlePointSize, weight: .semibold, design: .rounded),
                 color: .white,
                 gap: 16,
-                speed: 24
+                speed: 24,
+                expandsHorizontally: true
             )
             .layoutPriority(1)
 
@@ -750,6 +751,7 @@ private struct ComposerFlatActionButtonLabel: View {
                         speed: 22
                     )
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
     }
 }
@@ -770,7 +772,8 @@ private struct RecordingStatusBanner: View {
                 font: .caption2.weight(.semibold),
                 color: .white.opacity(0.88),
                 gap: 14,
-                speed: 24
+                speed: 24,
+                expandsHorizontally: true
             )
 
             Spacer(minLength: 0)

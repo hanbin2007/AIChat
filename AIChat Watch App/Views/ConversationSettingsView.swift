@@ -16,6 +16,7 @@ struct ConversationSettingsView: View {
 
     @State private var draftTitle = ""
     @State private var draftSystemPrompt = ""
+    @State private var promptSaveTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -70,27 +71,14 @@ struct ConversationSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            Button("Save Prompt") {
-                                Task {
-                                    await chatStore.updateCustomSystemPrompt(
-                                        draftSystemPrompt,
-                                        for: conversation.id
-                                    )
-                                }
-                            }
-                            .disabled(chatStore.isReadOnlyMode)
-
-                            if draftSystemPrompt.trimmed.isEmpty == false {
-                                Button("Clear Prompt", role: .destructive) {
+                            if chatStore.isReadOnlyMode == false, draftSystemPrompt.trimmed.isEmpty == false {
+                                Button {
                                     draftSystemPrompt = ""
-                                    Task {
-                                        await chatStore.updateCustomSystemPrompt(
-                                            "",
-                                            for: conversation.id
-                                        )
-                                    }
+                                } label: {
+                                    Label("Clear Prompt", systemImage: "xmark.circle.fill")
                                 }
-                                .disabled(chatStore.isReadOnlyMode)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -112,6 +100,15 @@ struct ConversationSettingsView: View {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
                 draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
             }
+            .onChange(of: draftSystemPrompt) { newValue in
+                schedulePromptSave(newValue)
+            }
+            .onDisappear {
+                promptSaveTask?.cancel()
+                Task {
+                    await chatStore.updateCustomSystemPrompt(draftSystemPrompt, for: conversationID)
+                }
+            }
         }
     }
 
@@ -122,6 +119,22 @@ struct ConversationSettingsView: View {
         }
 
         return "Leave this empty to use the built-in system prompt for new replies."
+    }
+
+    private func schedulePromptSave(_ prompt: String) {
+        promptSaveTask?.cancel()
+        guard chatStore.isReadOnlyMode == false else {
+            return
+        }
+
+        promptSaveTask = Task { [conversationID, prompt] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
+        }
     }
 }
 #endif
