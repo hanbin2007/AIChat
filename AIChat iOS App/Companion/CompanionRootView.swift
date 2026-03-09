@@ -8,10 +8,21 @@
 
 import SwiftUI
 
+struct CompanionBottomSurfaceHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct CompanionRootView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     @StateObject private var chatStore: ChatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var selectedConversationID: UUID?
+    @State private var bottomSurfaceHeight: CGFloat = 0
 
     init() {
         let configuration = AppConfiguration.load()
@@ -46,7 +57,24 @@ struct CompanionRootView: View {
                 )
             }
         }
+        .background(alignment: .bottom) {
+            if shouldExtendBottomSurface {
+                Rectangle()
+                    .fill(Color.black.opacity(0.78))
+                    .frame(height: bottomSurfaceHeight)
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+                    }
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    .allowsHitTesting(false)
+            }
+        }
         .environmentObject(chatStore)
+        .onPreferenceChange(CompanionBottomSurfaceHeightKey.self) { height in
+            bottomSurfaceHeight = height
+        }
         .task {
             await chatStore.loadConversationsIfNeeded()
             reconcileSelection(with: chatStore.conversations.map(\.id))
@@ -54,6 +82,17 @@ struct CompanionRootView: View {
         .onChange(of: chatStore.conversations.map(\.id)) { ids in
             reconcileSelection(with: ids)
         }
+        .onChange(of: selectedConversationID) { conversationID in
+            if conversationID == nil {
+                bottomSurfaceHeight = 0
+            }
+        }
+    }
+
+    private var shouldExtendBottomSurface: Bool {
+        horizontalSizeClass == .regular &&
+        selectedConversationID != nil &&
+        bottomSurfaceHeight > 0
     }
 
     private func createConversation() {
