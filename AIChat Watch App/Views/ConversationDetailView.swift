@@ -14,9 +14,9 @@ private enum ComposerLayout {
     static let messagesToComposerSpacing: CGFloat = 4
     static let expandedBottomInset: CGFloat = 1
     static let collapsedBottomInset: CGFloat = 56
-    static let containerBottomPadding: CGFloat = 0
+    static let containerBottomPadding: CGFloat = 16
     static let composerInnerBottomPadding: CGFloat = 0
-    static let collapsedButtonBottomPadding: CGFloat = 8
+    static let collapsedButtonBottomPadding: CGFloat = 16
     static let regularComposerSpacing: CGFloat = 9
     static let compactComposerSpacing: CGFloat = 8
     static let regularAttachmentSize: CGFloat = 60
@@ -77,6 +77,7 @@ struct ConversationDetailView: View {
                             .transition(.scale.combined(with: .opacity))
                     }
                 }
+                .ignoresSafeArea(.container, edges: .bottom)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "trash.slash")

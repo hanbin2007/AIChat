@@ -114,6 +114,12 @@ struct CompanionConversationDetailView: View {
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 composerSurface
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(key: CompanionBottomSurfaceHeightKey.self, value: proxy.size.height)
+                        }
+                    }
             }
             .onAppear {
                 scrollToBottom(with: proxy, animated: false)
@@ -232,9 +238,9 @@ struct CompanionConversationDetailView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
             }
-            .background(companionComposerBackground)
+            .background(companionComposerBackground.ignoresSafeArea(.container, edges: .bottom))
         } else {
             composerView
         }
@@ -367,8 +373,8 @@ struct CompanionConversationDetailView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 12)
-            .background(companionComposerBackground)
+            .padding(.bottom, 8)
+            .background(companionComposerBackground.ignoresSafeArea(.container, edges: .bottom))
         }
     }
 
