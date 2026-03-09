@@ -181,14 +181,16 @@ struct GeminiRelayBridge {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let responseEnvelope = try decoder.decode(GeminiStreamChunk.self, from: data)
-
-        if let completionError = transcriptionCompletionError(for: responseEnvelope.candidates?.first?.finishReason) {
-            throw completionError
-        }
-
         let transcript = extractTranscript(from: responseEnvelope)
             .collapsedWhitespace
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let completionError = transcriptionCompletionError(
+            for: responseEnvelope.candidates?.first?.finishReason,
+            hasTranscript: transcript.isEmpty == false
+        ) {
+            throw completionError
+        }
 
         guard transcript.isEmpty == false else {
             throw RelayHTTPError.internalError("Gemini did not return a usable transcript.")
@@ -362,8 +364,14 @@ struct GeminiRelayBridge {
             .joined(separator: "\n")
     }
 
-    private func transcriptionCompletionError(for finishReason: String?) -> RelayHTTPError? {
+    private func transcriptionCompletionError(
+        for finishReason: String?,
+        hasTranscript: Bool
+    ) -> RelayHTTPError? {
         guard let normalizedReason = finishReason?.trimmedNonEmpty?.uppercased() else {
+            if hasTranscript {
+                return nil
+            }
             return .internalError("Relay transcription ended before Gemini returned a terminal result.")
         }
 

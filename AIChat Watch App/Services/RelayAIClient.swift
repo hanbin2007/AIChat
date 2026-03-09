@@ -237,10 +237,31 @@ struct RelayTranscriptionService: AITranscriptionService {
             throw relayClientError(from: data)
         }
 
+        return try parseTranscriptionResponse(
+            data,
+            fallbackModel: transcriptionConfiguration.model
+        )
+    }
+
+    func parseTranscriptionResponse(
+        _ data: Data,
+        fallbackModel: String
+    ) throws -> VoiceTranscriptionResult {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let relayResponse = try decoder.decode(RelayTranscriptionResponse.self, from: data)
-        let transcript = relayResponse.text.collapseWhitespace().trimmed
+
+        let transcript: String
+        let model: String?
+
+        if let relayResponse = try? decoder.decode(RelayTranscriptionResponse.self, from: data) {
+            transcript = relayResponse.text.collapseWhitespace().trimmed
+            model = relayResponse.model?.nonEmptyTrimmed
+        } else if let rawTranscript = String(data: data, encoding: .utf8)?.nonEmptyTrimmed {
+            transcript = rawTranscript
+            model = nil
+        } else {
+            throw RelayAPIError.invalidResponse
+        }
 
         guard transcript.isEmpty == false else {
             throw VoiceTranscriptionError.emptyTranscript
@@ -248,7 +269,7 @@ struct RelayTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: relayResponse.model.nonEmptyTrimmed ?? transcriptionConfiguration.model
+            model: model ?? fallbackModel
         )
     }
 
@@ -315,9 +336,40 @@ struct RelayTranscriptionRequest: Codable, Equatable {
     var audio: RelayAttachment
 }
 
-struct RelayTranscriptionResponse: Codable, Equatable {
+struct RelayTranscriptionResponse: Decodable, Equatable {
     var text: String
-    var model: String
+    var model: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case transcript
+        case model
+    }
+
+    init(text: String, model: String?) {
+        self.text = text
+        self.model = model
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let text = try container.decodeIfPresent(String.self, forKey: .text) {
+            self.text = text
+        } else if let transcript = try container.decodeIfPresent(String.self, forKey: .transcript) {
+            self.text = transcript
+        } else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.text,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "Expected `text` or `transcript` in relay transcription response."
+                )
+            )
+        }
+
+        self.model = try container.decodeIfPresent(String.self, forKey: .model)
+    }
 }
 
 func relayCompletionError(

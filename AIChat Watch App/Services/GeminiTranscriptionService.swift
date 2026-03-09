@@ -131,17 +131,31 @@ struct GeminiTranscriptionService: AITranscriptionService {
             throw geminiAPIError(from: data)
         }
 
+        return try parseTranscriptionResponse(
+            data,
+            requestedModel: transcriptionConfiguration.model
+        )
+    }
+
+    func parseTranscriptionResponse(
+        _ data: Data,
+        requestedModel: String
+    ) throws -> VoiceTranscriptionResult {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
 
         let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
-        if let completionError = geminiCompletionError(for: extractFinishReason(from: responseEnvelope)) {
-            throw completionError
-        }
-
+        let finishReason = extractFinishReason(from: responseEnvelope)
         let transcript = extractTranscript(from: responseEnvelope)
             .collapseWhitespace()
             .trimmed
+
+        if let completionError = transcriptionCompletionError(
+            for: finishReason,
+            hasTranscript: transcript.isEmpty == false
+        ) {
+            throw completionError
+        }
 
         guard transcript.isEmpty == false else {
             throw VoiceTranscriptionError.emptyTranscript
@@ -149,7 +163,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
 
         return VoiceTranscriptionResult(
             text: transcript,
-            model: transcriptionConfiguration.model
+            model: requestedModel
         )
     }
 
@@ -213,6 +227,17 @@ struct GeminiTranscriptionService: AITranscriptionService {
             .compactMap(\.finishReason)
             .first?
             .nonEmptyTrimmed
+    }
+
+    private func transcriptionCompletionError(
+        for finishReason: String?,
+        hasTranscript: Bool
+    ) -> GeminiAPIError? {
+        if finishReason?.nonEmptyTrimmed == nil, hasTranscript {
+            return nil
+        }
+
+        return geminiCompletionError(for: finishReason)
     }
 
     private func geminiAPIError(from data: Data) -> Error {

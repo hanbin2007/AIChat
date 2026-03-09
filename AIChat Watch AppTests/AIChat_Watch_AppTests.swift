@@ -503,6 +503,161 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertFalse(request.contents[0].parts.first?.text?.contains("Recent conversation context:") == true)
     }
 
+    func testTranscriptionResponseCanSucceedWithoutFinishReason() throws {
+        let service = GeminiTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let data = Data(
+            """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      { "text": "帮我订明天上午去杭州的高铁" }
+                    ]
+                  }
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let result = try service.parseTranscriptionResponse(
+            data,
+            requestedModel: "gemini-3-flash-preview"
+        )
+
+        XCTAssertEqual(result.text, "帮我订明天上午去杭州的高铁")
+        XCTAssertEqual(result.model, "gemini-3-flash-preview")
+    }
+
+    func testTranscriptionResponseCanDecodeLoggedGeminiPayload() throws {
+        let service = GeminiTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3.1-pro-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let data = Data(
+            """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      {
+                        "text": "但是这道题我是假设它通过两摩尔电子算的。",
+                        "thoughtSignature": "abc123"
+                      }
+                    ],
+                    "role": "model"
+                  },
+                  "finishReason": "STOP",
+                  "index": 0
+                }
+              ],
+              "modelVersion": "gemini-3.1-pro-preview",
+              "responseId": "test-response",
+              "usageMetadata": {
+                "candidatesTokenCount": 13,
+                "promptTokenCount": 286,
+                "thoughtsTokenCount": 393,
+                "totalTokenCount": 692
+              }
+            }
+            """.utf8
+        )
+
+        let result = try service.parseTranscriptionResponse(
+            data,
+            requestedModel: "gemini-3.1-pro-preview"
+        )
+
+        XCTAssertEqual(result.text, "但是这道题我是假设它通过两摩尔电子算的。")
+        XCTAssertEqual(result.model, "gemini-3.1-pro-preview")
+    }
+
+    func testRelayTranscriptionResponseCanDecodeWithoutModel() throws {
+        let service = RelayTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "test-token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let data = Data(
+            """
+            {
+              "text": "book a table for four at 7 pm"
+            }
+            """.utf8
+        )
+
+        let result = try service.parseTranscriptionResponse(
+            data,
+            fallbackModel: "gemini-3-flash-preview"
+        )
+
+        XCTAssertEqual(result.text, "book a table for four at 7 pm")
+        XCTAssertEqual(result.model, "gemini-3-flash-preview")
+    }
+
+    func testRelayTranscriptionResponseCanDecodeLoggedClientPayload() throws {
+        let service = RelayTranscriptionService(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3.1-pro-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "test-token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let data = Data(
+            """
+            {
+              "model": "gemini-3.1-pro-preview",
+              "text": "但是这道题我是假设它通过两摩尔电子算的。"
+            }
+            """.utf8
+        )
+
+        let result = try service.parseTranscriptionResponse(
+            data,
+            fallbackModel: "gemini-3-flash-preview"
+        )
+
+        XCTAssertEqual(result.text, "但是这道题我是假设它通过两摩尔电子算的。")
+        XCTAssertEqual(result.model, "gemini-3.1-pro-preview")
+    }
+
     @MainActor
     func testRecordedAudioIsTranscribedIntoDraftWithoutSending() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)

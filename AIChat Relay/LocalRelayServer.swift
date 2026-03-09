@@ -228,6 +228,7 @@ actor LocalRelayServer {
                             try await self.send(event.data(), on: connection)
                         }
                     )
+                    try? await finishResponse(on: connection)
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
                     await markFailedRequest(
@@ -238,6 +239,7 @@ actor LocalRelayServer {
                     )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(error.message).data(), on: connection)
+                        try? await finishResponse(on: connection)
                     } else {
                         try await sendJSON(
                             statusCode: error.statusCode,
@@ -255,6 +257,7 @@ actor LocalRelayServer {
                     )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(relayError.message).data(), on: connection)
+                        try? await finishResponse(on: connection)
                     } else {
                         try await sendJSON(
                             statusCode: relayError.statusCode,
@@ -453,13 +456,11 @@ actor LocalRelayServer {
 
     private func sendSSEHeaders(on connection: NWConnection) async throws {
         let header =
-            """
-            HTTP/1.1 200 OK\r
-            Content-Type: text/event-stream; charset=utf-8\r
-            Cache-Control: no-cache, no-transform\r
-            Connection: close\r
-            \r
-            """
+            "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: text/event-stream; charset=utf-8\r\n" +
+            "Cache-Control: no-cache, no-transform\r\n" +
+            "Connection: close\r\n" +
+            "\r\n"
 
         try await send(Data(header.utf8), on: connection)
     }
@@ -472,17 +473,15 @@ actor LocalRelayServer {
         let encoder = JSONEncoder()
         let body = try encoder.encode(payload)
         let header =
-            """
-            HTTP/1.1 \(statusCode) \(reasonPhrase(for: statusCode))\r
-            Content-Type: application/json; charset=utf-8\r
-            Content-Length: \(body.count)\r
-            Connection: close\r
-            \r
-            """
+            "HTTP/1.1 \(statusCode) \(reasonPhrase(for: statusCode))\r\n" +
+            "Content-Type: application/json; charset=utf-8\r\n" +
+            "Content-Length: \(body.count)\r\n" +
+            "Connection: close\r\n" +
+            "\r\n"
 
         var data = Data(header.utf8)
         data.append(body)
-        try await send(data, on: connection)
+        try await send(data, on: connection, isComplete: true)
     }
 
     private func sendFailureResponse(
@@ -506,15 +505,28 @@ actor LocalRelayServer {
         )
     }
 
-    private func send(_ data: Data, on connection: NWConnection) async throws {
+    private func finishResponse(on connection: NWConnection) async throws {
+        try await send(Data(), on: connection, isComplete: true)
+    }
+
+    private func send(
+        _ data: Data,
+        on connection: NWConnection,
+        isComplete: Bool = false
+    ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
+            connection.send(
+                content: data,
+                contentContext: .defaultMessage,
+                isComplete: isComplete,
+                completion: .contentProcessed { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
                 }
-            })
+            )
         }
     }
 

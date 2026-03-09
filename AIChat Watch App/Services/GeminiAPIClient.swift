@@ -333,6 +333,15 @@ struct GeminiInlineData: Codable, Equatable {
 
 struct GeminiGenerateContentResponse: Decodable {
     var candidates: [GeminiCandidate]
+
+    private enum CodingKeys: String, CodingKey {
+        case candidates
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.candidates = try container.decodeIfPresent([GeminiCandidate].self, forKey: .candidates) ?? []
+    }
 }
 
 struct GeminiCandidate: Decodable {
