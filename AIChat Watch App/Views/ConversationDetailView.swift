@@ -682,13 +682,12 @@ private struct CompactMenuButtonLabel: View {
             )
             .layoutPriority(1)
 
-            Spacer(minLength: 0)
-
             Image(systemName: "chevron.down")
                 .font(.system(size: isDense ? 9 : 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: isDense ? 8 : 10)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(.white)
         .padding(.horizontal, isDense ? 6 : 8)
         .padding(.vertical, isDense ? 6 : 8)
@@ -775,9 +774,9 @@ private struct RecordingStatusBanner: View {
                 speed: 24,
                 expandsHorizontally: true
             )
-
-            Spacer(minLength: 0)
+            .layoutPriority(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(

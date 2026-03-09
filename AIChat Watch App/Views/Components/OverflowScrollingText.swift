@@ -44,32 +44,32 @@ struct OverflowScrollingText: View {
                     textView(fixed: false)
                 }
             }
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: OverflowScrollingTextContainerWidthPreferenceKey.self,
-                        value: geometry.size.width
-                    )
-                }
-            )
-            .overlay(alignment: .leading) {
-                textView(fixed: true)
-                    .hidden()
-                    .background(
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: OverflowScrollingTextWidthPreferenceKey.self,
-                                value: geometry.size.width
-                            )
-                        }
-                    )
-                    .allowsHitTesting(false)
-            }
-            .onPreferenceChange(OverflowScrollingTextWidthPreferenceKey.self) { textWidth = $0 }
-            .onPreferenceChange(OverflowScrollingTextContainerWidthPreferenceKey.self) { containerWidth = $0 }
-            .clipped()
-            .accessibilityLabel(text)
         }
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: OverflowScrollingTextContainerWidthPreferenceKey.self,
+                    value: geometry.size.width
+                )
+            }
+        )
+        .overlay(alignment: .leading) {
+            textView(fixed: true)
+                .hidden()
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: OverflowScrollingTextWidthPreferenceKey.self,
+                            value: geometry.size.width
+                        )
+                    }
+                )
+                .allowsHitTesting(false)
+        }
+        .onPreferenceChange(OverflowScrollingTextWidthPreferenceKey.self) { textWidth = $0 }
+        .onPreferenceChange(OverflowScrollingTextContainerWidthPreferenceKey.self) { containerWidth = $0 }
+        .clipped()
+        .accessibilityLabel(text)
     }
 
     @ViewBuilder

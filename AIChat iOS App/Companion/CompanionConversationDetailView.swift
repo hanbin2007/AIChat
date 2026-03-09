@@ -537,13 +537,13 @@ private struct CompanionComposerMenuLabel: View {
                 speed: 24,
                 expandsHorizontally: true
             )
-
-            Spacer(minLength: 0)
+            .layoutPriority(1)
 
             Image(systemName: "chevron.down")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.62))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
