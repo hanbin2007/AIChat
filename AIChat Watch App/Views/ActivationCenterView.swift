@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-#if os(watchOS)
-import WatchKit
-#endif
 
 #if os(watchOS)
 struct ActivationCenterView: View {
@@ -20,6 +17,7 @@ struct ActivationCenterView: View {
     @State private var draftActivationCode = ""
     @State private var feedbackMessage: String?
     @State private var isSubmitting = false
+    @State private var isShowingActivationCodeEntry = false
 
     var body: some View {
         NavigationStack {
@@ -76,13 +74,13 @@ struct ActivationCenterView: View {
                                     .fill(Color.black.opacity(0.28))
                             )
 
-                        Text("点按下方按钮会打开系统输入界面，可使用键盘、涂鸦或语音。")
+                        Text("打开一个只包含原生输入框的页面，避免当前列表布局影响点击和焦点。")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        Button(draftActivationCode.isEmpty ? "输入激活码" : "重新输入激活码") {
-                            presentActivationCodeInput()
+                        Button(draftActivationCode.isEmpty ? "打开输入框" : "重新编辑激活码") {
+                            isShowingActivationCodeEntry = true
                         }
 
                         Button("应用激活码") {
@@ -132,6 +130,9 @@ struct ActivationCenterView: View {
                     }
                 }
             }
+            .sheet(isPresented: $isShowingActivationCodeEntry) {
+                ActivationCodeEntrySheet(draftActivationCode: $draftActivationCode)
+            }
             .onAppear {
                 refreshRequestCode()
             }
@@ -179,44 +180,6 @@ struct ActivationCenterView: View {
         chatStore.publishActivationRequestCodeToCompanion(requestCode)
     }
 
-    private func presentActivationCodeInput() {
-        guard let controller = WKExtension.shared().visibleInterfaceController else {
-            feedbackMessage = "当前无法打开输入界面，请返回后重试。"
-            return
-        }
-
-        chatStore.clearCompanionActivationFeedbackMessage()
-        controller.presentTextInputController(withSuggestions: nil, allowedInputMode: .plain) { results in
-            guard let importedText = results?
-                .compactMap({ result -> String? in
-                    if let value = result as? String {
-                        return value
-                    }
-
-                    if let value = result as? NSString {
-                        return value as String
-                    }
-
-                    return nil
-                })
-                .joined(separator: " ")
-                .nonEmptyTrimmed
-            else {
-                return
-            }
-
-            let normalizedCode = OfflineActivation.normalizeActivationInput(importedText)
-            guard normalizedCode.isEmpty == false else {
-                return
-            }
-
-            Task { @MainActor in
-                draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
-                feedbackMessage = nil
-            }
-        }
-    }
-
     private func applyActivationCode(_ rawCode: String) async {
         let normalizedCode = OfflineActivation.normalizeActivationInput(rawCode)
         guard normalizedCode.isEmpty == false else {
@@ -257,6 +220,48 @@ struct ActivationCenterView: View {
 
         let remaining = state.remainingMessageCount ?? 0
         return "\(messageLimit) 次，总剩余 \(remaining) 次"
+    }
+}
+
+private struct ActivationCodeEntrySheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var draftActivationCode: String
+    @FocusState private var isInputFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("输入激活码", text: $draftActivationCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .focused($isInputFocused)
+                    .onChange(of: draftActivationCode) { _, newValue in
+                        let normalizedCode = OfflineActivation.normalizeActivationInput(newValue)
+                        if normalizedCode.isEmpty {
+                            if newValue.isEmpty == false {
+                                draftActivationCode = ""
+                            }
+                            return
+                        }
+
+                        let formattedCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
+                        if formattedCode != newValue {
+                            draftActivationCode = formattedCode
+                        }
+                    }
+
+                Button("完成") {
+                    dismiss()
+                }
+            }
+            .navigationTitle("输入激活码")
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                isInputFocused = true
+            }
+        }
     }
 }
 #endif
