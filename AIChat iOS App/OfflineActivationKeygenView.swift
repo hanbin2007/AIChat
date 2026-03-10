@@ -132,6 +132,13 @@ struct OfflineActivationKeygenView: View {
                     UIPasteboard.general.string = generatedCode
                 }
                 .buttonStyle(.bordered)
+
+                if let activationImportURL {
+                    ShareLink(item: activationImportURL) {
+                        Label("分享导入链接", systemImage: "message")
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         }
     }
@@ -231,5 +238,21 @@ struct OfflineActivationKeygenView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var activationImportURL: URL? {
+        guard generatedCode.isEmpty == false else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "aichat"
+        components.host = "activation"
+        components.path = "/import"
+        components.queryItems = [
+            URLQueryItem(name: "code", value: generatedCode)
+        ]
+
+        return components.url
     }
 }

@@ -4,6 +4,7 @@ import { TextDecoder } from "node:util";
 const port = Number(process.env.PORT || 8787);
 const geminiApiKey = process.env.GEMINI_API_KEY;
 const relayBearerToken = process.env.RELAY_BEARER_TOKEN;
+const transcriptionMaxOutputTokens = 5120;
 
 if (!geminiApiKey || !relayBearerToken) {
   console.error("Missing GEMINI_API_KEY or RELAY_BEARER_TOKEN.");
@@ -133,7 +134,97 @@ function toGeminiTranscriptionRequest(body, model) {
     generationConfig: {
       temperature: temperatureForModel(model, 0.1),
       topP: 0.95,
-      maxOutputTokens: 1024
+      maxOutputTokens: transcriptionMaxOutputTokens
+    }
+  };
+}
+
+const memoryExtractionSystemPrompt = `
+You maintain compressed conversation memory for AIChat.
+Return strict JSON only. Do not answer the user.
+Prefer concise Chinese phrasing when the source conversation is Chinese.
+Use this schema exactly:
+{
+  "kind": "casual|teaching|task",
+  "title": "short title",
+  "focusNote": "compact focus note",
+  "openLoops": ["pending question or next step"],
+  "memoryItems": ["stable reusable memory item"],
+  "archiveTitle": "short archive title or null",
+  "archiveSummary": "archive summary or null",
+  "archiveOpenLoops": ["pending loop from archive"]
+}
+Rules:
+- Return valid JSON with double quotes and no markdown fence.
+- memoryItems must contain only stable reusable memory, not ephemeral chatter.
+- If there is no archive candidate, set archiveTitle and archiveSummary to null and archiveOpenLoops to [].
+`.trim();
+
+function memoryExtractionPrompt(body) {
+  const sections = [
+    `Mode hint: ${body.mode || "casual"}`,
+    `Conversation title: ${body.conversationTitle || "Untitled"}`
+  ];
+
+  if (body.existingFocusState) {
+    const focusLines = [];
+    if (body.existingFocusState.kind) {
+      focusLines.push(`kind: ${body.existingFocusState.kind}`);
+    }
+    if (body.existingFocusState.title) {
+      focusLines.push(`title: ${body.existingFocusState.title}`);
+    }
+    if (body.existingFocusState.focusNote) {
+      focusLines.push(`focusNote: ${body.existingFocusState.focusNote}`);
+    }
+    if ((body.existingFocusState.openLoops || []).length > 0) {
+      focusLines.push(`openLoops: ${body.existingFocusState.openLoops.join(" | ")}`);
+    }
+    if (focusLines.length > 0) {
+      sections.push(`Existing focus state:\n${focusLines.join("\n")}`);
+    }
+  }
+
+  if ((body.existingMemoryItems || []).length > 0) {
+    sections.push(`Existing reusable memory:\n${body.existingMemoryItems.map((item) => `- ${item}`).join("\n")}`);
+  }
+
+  sections.push(
+    `Recent messages (newest last):\n${(body.recentMessages || [])
+      .map((message, index) => `[${index + 1}] ${message.role}: ${message.text || ""}`)
+      .join("\n")}`
+  );
+
+  if ((body.archiveCandidateMessages || []).length > 0) {
+    sections.push(
+      `Archive candidate (older stable slice to compress if useful):\n${body.archiveCandidateMessages
+        .map((message, index) => `[${index + 1}] ${message.role}: ${message.text || ""}`)
+        .join("\n")}`
+    );
+  } else {
+    sections.push("Archive candidate: none");
+  }
+
+  sections.push("Return JSON only.");
+  return sections.join("\n\n");
+}
+
+function toGeminiMemoryRequest(body, model) {
+  return {
+    systemInstruction: {
+      parts: [{ text: memoryExtractionSystemPrompt }]
+    },
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: memoryExtractionPrompt(body) }]
+      }
+    ],
+    generationConfig: {
+      temperature: temperatureForModel(model, 0.1),
+      topP: 0.9,
+      maxOutputTokens: 4096,
+      responseMimeType: "application/json"
     }
   };
 }
@@ -201,6 +292,24 @@ function extractTranscript(payload) {
     .trim();
 }
 
+function decodeMemoryExtractionPayload(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    throw makeRelayError(502, "Gemini did not return memory extraction JSON.");
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  const match = trimmed.match(/\{[\s\S]*\}/);
+  if (!match) {
+    throw makeRelayError(502, "Gemini returned invalid memory extraction JSON.");
+  }
+
+  return JSON.parse(match[0]);
+}
+
 async function transcribeGeminiResponse({ model, requestBody }) {
   const geminiResponse = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -243,6 +352,42 @@ async function transcribeGeminiResponse({ model, requestBody }) {
     text: transcript,
     model
   };
+}
+
+async function extractMemoryGeminiResponse({ model, requestBody }) {
+  const geminiResponse = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiApiKey
+      },
+      body: JSON.stringify(requestBody)
+    }
+  );
+
+  if (!geminiResponse.ok) {
+    const errorText = await geminiResponse.text();
+    throw makeRelayError(geminiResponse.status, errorText || "Gemini relay failed.");
+  }
+
+  const payload = await geminiResponse.json();
+  const finishReason = String(payload?.candidates?.[0]?.finishReason || "").trim().toUpperCase();
+
+  if (!finishReason) {
+    throw makeRelayError(502, "Relay memory extraction ended before Gemini returned a terminal result.");
+  }
+
+  if (finishReason === "MAX_TOKENS") {
+    throw makeRelayError(502, "Memory extraction hit the output limit before completion.");
+  }
+
+  if (finishReason !== "STOP") {
+    throw makeRelayError(502, `Relay memory extraction reported an incomplete finish (${finishReason}).`);
+  }
+
+  return decodeMemoryExtractionPayload(extractTranscript(payload));
 }
 
 async function streamGeminiResponse({ model, requestBody, res }) {
@@ -405,7 +550,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url !== "/v1/chat/stream" && req.url !== "/v1/audio/transcribe") {
+  if (req.url !== "/v1/chat/stream" && req.url !== "/v1/audio/transcribe" && req.url !== "/v1/memory/extract") {
     sendJson(res, 404, { message: "Not found." });
     return;
   }
@@ -439,6 +584,22 @@ const server = http.createServer(async (req, res) => {
       });
     } catch (error) {
       writeRelayStreamError(res, error instanceof Error ? error.message : "Relay error.");
+    }
+    return;
+  }
+
+  if (req.url === "/v1/memory/extract") {
+    try {
+      const model = body.model || "gemini-3-flash-preview";
+      const response = await extractMemoryGeminiResponse({
+        model,
+        requestBody: toGeminiMemoryRequest(body, model)
+      });
+      sendJson(res, 200, response);
+    } catch (error) {
+      const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 502;
+      const message = error instanceof Error ? error.message : "Relay error.";
+      sendJson(res, statusCode, { message });
     }
     return;
   }

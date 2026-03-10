@@ -23,18 +23,22 @@ struct CompanionRootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var selectedConversationID: UUID?
     @State private var bottomSurfaceHeight: CGFloat = 0
+    @State private var importedActivationCode = ""
+    @State private var isShowingActivationCenter = false
 
     init() {
         let configuration = AppConfiguration.load()
         let repository = ConversationRepository(configuration: configuration)
         let service = AIServiceFactory.makeService(configuration: configuration)
         let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
+        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
         let syncBridge = CompanionSyncBridge()
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
                 aiService: service,
                 transcriptionService: transcriptionService,
+                memoryMaintenanceService: memoryMaintenanceService,
                 configuration: configuration,
                 syncBridge: syncBridge
             )
@@ -72,12 +76,28 @@ struct CompanionRootView: View {
             }
         }
         .environmentObject(chatStore)
+        .sheet(isPresented: $isShowingActivationCenter) {
+            CompanionActivationCenterView(
+                prefilledActivationCode: importedActivationCode,
+                autoSendToWatch: true
+            )
+            .id(importedActivationCode)
+            .environmentObject(chatStore)
+        }
         .onPreferenceChange(CompanionBottomSurfaceHeightKey.self) { height in
             bottomSurfaceHeight = height
         }
         .task {
             await chatStore.loadConversationsIfNeeded()
             reconcileSelection(with: chatStore.conversations.map(\.id))
+        }
+        .onOpenURL { url in
+            guard let activationCode = activationCodeImport(from: url) else {
+                return
+            }
+
+            importedActivationCode = activationCode
+            isShowingActivationCenter = true
         }
         .onChange(of: chatStore.conversations.map(\.id)) { ids in
             reconcileSelection(with: ids)
@@ -114,6 +134,34 @@ struct CompanionRootView: View {
             self.selectedConversationID = ids.first
             return
         }
+    }
+
+    private func activationCodeImport(from url: URL) -> String? {
+        guard url.scheme?.lowercased() == "aichat" else {
+            return nil
+        }
+
+        guard url.host?.lowercased() == "activation" else {
+            return nil
+        }
+
+        let normalizedPath = url.path.lowercased()
+        guard normalizedPath.isEmpty || normalizedPath == "/" || normalizedPath == "/import" else {
+            return nil
+        }
+
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value
+        else {
+            return nil
+        }
+
+        let normalizedCode = OfflineActivation.normalizeActivationInput(code)
+        guard normalizedCode.isEmpty == false else {
+            return nil
+        }
+
+        return OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
     }
 }
 

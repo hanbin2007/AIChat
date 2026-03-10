@@ -47,6 +47,7 @@ struct CompanionConversationSettingsView: View {
                     LabeledContent("Storage", value: chatStore.storageDescription)
                     LabeledContent("Sync", value: chatStore.syncStatusDescription)
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
+                    LabeledContent("Version", value: chatStore.appVersionDescription)
                 }
 
                 if let conversation = chatStore.conversation(id: conversationID) {
@@ -75,6 +76,45 @@ struct CompanionConversationSettingsView: View {
                                 Button("清空系统提示词", role: .destructive) {
                                     draftSystemPrompt = ""
                                 }
+                            }
+                        }
+                    }
+
+                    Section("记忆") {
+                        Toggle("调用全局记忆", isOn: globalMemoryBinding(for: conversation.id))
+                            .disabled(chatStore.isReadOnlyMode)
+
+                        LabeledContent("全局记忆条目", value: "\(chatStore.globalPinnedMemories.count)")
+
+                        Text("开启后，这个会话会在本地记忆之外额外召回全局固定记忆。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("本会话固定记忆") {
+                        if conversation.pinnedMemories.isEmpty {
+                            Text("还没有固定记忆。可以在消息菜单里把重要内容固定到当前会话。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(conversation.pinnedMemories) { item in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(item.text)
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                    Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+
+                                    if chatStore.isReadOnlyMode == false {
+                                        Button("删除固定记忆", role: .destructive) {
+                                            Task {
+                                                await chatStore.removePinnedMemory(id: item.id, from: conversation.id)
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
                             }
                         }
                     }
@@ -138,6 +178,19 @@ struct CompanionConversationSettingsView: View {
 
             await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
         }
+    }
+
+    private func globalMemoryBinding(for conversationID: UUID) -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.aiConfiguration(for: conversationID).usesGlobalPinnedMemory
+            },
+            set: { newValue in
+                Task {
+                    await chatStore.updateUsesGlobalPinnedMemory(newValue, for: conversationID)
+                }
+            }
+        )
     }
 }
 #endif

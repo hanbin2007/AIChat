@@ -73,4 +73,29 @@ enum AIServiceFactory {
             return RelayTranscriptionService(configuration: configuration)
         }
     }
+
+    static func makeMemoryMaintenanceService(configuration: AppConfiguration) -> any AIMemoryMaintenanceService {
+        switch configuration.backendMode {
+        case .direct:
+            guard configuration.geminiAPIKey != nil else {
+                return HeuristicMemoryMaintenanceService()
+            }
+
+            return ModelBackedMemoryMaintenanceService(
+                extractor: GeminiMemoryExtractionClient(configuration: configuration),
+                defaultModel: configuration.geminiModel
+            )
+        case .relay:
+            guard configuration.relayMemoryExtractURL != nil,
+                  configuration.relayBearerToken != nil
+            else {
+                return HeuristicMemoryMaintenanceService()
+            }
+
+            return ModelBackedMemoryMaintenanceService(
+                extractor: RelayMemoryExtractionClient(configuration: configuration),
+                defaultModel: configuration.geminiModel
+            )
+        }
+    }
 }

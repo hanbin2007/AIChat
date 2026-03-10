@@ -47,6 +47,7 @@ struct ConversationSettingsView: View {
                     LabeledContent("Storage", value: chatStore.storageDescription)
                     LabeledContent("Sync", value: chatStore.syncStatusDescription)
                     LabeledContent("Activation", value: chatStore.activationStatusTitle)
+                    LabeledContent("Version", value: chatStore.appVersionDescription)
                 }
 
                 if let conversation = chatStore.conversation(id: conversationID) {
@@ -82,6 +83,49 @@ struct ConversationSettingsView: View {
                             }
                         }
                     }
+
+                    Section("Memory") {
+                        Toggle("Use Global Memory", isOn: globalMemoryBinding(for: conversation.id))
+                            .disabled(chatStore.isReadOnlyMode)
+
+                        LabeledContent("Global Items", value: "\(chatStore.globalPinnedMemories.count)")
+
+                        Text("Enable this to let the conversation recall globally pinned memory items in addition to local memory.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Section("Pinned to This Chat") {
+                        if conversation.pinnedMemories.isEmpty {
+                            Text("No pinned memory yet. Use the message menu to pin important details.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            ForEach(conversation.pinnedMemories) { item in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(item.text)
+                                        .font(.body)
+                                        .fixedSize(horizontal: false, vertical: true)
+
+                                    Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+
+                                    if chatStore.isReadOnlyMode == false {
+                                        Button("Remove", role: .destructive) {
+                                            Task {
+                                                await chatStore.removePinnedMemory(id: item.id, from: conversation.id)
+                                            }
+                                        }
+                                        .font(.caption2)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
                 }
 
                 Section("Danger Zone") {
@@ -100,7 +144,7 @@ struct ConversationSettingsView: View {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
                 draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
             }
-            .onChange(of: draftSystemPrompt) { newValue in
+            .onChange(of: draftSystemPrompt) { _, newValue in
                 schedulePromptSave(newValue)
             }
             .onDisappear {
@@ -135,6 +179,19 @@ struct ConversationSettingsView: View {
 
             await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
         }
+    }
+
+    private func globalMemoryBinding(for conversationID: UUID) -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.aiConfiguration(for: conversationID).usesGlobalPinnedMemory
+            },
+            set: { newValue in
+                Task {
+                    await chatStore.updateUsesGlobalPinnedMemory(newValue, for: conversationID)
+                }
+            }
+        )
     }
 }
 #endif

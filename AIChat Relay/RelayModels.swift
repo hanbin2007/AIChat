@@ -86,6 +86,40 @@ struct RelayTranscriptionResponse: Encodable, Sendable {
     var model: String
 }
 
+struct RelayMemoryMessage: Codable, Sendable {
+    var id: String
+    var role: String
+    var text: String
+}
+
+struct RelayMemoryFocusState: Codable, Sendable {
+    var kind: String?
+    var title: String?
+    var focusNote: String?
+    var openLoops: [String]
+}
+
+struct RelayMemoryExtractionRequest: Decodable, Sendable {
+    var model: String?
+    var mode: String
+    var conversationTitle: String
+    var recentMessages: [RelayMemoryMessage]
+    var existingFocusState: RelayMemoryFocusState?
+    var existingMemoryItems: [String]
+    var archiveCandidateMessages: [RelayMemoryMessage]
+}
+
+struct RelayMemoryExtractionResponse: Codable, Sendable {
+    var kind: String?
+    var title: String?
+    var focusNote: String?
+    var openLoops: [String]
+    var memoryItems: [String]
+    var archiveTitle: String?
+    var archiveSummary: String?
+    var archiveOpenLoops: [String]
+}
+
 enum RelayHTTPError: LocalizedError, Sendable {
     case badRequest(String)
     case unauthorized
@@ -208,6 +242,7 @@ struct GeminiGenerationConfig: Encodable, Sendable {
     var topP: Double
     var maxOutputTokens: Int
     var thinkingConfig: GeminiThinkingConfig?
+    var responseMimeType: String?
 }
 
 struct GeminiThinkingConfig: Encodable, Sendable {

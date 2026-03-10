@@ -17,12 +17,14 @@ struct AIChat_Watch_AppApp: App {
         let repository = ConversationRepository(configuration: configuration)
         let service = AIServiceFactory.makeService(configuration: configuration)
         let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
+        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
         let syncBridge = CompanionSyncBridge()
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
                 aiService: service,
                 transcriptionService: transcriptionService,
+                memoryMaintenanceService: memoryMaintenanceService,
                 configuration: configuration,
                 syncBridge: syncBridge
             )

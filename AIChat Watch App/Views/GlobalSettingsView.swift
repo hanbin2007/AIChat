@@ -116,6 +116,41 @@ struct GlobalSettingsView: View {
                         }
                     }
                 }
+
+                Section("Global Memory") {
+                    if chatStore.globalPinnedMemories.isEmpty {
+                        Text("No global pinned memory yet. Pin a message globally to make it reusable across conversations.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(chatStore.globalPinnedMemories) { item in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(item.text)
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+
+                                if chatStore.isReadOnlyMode == false {
+                                    Button("Remove", role: .destructive) {
+                                        Task {
+                                            await chatStore.removeGlobalPinnedMemory(id: item.id)
+                                        }
+                                    }
+                                    .font(.caption2)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+
+                Section("About") {
+                    LabeledContent("Version", value: chatStore.appVersionDescription)
+                }
             }
             .navigationTitle("Global Settings")
             .navigationBarTitleDisplayMode(.inline)

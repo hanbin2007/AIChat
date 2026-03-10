@@ -84,6 +84,38 @@ struct CompanionGlobalSettingsView: View {
                         }
                     }
                 }
+
+                Section("全局记忆") {
+                    if chatStore.globalPinnedMemories.isEmpty {
+                        Text("还没有全局固定记忆。把消息固定为全局记忆后，就能在开启开关的其他会话里复用。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(chatStore.globalPinnedMemories) { item in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(item.text)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+
+                                if chatStore.isReadOnlyMode == false {
+                                    Button("删除全局记忆", role: .destructive) {
+                                        Task {
+                                            await chatStore.removeGlobalPinnedMemory(id: item.id)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
+                Section("关于") {
+                    LabeledContent("版本", value: chatStore.appVersionDescription)
+                }
             }
             .navigationTitle("全局设置")
             .navigationBarTitleDisplayMode(.inline)

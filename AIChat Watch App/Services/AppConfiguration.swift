@@ -141,6 +141,14 @@ struct AppConfiguration: Equatable {
         return relayBaseURL.appending(path: "v1/audio/transcribe")
     }
 
+    var relayMemoryExtractURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/memory/extract")
+    }
+
     private var hasValidRelayBaseURL: Bool {
         guard let relayBaseURL else {
             return false

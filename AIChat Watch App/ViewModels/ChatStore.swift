@@ -28,13 +28,17 @@ final class ChatStore: ObservableObject {
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
+    @Published private(set) var syncStatus: CompanionSyncStatus
     @Published private(set) var syncStatusDescription: String
     @Published private(set) var activationState: OfflineActivationState?
+    @Published private(set) var pairedWatchActivationRequestCode: String?
+    @Published private(set) var companionActivationFeedbackMessage: String?
     @Published private(set) var sendFailureRetryLimit: Int
     @Published private(set) var defaultConversationConfiguration: ConversationAIConfiguration
     @Published private(set) var transcriptionModel: String
     @Published private(set) var transcriptionCustomPrompt: String
     @Published private(set) var transcriptionIncludesContext: Bool
+    @Published private(set) var globalPinnedMemories: [PinnedMemoryItem] = []
 
     let configuration: AppConfiguration
     let storageDescription: String
@@ -43,6 +47,7 @@ final class ChatStore: ObservableObject {
     private let repository: ConversationRepository
     private let aiService: AIStreamingService
     private let transcriptionService: AITranscriptionService?
+    private let memoryMaintenanceService: any AIMemoryMaintenanceService
     private let syncBridge: CompanionSyncBridge
     private let activationRepository: ActivationRepository
     private let defaults: UserDefaults
@@ -50,11 +55,13 @@ final class ChatStore: ObservableObject {
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
+    private var lastHandledCompanionActivationTransferID: String?
 
     init(
         repository: ConversationRepository,
         aiService: AIStreamingService,
         transcriptionService: AITranscriptionService?,
+        memoryMaintenanceService: any AIMemoryMaintenanceService = HeuristicMemoryMaintenanceService(),
         configuration: AppConfiguration,
         syncBridge: CompanionSyncBridge,
         activationRepository: ActivationRepository = ActivationRepository(),
@@ -66,6 +73,7 @@ final class ChatStore: ObservableObject {
         self.repository = repository
         self.aiService = aiService
         self.transcriptionService = transcriptionService
+        self.memoryMaintenanceService = memoryMaintenanceService
         self.configuration = configuration
         self.syncBridge = syncBridge
         self.activationRepository = activationRepository
@@ -73,6 +81,7 @@ final class ChatStore: ObservableObject {
         self.defaults = resolvedDefaults
         self.sendRetryDelayNanoseconds = sendRetryDelayNanoseconds
         self.storageDescription = repository.storageDescription
+        self.syncStatus = syncBridge.currentStatus
         self.syncStatusDescription = syncBridge.currentStatus.description
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
         self.defaultConversationConfiguration = Self.loadDefaultConversationConfiguration(
@@ -87,11 +96,16 @@ final class ChatStore: ObservableObject {
         self.transcriptionIncludesContext = Self.loadTranscriptionIncludesContext(from: resolvedDefaults)
 
         syncBridge.setStatusHandler { [weak self] status in
+            self?.syncStatus = status
             self?.syncStatusDescription = status.description
         }
 
         syncBridge.setSnapshotProvider { [weak self] in
             self?.conversations ?? []
+        }
+
+        syncBridge.setGlobalPinnedMemoriesProvider { [weak self] in
+            self?.globalPinnedMemories ?? []
         }
 
         syncBridge.setEventHandler { [weak self] event in
@@ -182,6 +196,7 @@ final class ChatStore: ObservableObject {
 
         do {
             conversations = try await repository.loadConversations()
+            globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
             syncBridge.requestBootstrapIfPossible()
         } catch {
             startupError = error.localizedDescription
@@ -194,6 +209,10 @@ final class ChatStore: ObservableObject {
 
     func activationRequestCode(now: Date = .now) -> String {
         OfflineActivation.makeRequestCode(deviceToken: deviceIdentity.deviceToken, now: now)
+    }
+
+    func publishActivationRequestCodeToCompanion(_ requestCode: String) {
+        syncBridge.pushActivationRequestCode(requestCode)
     }
 
     func applyActivationCode(_ rawCode: String, now: Date = .now) async throws {
@@ -210,6 +229,23 @@ final class ChatStore: ObservableObject {
     func clearActivation() async {
         await activationRepository.clearState()
         activationState = nil
+    }
+
+    var canTransferActivationCodeToPairedWatch: Bool {
+        switch syncStatus {
+        case .idle, .reachable:
+            return true
+        case .unavailable, .notPaired, .companionMissing:
+            return false
+        }
+    }
+
+    func sendActivationCodeToPairedWatch(_ rawCode: String) {
+        syncBridge.pushActivationCodeImport(rawCode)
+    }
+
+    func clearCompanionActivationFeedbackMessage() {
+        companionActivationFeedbackMessage = nil
     }
 
     func createConversation() async -> UUID {
@@ -267,6 +303,10 @@ final class ChatStore: ObservableObject {
 
     var defaultConversationSystemPrompt: String {
         defaultConversationConfiguration.customSystemPrompt ?? ""
+    }
+
+    var appVersionDescription: String {
+        Bundle.main.appVersionDescription
     }
 
     var selectedTranscriptionCustomPrompt: String {
@@ -328,6 +368,20 @@ final class ChatStore: ObservableObject {
 
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.customSystemPrompt = prompt.nonEmptyTrimmed
+        }
+    }
+
+    func updateUsesGlobalPinnedMemory(
+        _ usesGlobalPinnedMemory: Bool,
+        for conversationID: UUID
+    ) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.usesGlobalPinnedMemory = usesGlobalPinnedMemory
         }
     }
 
@@ -549,6 +603,79 @@ final class ChatStore: ObservableObject {
         defaults.set(includesContext, forKey: DefaultsKeys.transcriptionIncludesContext)
     }
 
+    func pinMessage(
+        id messageID: UUID,
+        from conversationID: UUID,
+        scope: PinnedMemoryScope
+    ) async {
+        guard let conversation = conversation(id: conversationID),
+              let message = conversation.messages.first(where: { $0.id == messageID }),
+              let text = message.cleanedText.nonEmptyTrimmed
+        else {
+            return
+        }
+
+        let item = PinnedMemoryItem(
+            text: String(text.prefix(260)),
+            keywords: derivedKeywords(from: text),
+            scope: scope,
+            sourceMessageIDs: [messageID],
+            updatedAt: .now
+        )
+
+        switch scope {
+        case .conversation:
+            guard conversation.pinnedMemories.contains(where: { $0.text == item.text }) == false else {
+                return
+            }
+
+            mutateConversation(id: conversationID) { updatedConversation in
+                updatedConversation.pinnedMemories.append(item)
+            }
+            if let updatedConversation = self.conversation(id: conversationID) {
+                await persist(updatedConversation, sync: true)
+            }
+        case .global:
+            guard globalPinnedMemories.contains(where: { $0.text == item.text }) == false else {
+                return
+            }
+
+            globalPinnedMemories.append(item)
+            await persistGlobalPinnedMemories(sync: true)
+        }
+    }
+
+    func removePinnedMemory(
+        id pinnedMemoryID: UUID,
+        from conversationID: UUID
+    ) async {
+        guard let currentConversation = conversation(id: conversationID),
+              currentConversation.pinnedMemories.contains(where: { $0.id == pinnedMemoryID })
+        else {
+            return
+        }
+
+        mutateConversation(id: conversationID) { updatedConversation in
+            updatedConversation.replacePinnedMemories(
+                updatedConversation.pinnedMemories.filter { $0.id != pinnedMemoryID }
+            )
+        }
+
+        if let updatedConversation = conversation(id: conversationID) {
+            await persist(updatedConversation, sync: true)
+        }
+    }
+
+    func removeGlobalPinnedMemory(id pinnedMemoryID: UUID) async {
+        let filteredMemories = globalPinnedMemories.filter { $0.id != pinnedMemoryID }
+        guard filteredMemories.count != globalPinnedMemories.count else {
+            return
+        }
+
+        globalPinnedMemories = filteredMemories
+        await persistGlobalPinnedMemories(sync: true)
+    }
+
     func sendMessage(in conversationID: UUID) async {
         let draft = drafts[conversationID] ?? ConversationDraft()
         await runSendTask(for: conversationID) { store in
@@ -587,10 +714,12 @@ final class ChatStore: ObservableObject {
 
         guard isSending(conversationID: conversationID) == false,
               isTranscribing(conversationID: conversationID) == false,
-              let currentConversation = conversation(id: conversationID)
+              let storedConversation = conversation(id: conversationID)
         else {
             return
         }
+
+        let currentConversation = requestConversation(from: storedConversation)
 
         let effectiveAIConfiguration = licensedConfiguration(
             from: currentConversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
@@ -709,7 +838,7 @@ final class ChatStore: ObservableObject {
         upsertConversation(currentConversation)
         await persist(currentConversation, sync: true)
 
-        let requestConversation = currentConversation
+        let requestConversation = requestConversation(from: currentConversation)
         await streamAssistantReply(for: requestConversation, in: conversationID)
     }
 
@@ -718,6 +847,17 @@ final class ChatStore: ObservableObject {
             try await repository.save(conversation)
             if sync {
                 syncBridge.pushConversation(conversation)
+            }
+        } catch {
+            startupError = error.localizedDescription
+        }
+    }
+
+    private func persistGlobalPinnedMemories(sync: Bool) async {
+        do {
+            try await repository.saveGlobalPinnedMemories(globalPinnedMemories)
+            if sync {
+                syncBridge.pushGlobalPinnedMemories(globalPinnedMemories)
             }
         } catch {
             startupError = error.localizedDescription
@@ -925,9 +1065,10 @@ final class ChatStore: ObservableObject {
             await persist(currentConversation, sync: true)
         }
 
-        guard let requestConversation = latestReplyRequestConversation(from: currentConversation) else {
+        guard let latestReplyConversation = latestReplyRequestConversation(from: currentConversation) else {
             return
         }
+        let requestConversation = requestConversation(from: latestReplyConversation)
 
         do {
             try await consumeActivationMessage(for: effectiveAIConfiguration.model)
@@ -951,6 +1092,214 @@ final class ChatStore: ObservableObject {
         requestConversation.messages = Array(conversation.messages.prefix(lastUserIndex + 1))
         requestConversation.updatedAt = .now
         return requestConversation
+    }
+
+    private func refreshConversationArtifacts(for conversationID: UUID) async {
+        guard var conversation = conversation(id: conversationID) else {
+            return
+        }
+
+        let derivedArtifacts = await memoryMaintenanceService.refreshArtifacts(for: conversation)
+
+        if conversation.focusState == derivedArtifacts.focusState,
+           conversation.memoryItems == derivedArtifacts.memoryItems,
+           conversation.archiveSegments == derivedArtifacts.archiveSegments {
+            return
+        }
+
+        conversation.updateFocusState(derivedArtifacts.focusState)
+        conversation.replaceMemoryItems(derivedArtifacts.memoryItems)
+        conversation.replaceArchiveSegments(derivedArtifacts.archiveSegments)
+        upsertConversation(conversation)
+        await persist(conversation, sync: true)
+    }
+
+    private func contextEligibleMessages(in conversation: ConversationThread) -> [ChatMessage] {
+        conversation.messages.filter { message in
+            message.status != .failed &&
+            message.role != .system &&
+            message.hasVisibleContent
+        }
+    }
+
+    private func deriveFocusState(
+        from messages: [ChatMessage],
+        existingFocusState: ConversationFocusState?,
+        mode: ContextMode,
+        conversationTitle: String
+    ) -> ConversationFocusState? {
+        guard messages.isEmpty == false else {
+            return nil
+        }
+
+        if mode == .casual, let existingFocusState, existingFocusState.openLoops.isEmpty {
+            return nil
+        }
+
+        let focusMessages = Array(messages.suffix(mode == .casual ? 4 : 6))
+        let latestFocusTitleSource = focusMessages.reversed().first { message in
+            message.role == .user && message.cleanedText.isEmpty == false
+        }?.cleanedText
+        let title = latestFocusTitleSource.map { source in
+            String(source.prefix(28)).trimmed
+        } ?? existingFocusState?.title ?? conversationTitle
+
+        let focusLines = focusMessages.map { message in
+            let speaker = message.role == .assistant ? "Assistant" : "User"
+            return "\(speaker): \(message.cleanedText.collapseWhitespace())"
+        }
+        let focusNote = focusLines.joined(separator: "\n")
+        let openLoops = extractOpenLoops(from: focusMessages)
+        let sourceMessageIDs = focusMessages.map(\.id)
+
+        guard focusNote.nonEmptyTrimmed != nil || openLoops.isEmpty == false else {
+            return nil
+        }
+
+        return ConversationFocusState(
+            id: existingFocusState?.id ?? UUID(),
+            kind: mode,
+            title: String(title),
+            focusNote: String(focusNote.prefix(1_500)),
+            openLoops: openLoops,
+            sourceMessageIDs: sourceMessageIDs,
+            updatedAt: .now
+        )
+    }
+
+    private func deriveMemoryItems(from messages: [ChatMessage]) -> [ConversationMemoryItem] {
+        let candidates = messages
+            .filter { $0.role == .user }
+            .dropLast(2)
+            .compactMap(\.cleanedText.nonEmptyTrimmed)
+            .filter { text in
+                let normalized = text.lowercased()
+                return [
+                    "喜欢", "希望", "请用", "尽量", "不要", "习惯", "更喜欢",
+                    "薄弱", "容易错", "总是错", "看不懂", "中文", "分步", "详细"
+                ].contains(where: { normalized.contains($0) })
+            }
+
+        var uniqueTexts: [String] = []
+        for candidate in candidates.reversed() {
+            if uniqueTexts.contains(candidate) == false {
+                uniqueTexts.append(candidate)
+            }
+            if uniqueTexts.count >= 8 {
+                break
+            }
+        }
+
+        return uniqueTexts.map { text in
+            ConversationMemoryItem(
+                text: String(text.prefix(220)),
+                keywords: derivedKeywords(from: text)
+            )
+        }
+    }
+
+    private func deriveArchiveSegments(
+        from messages: [ChatMessage],
+        existingSegments: [ConversationArchiveSegment],
+        protectedRecentMessages: Int
+    ) -> [ConversationArchiveSegment] {
+        guard messages.count > 14 || messages.reduce(0, { $0 + max($1.cleanedText.count, 24) }) > 8_000 else {
+            return existingSegments
+        }
+
+        let protectedIDs = Set(messages.suffix(protectedRecentMessages).map(\.id))
+        let archivedMessageIDs = Set(existingSegments.flatMap(\.sourceMessageIDs))
+        let candidateMessages = messages.filter { message in
+            protectedIDs.contains(message.id) == false &&
+            archivedMessageIDs.contains(message.id) == false
+        }
+
+        guard candidateMessages.isEmpty == false else {
+            return existingSegments
+        }
+
+        let segmentMessages = Array(candidateMessages.prefix(8))
+        let summary = summarizedArchiveText(for: segmentMessages)
+        guard summary.isEmpty == false else {
+            return existingSegments
+        }
+
+        let archiveTitleSource = segmentMessages.first { message in
+            message.role == .user && message.cleanedText.isEmpty == false
+        }?.cleanedText
+        let title = archiveTitleSource.map { source in
+            String(source.prefix(28)).trimmed
+        } ?? "Archived Context"
+        let sourceMessageIDs = segmentMessages.map(\.id)
+        if existingSegments.contains(where: { $0.sourceMessageIDs == sourceMessageIDs }) {
+            return existingSegments
+        }
+
+        var updatedSegments = existingSegments
+        updatedSegments.append(
+            ConversationArchiveSegment(
+                title: String(title),
+                summary: summary,
+                keywords: derivedKeywords(from: summary),
+                openLoops: extractOpenLoops(from: segmentMessages),
+                sourceMessageIDs: sourceMessageIDs,
+                updatedAt: .now
+            )
+        )
+
+        return Array(updatedSegments.suffix(24))
+    }
+
+    private func extractOpenLoops(from messages: [ChatMessage]) -> [String] {
+        var loops: [String] = []
+
+        for message in messages.reversed() where message.role == .user {
+            guard let text = message.cleanedText.nonEmptyTrimmed else {
+                continue
+            }
+
+            let normalized = text.lowercased()
+            let isOpenLoop =
+                text.contains("?") ||
+                text.contains("？") ||
+                normalized.contains("下一步") ||
+                normalized.contains("继续") ||
+                normalized.contains("为什么") ||
+                normalized.contains("怎么")
+
+            guard isOpenLoop else {
+                continue
+            }
+
+            loops.append(String(text.prefix(140)))
+            if loops.count >= 3 {
+                break
+            }
+        }
+
+        return loops.reversed()
+    }
+
+    private func summarizedArchiveText(for messages: [ChatMessage]) -> String {
+        String(
+            messages
+            .compactMap { message -> String? in
+                guard let text = message.cleanedText.nonEmptyTrimmed else {
+                    return nil
+                }
+                let speaker = message.role == .assistant ? "Assistant" : "User"
+                return "\(speaker): \(text.collapseWhitespace())"
+            }
+            .joined(separator: "\n")
+            .prefix(1_200)
+        ).trimmed
+    }
+
+    private func derivedKeywords(from text: String) -> [String] {
+        let normalized = text.collapseWhitespace().lowercased()
+        let wordMatches = normalized.matches(for: #"[a-z0-9_]{2,}"#)
+        let cjkTokens = normalized.cjkBigrams()
+        return Array(Set((wordMatches + cjkTokens).filter { $0.isEmpty == false })).sorted().prefix(12).map { $0 }
     }
 
     private func consumeActivationMessage(for modelID: String) async throws {
@@ -1069,6 +1418,7 @@ final class ChatStore: ObservableObject {
 
                 if let finalizedConversation = conversation(id: conversationID) {
                     await persist(finalizedConversation, sync: true)
+                    await refreshConversationArtifacts(for: conversationID)
                 }
                 return
             } catch {
@@ -1168,7 +1518,76 @@ final class ChatStore: ObservableObject {
                 upsertConversation(remoteConversation)
                 await persist(remoteConversation, sync: false)
             }
+        case .globalPinnedMemories(let items):
+            await mergeGlobalPinnedMemories(items, syncMergedState: true)
+        case .activationRequestCode(let requestCode):
+            #if os(iOS)
+            pairedWatchActivationRequestCode = OfflineActivation.formatForDisplay(requestCode, groupSize: 4)
+            #endif
+        case .activationCodeImport(let code, let transferID):
+            #if os(watchOS)
+            if let transferID, transferID == lastHandledCompanionActivationTransferID {
+                return
+            }
+
+            lastHandledCompanionActivationTransferID = transferID
+            let normalizedCode = OfflineActivation.normalizeActivationInput(code)
+
+            do {
+                try await applyActivationCode(normalizedCode)
+                companionActivationFeedbackMessage = "已从 iPhone 导入并应用激活码。"
+            } catch {
+                companionActivationFeedbackMessage = "从 iPhone 导入失败：\(error.localizedDescription)"
+            }
+            #endif
         }
+    }
+
+    private func mergeGlobalPinnedMemories(
+        _ incomingItems: [PinnedMemoryItem],
+        syncMergedState: Bool
+    ) async {
+        var itemsByID = Dictionary(uniqueKeysWithValues: globalPinnedMemories.map { ($0.id, $0) })
+
+        for item in incomingItems {
+            if let existing = itemsByID[item.id], existing.updatedAt >= item.updatedAt {
+                continue
+            }
+
+            itemsByID[item.id] = item
+        }
+
+        let mergedItems = itemsByID.values.sorted { lhs, rhs in
+            if lhs.updatedAt == rhs.updatedAt {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+
+            return lhs.updatedAt > rhs.updatedAt
+        }
+
+        guard mergedItems != globalPinnedMemories else {
+            return
+        }
+
+        globalPinnedMemories = mergedItems
+        await persistGlobalPinnedMemories(sync: syncMergedState)
+    }
+
+    private func requestConversation(from conversation: ConversationThread) -> ConversationThread {
+        let resolvedConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        guard resolvedConfiguration.usesGlobalPinnedMemory else {
+            return conversation
+        }
+
+        let existingIDs = Set(conversation.pinnedMemories.map(\.id))
+        let additionalPinnedMemories = globalPinnedMemories.filter { existingIDs.contains($0.id) == false }
+        guard additionalPinnedMemories.isEmpty == false else {
+            return conversation
+        }
+
+        var enrichedConversation = conversation
+        enrichedConversation.pinnedMemories.append(contentsOf: additionalPinnedMemories)
+        return enrichedConversation
     }
 
     private static func makeDefaults(configuration: AppConfiguration) -> UserDefaults {

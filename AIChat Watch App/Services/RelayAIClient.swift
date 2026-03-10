@@ -146,32 +146,43 @@ struct RelayAIClient: AIStreamingService {
 
     func makeRelayRequest(for conversation: ConversationThread) -> RelayChatRequest {
         let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
-        let selectedMessages = AIContextBuilder.selectedMessages(
-            from: conversation.messages,
-            maxContextMessages: maxContextMessages,
-            maxCharacterBudget: maxCharacterBudget,
-            maxInlineAttachmentBytes: maxInlineAttachmentBytes
+        let assembledContext = AIContextAssembler.assembleReplyContext(
+            for: conversation,
+            configuration: runtimeConfiguration
         )
+        var relayMessages: [RelayMessage] = []
+
+        if let prefaceText = assembledContext.prefaceText?.nonEmptyTrimmed {
+            relayMessages.append(
+                RelayMessage(
+                    role: ChatRole.user.rawValue,
+                    text: prefaceText,
+                    attachments: []
+                )
+            )
+        }
+
+        relayMessages.append(contentsOf: assembledContext.recentMessages.map { message in
+            RelayMessage(
+                role: message.role.rawValue,
+                text: requestText(for: message),
+                attachments: message.attachments.map { attachment in
+                    RelayAttachment(
+                        mimeType: attachment.mimeType,
+                        base64Data: attachment.data.base64EncodedString(),
+                        filename: attachment.filename
+                    )
+                }
+            )
+        })
 
         return RelayChatRequest(
             model: runtimeConfiguration.model,
-            systemPrompt: AIContextBuilder.systemPrompt(for: runtimeConfiguration),
+            systemPrompt: assembledContext.systemPrompt,
             thinkingIntensity: runtimeConfiguration.thinkingIntensity,
             maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
             includeThoughts: true,
-            messages: selectedMessages.map { message in
-                RelayMessage(
-                    role: message.role.rawValue,
-                    text: requestText(for: message),
-                    attachments: message.attachments.map { attachment in
-                        RelayAttachment(
-                            mimeType: attachment.mimeType,
-                            base64Data: attachment.data.base64EncodedString(),
-                            filename: attachment.filename
-                        )
-                    }
-                )
-            }
+            messages: relayMessages
         )
     }
 

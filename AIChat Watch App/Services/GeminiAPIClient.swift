@@ -141,10 +141,17 @@ struct GeminiAPIClient: AIStreamingService {
 
     func makeRequestBody(for conversation: ConversationThread) -> GeminiGenerateContentRequest {
         let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        let assembledContext = AIContextAssembler.assembleReplyContext(
+            for: conversation,
+            configuration: runtimeConfiguration
+        )
 
         return GeminiGenerateContentRequest(
-            systemInstruction: AIContextBuilder.systemPrompt(for: runtimeConfiguration).map(GeminiContent.systemPrompt),
-            contents: contextWindow(from: conversation.messages),
+            systemInstruction: assembledContext.systemPrompt.map(GeminiContent.systemPrompt),
+            contents: contextWindow(
+                from: assembledContext.recentMessages,
+                prefaceText: assembledContext.prefaceText
+            ),
             generationConfig: GeminiGenerationConfig(
                 temperature: requestTemperature(for: runtimeConfiguration.model, fallback: 0.65),
                 topP: 0.9,
@@ -154,15 +161,22 @@ struct GeminiAPIClient: AIStreamingService {
         )
     }
 
-    func contextWindow(from messages: [ChatMessage]) -> [GeminiContent] {
-        let selectedMessages = AIContextBuilder.selectedMessages(
-            from: messages,
-            maxContextMessages: maxContextMessages,
-            maxCharacterBudget: maxCharacterBudget,
-            maxInlineAttachmentBytes: maxInlineAttachmentBytes
-        )
+    func contextWindow(
+        from messages: [ChatMessage],
+        prefaceText: String?
+    ) -> [GeminiContent] {
+        var contents: [GeminiContent] = []
 
-        return selectedMessages.compactMap { message in
+        if let prefaceText = prefaceText?.nonEmptyTrimmed {
+            contents.append(
+                GeminiContent(
+                    role: "user",
+                    parts: [GeminiPart(text: prefaceText, inlineData: nil)]
+                )
+            )
+        }
+
+        contents.append(contentsOf: messages.compactMap { message in
             guard let role = message.role.geminiRole else {
                 return nil
             }
@@ -182,7 +196,13 @@ struct GeminiAPIClient: AIStreamingService {
             }
 
             return GeminiContent(role: role, parts: parts)
-        }
+        })
+
+        return contents
+    }
+
+    func contextWindow(from messages: [ChatMessage]) -> [GeminiContent] {
+        contextWindow(from: messages, prefaceText: nil)
     }
 
     private func extractChunk(from responseEnvelope: GeminiGenerateContentResponse) -> GeminiStreamChunk {
@@ -297,6 +317,7 @@ struct GeminiGenerationConfig: Codable, Equatable {
     var topP: Double
     var maxOutputTokens: Int
     var thinkingConfig: GeminiThinkingConfig?
+    var responseMimeType: String?
 }
 
 struct GeminiThinkingConfig: Codable, Equatable {

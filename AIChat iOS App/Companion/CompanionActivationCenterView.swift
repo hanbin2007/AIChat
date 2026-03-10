@@ -13,11 +13,21 @@ struct CompanionActivationCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var chatStore: ChatStore
 
+    private let autoSendToWatch: Bool
     @State private var requestCode = ""
     @State private var requestIssuedAt = Date.now
     @State private var draftActivationCode = ""
     @State private var feedbackMessage: String?
     @State private var isSubmitting = false
+    @State private var hasAttemptedAutomaticWatchTransfer = false
+
+    init(
+        prefilledActivationCode: String = "",
+        autoSendToWatch: Bool = false
+    ) {
+        self.autoSendToWatch = autoSendToWatch
+        _draftActivationCode = State(initialValue: prefilledActivationCode)
+    }
 
     var body: some View {
         NavigationStack {
@@ -77,6 +87,55 @@ struct CompanionActivationCenterView: View {
                     .disabled(isSubmitting)
                 }
 
+                Section("Apple Watch 备用导入") {
+                    LabeledContent("同步状态", value: chatStore.syncStatusDescription)
+
+                    if let pairedWatchActivationRequestCode = chatStore.pairedWatchActivationRequestCode {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("最近来自手表的请求码")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(pairedWatchActivationRequestCode)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color(uiColor: .secondarySystemBackground))
+                                )
+                        }
+
+                        Button("复制手表请求码") {
+                            UIPasteboard.general.string = pairedWatchActivationRequestCode
+                        }
+                    }
+
+                    Button("从剪贴板粘贴激活码") {
+                        let pastedValue = UIPasteboard.general.string ?? ""
+                        let normalizedCode = OfflineActivation.normalizeActivationInput(pastedValue)
+                        guard normalizedCode.isEmpty == false else {
+                            feedbackMessage = "剪贴板里没有可用激活码。"
+                            return
+                        }
+
+                        draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
+                    }
+                    .disabled(isSubmitting)
+
+                    Button("发送到 Apple Watch") {
+                        Task {
+                            await sendActivationCodeToWatch(draftActivationCode)
+                        }
+                    }
+                    .disabled(isSubmitting || chatStore.canTransferActivationCodeToPairedWatch == false)
+
+                    Text("手表端仍然可以独立输入激活码；这里仅作为备用快速导入。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if let licenseState {
                     Section("授权详情") {
                         LabeledContent("生效时间", value: licenseState.license.validFrom.formatted(date: .abbreviated, time: .shortened))
@@ -109,6 +168,7 @@ struct CompanionActivationCenterView: View {
             }
             .onAppear {
                 refreshRequestCode()
+                attemptAutomaticWatchTransferIfNeeded()
             }
         }
     }
@@ -170,6 +230,45 @@ struct CompanionActivationCenterView: View {
             feedbackMessage = "激活成功，当前设备已解锁发送权限。"
         } catch {
             feedbackMessage = error.localizedDescription
+        }
+    }
+
+    private func sendActivationCodeToWatch(_ rawCode: String) async {
+        let normalizedCode = OfflineActivation.normalizeActivationInput(rawCode)
+        guard normalizedCode.isEmpty == false else {
+            feedbackMessage = "请输入激活码。"
+            return
+        }
+
+        guard chatStore.canTransferActivationCodeToPairedWatch else {
+            feedbackMessage = "当前没有可用的 Apple Watch 同步通道。"
+            return
+        }
+
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        chatStore.sendActivationCodeToPairedWatch(normalizedCode)
+        draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
+        feedbackMessage = "已发送到 Apple Watch，手表会自动应用激活码。"
+    }
+
+    private func attemptAutomaticWatchTransferIfNeeded() {
+        guard autoSendToWatch else {
+            return
+        }
+
+        guard hasAttemptedAutomaticWatchTransfer == false else {
+            return
+        }
+
+        guard draftActivationCode.isEmpty == false else {
+            return
+        }
+
+        hasAttemptedAutomaticWatchTransfer = true
+        Task {
+            await sendActivationCodeToWatch(draftActivationCode)
         }
     }
 

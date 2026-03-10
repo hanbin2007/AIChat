@@ -7,6 +7,14 @@
 
 import Foundation
 
+private enum RelayTranscriptionLimits {
+    static let maxOutputTokens = 5_120
+}
+
+private enum RelayMemoryExtractionLimits {
+    static let maxOutputTokens = 4_096
+}
+
 struct GeminiRelayBridge {
     var session: URLSession = .shared
 
@@ -213,6 +221,83 @@ struct GeminiRelayBridge {
         )
     }
 
+    func extractMemory(
+        relayRequest: RelayMemoryExtractionRequest,
+        apiKey: String,
+        debugLog: (@Sendable (String, String) async -> Void)? = nil
+    ) async throws -> RelayMemoryExtractionResponse {
+        let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
+
+        var request = URLRequest(
+            url: URL(
+                string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent"
+            )!
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let requestBody = try encoder.encode(makeGeminiMemoryRequest(from: relayRequest, model: model))
+        request.httpBody = requestBody
+
+        if let debugLog {
+            await debugLog(
+                "Gemini Request • Memory Extract",
+                RelayDebugFormatter.httpRequest(
+                    method: request.httpMethod ?? "POST",
+                    url: request.url?.absoluteString ?? "",
+                    headers: request.allHTTPHeaderFields ?? [:],
+                    body: requestBody
+                )
+            )
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RelayHTTPError.invalidUpstreamResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if let debugLog {
+                await debugLog(
+                    "Gemini Response • Memory Extract Error",
+                    RelayDebugFormatter.httpResponse(
+                        statusCode: httpResponse.statusCode,
+                        headers: httpHeaders(from: httpResponse),
+                        body: data
+                    )
+                )
+            }
+            throw upstreamError(statusCode: httpResponse.statusCode, data: data)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let responseEnvelope = try decoder.decode(GeminiStreamChunk.self, from: data)
+        let responseText = extractTranscript(from: responseEnvelope)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let completionError = transcriptionCompletionError(
+            for: responseEnvelope.candidates?.first?.finishReason,
+            hasTranscript: responseText.isEmpty == false
+        ) {
+            throw completionError
+        }
+
+        let extractionResponse = try decodeMemoryExtractionResponse(from: responseText)
+
+        if let debugLog {
+            await debugLog(
+                "Gemini Response • Memory Extract",
+                RelayDebugFormatter.prettyJSON(extractionResponse)
+            )
+        }
+
+        return extractionResponse
+    }
+
     private func makeGeminiRequest(from request: RelayChatRequest, model: String) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
@@ -281,8 +366,44 @@ struct GeminiRelayBridge {
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature(for: model, fallback: 0.1),
                 topP: 0.95,
-                maxOutputTokens: 1_024,
-                thinkingConfig: nil
+                maxOutputTokens: RelayTranscriptionLimits.maxOutputTokens,
+                thinkingConfig: nil,
+                responseMimeType: nil
+            )
+        )
+    }
+
+    private func makeGeminiMemoryRequest(
+        from request: RelayMemoryExtractionRequest,
+        model: String
+    ) -> GeminiGenerateContentRequest {
+        GeminiGenerateContentRequest(
+            systemInstruction: GeminiContent(
+                role: nil,
+                parts: [
+                    GeminiPart(
+                        text: memoryExtractionSystemPrompt,
+                        inlineData: nil
+                    )
+                ]
+            ),
+            contents: [
+                GeminiContent(
+                    role: "user",
+                    parts: [
+                        GeminiPart(
+                            text: memoryExtractionPrompt(for: request),
+                            inlineData: nil
+                        )
+                    ]
+                )
+            ],
+            generationConfig: GeminiGenerationConfig(
+                temperature: temperature(for: model, fallback: 0.1),
+                topP: 0.9,
+                maxOutputTokens: RelayMemoryExtractionLimits.maxOutputTokens,
+                thinkingConfig: nil,
+                responseMimeType: "application/json"
             )
         )
     }
@@ -371,6 +492,24 @@ struct GeminiRelayBridge {
             .joined(separator: "\n")
     }
 
+    private func decodeMemoryExtractionResponse(from text: String) throws -> RelayMemoryExtractionResponse {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        if let data = trimmed.data(using: .utf8),
+           let response = try? decoder.decode(RelayMemoryExtractionResponse.self, from: data) {
+            return response
+        }
+
+        if let range = trimmed.range(of: #"\{[\s\S]*\}"#, options: .regularExpression),
+           let data = String(trimmed[range]).data(using: .utf8) {
+            return try decoder.decode(RelayMemoryExtractionResponse.self, from: data)
+        }
+
+        throw RelayHTTPError.invalidUpstreamResponse
+    }
+
     private func transcriptionCompletionError(
         for finishReason: String?,
         hasTranscript: Bool
@@ -443,6 +582,83 @@ struct GeminiRelayBridge {
             partialResult[key] = String(describing: pair.value)
         }
     }
+}
+
+private let memoryExtractionSystemPrompt =
+    """
+    You maintain compressed conversation memory for AIChat.
+    Return strict JSON only. Do not answer the user.
+    Prefer concise Chinese phrasing when the source conversation is Chinese.
+    Use this schema exactly:
+    {
+      "kind": "casual|teaching|task",
+      "title": "short title",
+      "focusNote": "compact focus note",
+      "openLoops": ["pending question or next step"],
+      "memoryItems": ["stable reusable memory item"],
+      "archiveTitle": "short archive title or null",
+      "archiveSummary": "archive summary or null",
+      "archiveOpenLoops": ["pending loop from archive"]
+    }
+    Rules:
+    - Return valid JSON with double quotes and no markdown fence.
+    - memoryItems must contain only stable reusable memory, not ephemeral chatter.
+    - If there is no archive candidate, set archiveTitle and archiveSummary to null and archiveOpenLoops to [].
+    """
+
+private func memoryExtractionPrompt(for request: RelayMemoryExtractionRequest) -> String {
+    var sections = [
+        "Mode hint: \(request.mode)",
+        "Conversation title: \(request.conversationTitle)"
+    ]
+
+    if let existingFocusState = request.existingFocusState {
+        var focusLines: [String] = []
+        if let kind = existingFocusState.kind?.trimmedNonEmpty {
+            focusLines.append("kind: \(kind)")
+        }
+        if let title = existingFocusState.title?.trimmedNonEmpty {
+            focusLines.append("title: \(title)")
+        }
+        if let focusNote = existingFocusState.focusNote?.trimmedNonEmpty {
+            focusLines.append("focusNote: \(focusNote)")
+        }
+        if existingFocusState.openLoops.isEmpty == false {
+            focusLines.append("openLoops: \(existingFocusState.openLoops.joined(separator: " | "))")
+        }
+
+        if focusLines.isEmpty == false {
+            sections.append("Existing focus state:\n\(focusLines.joined(separator: "\n"))")
+        }
+    }
+
+    if request.existingMemoryItems.isEmpty == false {
+        sections.append(
+            "Existing reusable memory:\n" +
+            request.existingMemoryItems.map { "- \($0)" }.joined(separator: "\n")
+        )
+    }
+
+    sections.append(
+        "Recent messages (newest last):\n" +
+        request.recentMessages.enumerated().map { index, message in
+            "[\(index + 1)] \(message.role): \(message.text)"
+        }.joined(separator: "\n")
+    )
+
+    if request.archiveCandidateMessages.isEmpty == false {
+        sections.append(
+            "Archive candidate (older stable slice to compress if useful):\n" +
+            request.archiveCandidateMessages.enumerated().map { index, message in
+                "[\(index + 1)] \(message.role): \(message.text)"
+            }.joined(separator: "\n")
+        )
+    } else {
+        sections.append("Archive candidate: none")
+    }
+
+    sections.append("Return JSON only.")
+    return sections.joined(separator: "\n\n")
 }
 
 private extension String {

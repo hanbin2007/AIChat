@@ -149,6 +149,77 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertNil(requestBody.systemInstruction)
     }
 
+    func testContextAssemblerOmitsCasualFocusWithoutOpenLoops() {
+        let conversation = ConversationThread(
+            title: "Dinner",
+            messages: [
+                ChatMessage(role: .user, text: "今晚吃什么好？")
+            ],
+            focusState: ConversationFocusState(
+                kind: .casual,
+                title: "Dinner chat",
+                focusNote: "User is casually asking for dinner ideas.",
+                openLoops: []
+            )
+        )
+
+        let assembled = AIContextAssembler.assembleReplyContext(
+            for: conversation,
+            configuration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
+        )
+
+        XCTAssertEqual(assembled.mode, .casual)
+        XCTAssertNil(assembled.prefaceText)
+    }
+
+    func testContextAssemblerIncludesTeachingArtifactsInPreface() {
+        let conversation = ConversationThread(
+            title: "函数导数",
+            messages: [
+                ChatMessage(role: .user, text: "已知 f(x)=x^2+2x，帮我讲一下导数思路")
+            ],
+            focusState: ConversationFocusState(
+                kind: .teaching,
+                title: "导数讲解",
+                focusNote: "围绕二次函数求导，已经确认要先回顾导数定义，再带学生做一步步推导。",
+                openLoops: ["还要解释为什么常数项求导为 0"]
+            ),
+            memoryItems: [
+                ConversationMemoryItem(
+                    text: "学生更适合先给直观思路，再给公式化写法。",
+                    keywords: ["思路", "公式"]
+                )
+            ],
+            pinnedMemories: [
+                PinnedMemoryItem(
+                    text: "用户是高中理科中文教学场景。",
+                    keywords: ["高中", "理科", "教学"],
+                    scope: .conversation
+                )
+            ],
+            archiveSegments: [
+                ConversationArchiveSegment(
+                    title: "上一次函数题",
+                    summary: "之前已经讲过一次单调性判断，学生在符号书写上容易漏掉定义域。",
+                    keywords: ["函数", "定义域"],
+                    openLoops: ["本轮还可以顺手复习定义域"],
+                    sourceMessageIDs: []
+                )
+            ]
+        )
+
+        let assembled = AIContextAssembler.assembleReplyContext(
+            for: conversation,
+            configuration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
+        )
+
+        XCTAssertEqual(assembled.mode, .teaching)
+        XCTAssertTrue(assembled.prefaceText?.contains("Current focus:") == true)
+        XCTAssertTrue(assembled.prefaceText?.contains("Pinned memory:") == true)
+        XCTAssertTrue(assembled.prefaceText?.contains("Relevant conversation memory:") == true)
+        XCTAssertTrue(assembled.prefaceText?.contains("Archived context:") == true)
+    }
+
     func testCustomSystemPromptOverridesBuiltInPrompt() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Summarize this thread")],
@@ -458,6 +529,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertEqual(request.contents.count, 1)
         XCTAssertEqual(request.generationConfig.temperature, 1)
+        XCTAssertEqual(request.generationConfig.maxOutputTokens, 5_120)
+        XCTAssertNil(request.generationConfig.thinkingConfig)
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Expect the product name AIChat Pro.") == true)
@@ -997,6 +1070,104 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertNil(store.errorMessage(for: conversationID))
     }
 
+    func testConversationRepositoryExcludesGlobalPinnedMemorySidecarFromConversationList() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "hello")]
+        )
+
+        try await repository.save(conversation)
+        try await repository.saveGlobalPinnedMemories([
+            PinnedMemoryItem(
+                text: "用户偏好中文回答。",
+                keywords: ["中文", "回答"],
+                scope: .global
+            )
+        ])
+
+        let loadedConversations = try await repository.loadConversations()
+        let loadedGlobalPinnedMemories = try await repository.loadGlobalPinnedMemories()
+
+        XCTAssertEqual(loadedConversations.map(\.id), [conversation.id])
+        XCTAssertEqual(loadedGlobalPinnedMemories.count, 1)
+        XCTAssertEqual(loadedGlobalPinnedMemories.first?.scope, .global)
+    }
+
+    @MainActor
+    func testGlobalPinnedMemoryIsInjectedOnlyWhenConversationOptsIn() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let aiService = CapturingAIStreamingService()
+        let store = ChatStore(
+            repository: repository,
+            aiService: aiService,
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+
+        let sourceConversationID = await store.createConversation()
+        store.updateDraftText("记住我是高二理科生。", for: sourceConversationID)
+        await store.sendMessage(in: sourceConversationID)
+
+        let sourceConversation = try XCTUnwrap(store.conversation(id: sourceConversationID))
+        let sourceMessageID = try XCTUnwrap(sourceConversation.messages.first(where: { $0.role == .user })?.id)
+        await store.pinMessage(id: sourceMessageID, from: sourceConversationID, scope: .global)
+
+        let localOnlyConversationID = await store.createConversation()
+        store.updateDraftText("我们先随便聊聊。", for: localOnlyConversationID)
+        await store.sendMessage(in: localOnlyConversationID)
+        XCTAssertTrue(aiService.conversations.last?.pinnedMemories.isEmpty == true)
+
+        let globalMemoryConversationID = await store.createConversation()
+        await store.updateUsesGlobalPinnedMemory(true, for: globalMemoryConversationID)
+        store.updateDraftText("继续聊今天的计划。", for: globalMemoryConversationID)
+        await store.sendMessage(in: globalMemoryConversationID)
+
+        let injectedPinnedMemories = aiService.conversations.last?.pinnedMemories ?? []
+        XCTAssertEqual(injectedPinnedMemories.count, 1)
+        XCTAssertEqual(injectedPinnedMemories.first?.scope, .global)
+        XCTAssertEqual(injectedPinnedMemories.first?.text, "记住我是高二理科生。")
+    }
+
     @MainActor
     func testSendMessageRetriesBeforeReportingFailure() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
@@ -1283,6 +1454,23 @@ private final class CapturingTranscriptionService: AITranscriptionService {
             text: transcript,
             model: configuration.model
         )
+    }
+}
+
+private final class CapturingAIStreamingService: AIStreamingService {
+    private let lock = NSLock()
+
+    private(set) var conversations: [ConversationThread] = []
+
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        lock.withLock {
+            conversations.append(conversation)
+        }
+
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.answerDelta("Captured reply"))
+            continuation.finish()
+        }
     }
 }
 

@@ -157,7 +157,7 @@ struct ConversationDetailView: View {
                         starterCard
                     } else {
                         ForEach(conversation.messages) { message in
-                            ChatBubbleView(message: message)
+                            ChatBubbleView(conversationID: conversationID, message: message)
                                 .id(message.id)
                         }
                     }

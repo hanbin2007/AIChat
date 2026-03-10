@@ -7,6 +7,10 @@
 
 import Foundation
 
+private enum VoiceTranscriptionLimits {
+    static let maxOutputTokens = 5_120
+}
+
 enum VoiceTranscriptionPromptBuilder {
     static let systemPrompt =
         """
@@ -28,11 +32,7 @@ enum VoiceTranscriptionPromptBuilder {
         prompt(
             customPrompt: customPrompt,
             contextSummary: includesContext ?
-                AIContextBuilder.transcriptionContextSummary(
-                    from: conversation.messages,
-                    maxContextMessages: maxContextMessages,
-                    maxCharacterBudget: maxContextCharacters
-                ) :
+                AIContextAssembler.transcriptionContextSummary(for: conversation) :
                 nil
         )
     }
@@ -207,7 +207,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
             generationConfig: GeminiGenerationConfig(
                 temperature: requestTemperature(for: transcriptionConfiguration.model, fallback: 0.1),
                 topP: 0.95,
-                maxOutputTokens: 1_024,
+                maxOutputTokens: VoiceTranscriptionLimits.maxOutputTokens,
                 thinkingConfig: nil
             )
         )

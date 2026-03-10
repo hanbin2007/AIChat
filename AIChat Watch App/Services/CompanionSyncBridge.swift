@@ -55,18 +55,23 @@ nonisolated enum CompanionSyncEvent {
     case upsert(ConversationThread)
     case delete(UUID)
     case snapshot([ConversationThread])
+    case globalPinnedMemories([PinnedMemoryItem])
+    case activationRequestCode(String)
+    case activationCodeImport(code: String, transferID: String?)
 }
 
 final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias EventHandler = @MainActor (CompanionSyncEvent) -> Void
     typealias StatusHandler = @MainActor (CompanionSyncStatus) -> Void
     typealias SnapshotProvider = @MainActor () -> [ConversationThread]
+    typealias GlobalPinnedMemoriesProvider = @MainActor () -> [PinnedMemoryItem]
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var eventHandler: EventHandler?
     private var statusHandler: StatusHandler?
     private var snapshotProvider: SnapshotProvider?
+    private var globalPinnedMemoriesProvider: GlobalPinnedMemoriesProvider?
 
     private(set) var currentStatus: CompanionSyncStatus = .unavailable
 
@@ -97,6 +102,10 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
 
     func setSnapshotProvider(_ provider: SnapshotProvider?) {
         snapshotProvider = provider
+    }
+
+    func setGlobalPinnedMemoriesProvider(_ provider: GlobalPinnedMemoriesProvider?) {
+        globalPinnedMemoriesProvider = provider
     }
 
     func pushConversation(_ conversation: ConversationThread) {
@@ -130,6 +139,29 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         )
     }
 
+    func pushGlobalPinnedMemories(_ items: [PinnedMemoryItem]) {
+        guard WCSession.isSupported() else {
+            return
+        }
+
+        do {
+            let data = try encoder.encode(items)
+            let payload: [String: Any] = [
+                "type": "global_pinned_memories",
+                "payload": data.base64EncodedString()
+            ]
+            let session = WCSession.default
+
+            if session.isReachable {
+                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+            }
+
+            session.transferUserInfo(payload)
+        } catch {
+            return
+        }
+    }
+
     func requestBootstrapIfPossible() {
         guard WCSession.isSupported() else {
             return
@@ -141,6 +173,43 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         }
 
         session.sendMessage(["type": "bootstrap_request"], replyHandler: nil)
+    }
+
+    func pushActivationRequestCode(_ requestCode: String) {
+        guard WCSession.isSupported() else {
+            return
+        }
+
+        let payload: [String: Any] = [
+            "type": "activation_request_code",
+            "requestCode": requestCode
+        ]
+        let session = WCSession.default
+
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+
+        session.transferUserInfo(payload)
+    }
+
+    func pushActivationCodeImport(_ activationCode: String) {
+        guard WCSession.isSupported() else {
+            return
+        }
+
+        let payload: [String: Any] = [
+            "type": "activation_code_import",
+            "code": activationCode,
+            "transferID": UUID().uuidString
+        ]
+        let session = WCSession.default
+
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+
+        session.transferUserInfo(payload)
     }
 
     #if os(iOS)
@@ -246,6 +315,52 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             Task { @MainActor in
                 eventHandler?(.snapshot(conversations))
             }
+        case "bootstrap_snapshot":
+            if let base64Payload = payload["conversationsPayload"] as? String,
+               let data = Data(base64Encoded: base64Payload),
+               let conversations = try? decoder.decode([ConversationThread].self, from: data) {
+                Task { @MainActor in
+                    eventHandler?(.snapshot(conversations))
+                }
+            }
+
+            if let base64Payload = payload["globalPinnedPayload"] as? String,
+               let data = Data(base64Encoded: base64Payload),
+               let items = try? decoder.decode([PinnedMemoryItem].self, from: data) {
+                Task { @MainActor in
+                    eventHandler?(.globalPinnedMemories(items))
+                }
+            }
+        case "global_pinned_memories":
+            guard let base64Payload = payload["payload"] as? String,
+                  let data = Data(base64Encoded: base64Payload),
+                  let items = try? decoder.decode([PinnedMemoryItem].self, from: data)
+            else {
+                return
+            }
+
+            Task { @MainActor in
+                eventHandler?(.globalPinnedMemories(items))
+            }
+        case "activation_request_code":
+            guard let requestCode = payload["requestCode"] as? String else {
+                return
+            }
+
+            Task { @MainActor in
+                eventHandler?(.activationRequestCode(requestCode))
+            }
+        case "activation_code_import":
+            guard let code = payload["code"] as? String else {
+                return
+            }
+
+            Task { @MainActor in
+                eventHandler?(.activationCodeImport(
+                    code: code,
+                    transferID: payload["transferID"] as? String
+                ))
+            }
         default:
             break
         }
@@ -262,15 +377,19 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             }
 
             let conversations = self.snapshotProvider?() ?? []
-            guard let data = try? self.encoder.encode(conversations) else {
+            let globalPinnedMemories = self.globalPinnedMemoriesProvider?() ?? []
+            guard let conversationsData = try? self.encoder.encode(conversations),
+                  let globalPinnedData = try? self.encoder.encode(globalPinnedMemories)
+            else {
                 return
             }
 
             do {
                 try WCSession.default.updateApplicationContext(
                     [
-                        "type": "conversation_snapshot",
-                        "payload": data.base64EncodedString()
+                        "type": "bootstrap_snapshot",
+                        "conversationsPayload": conversationsData.base64EncodedString(),
+                        "globalPinnedPayload": globalPinnedData.base64EncodedString()
                     ]
                 )
             } catch {

@@ -149,7 +149,7 @@ actor LocalRelayServer {
                 return
             }
 
-            guard path == "/v1/chat/stream" || path == "/v1/audio/transcribe" else {
+            guard path == "/v1/chat/stream" || path == "/v1/audio/transcribe" || path == "/v1/memory/extract" else {
                 try await sendFailureResponse(
                     statusCode: 404,
                     message: "Not found.",
@@ -283,6 +283,58 @@ actor LocalRelayServer {
 
                 do {
                     let relayResponse = try await relayBridge.transcribeAudio(
+                        relayRequest: relayRequest,
+                        apiKey: configuration.geminiAPIKey,
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                    )
+
+                    try await sendJSON(
+                        statusCode: 200,
+                        payload: relayResponse,
+                        on: connection
+                    )
+                    await logDebugClientResponseIfNeeded(
+                        relayResponse,
+                        path: path,
+                        statusCode: 200,
+                        enabled: configuration.debugLoggingEnabled
+                    )
+                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                } catch let error as RelayHTTPError {
+                    try await sendFailureResponse(
+                        statusCode: error.statusCode,
+                        message: error.message,
+                        path: path,
+                        remoteAddress: remoteAddress,
+                        on: connection
+                    )
+                } catch {
+                    let relayError = RelayHTTPError.internalError(error.localizedDescription)
+                    try await sendFailureResponse(
+                        statusCode: relayError.statusCode,
+                        message: relayError.message,
+                        path: path,
+                        remoteAddress: remoteAddress,
+                        on: connection
+                    )
+                }
+            case "/v1/memory/extract":
+                let relayRequest: RelayMemoryExtractionRequest
+                do {
+                    relayRequest = try decoder.decode(RelayMemoryExtractionRequest.self, from: request.body)
+                } catch {
+                    try await sendFailureResponse(
+                        statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
+                        message: "Invalid JSON body.",
+                        path: path,
+                        remoteAddress: remoteAddress,
+                        on: connection
+                    )
+                    return
+                }
+
+                do {
+                    let relayResponse = try await relayBridge.extractMemory(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
                         debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)

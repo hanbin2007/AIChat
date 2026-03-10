@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(watchOS)
+import WatchKit
+#endif
 
 #if os(watchOS)
 struct ActivationCenterView: View {
@@ -23,7 +26,7 @@ struct ActivationCenterView: View {
             List {
                 ActivationStatusCard(
                     title: chatStore.activationStatusTitle,
-                    message: feedbackMessage ?? chatStore.activationStatusMessage,
+                    message: feedbackMessage ?? chatStore.companionActivationFeedbackMessage ?? chatStore.activationStatusMessage,
                     iconName: statusIconName,
                     accentColor: statusTintColor
                 )
@@ -56,9 +59,31 @@ struct ActivationCenterView: View {
                     Button("刷新请求码") {
                         refreshRequestCode()
                     }
+                }
 
+                Section("输入激活码") {
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("输入激活码", text: $draftActivationCode, axis: .vertical)
+                        Text("手动输入")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Text(draftActivationCode.isEmpty ? "尚未输入激活码" : OfflineActivation.formatActivationCodeForDisplay(draftActivationCode))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.black.opacity(0.28))
+                            )
+
+                        Text("点按下方按钮会打开系统输入界面，可使用键盘、涂鸦或语音。")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button(draftActivationCode.isEmpty ? "输入激活码" : "重新输入激活码") {
+                            presentActivationCodeInput()
+                        }
 
                         Button("应用激活码") {
                             Task {
@@ -66,6 +91,13 @@ struct ActivationCenterView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(draftActivationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        if draftActivationCode.isEmpty == false {
+                            Button("清空输入", role: .destructive) {
+                                draftActivationCode = ""
+                            }
+                        }
                     }
                     .disabled(isSubmitting)
                 }
@@ -144,6 +176,45 @@ struct ActivationCenterView: View {
     private func refreshRequestCode() {
         requestIssuedAt = .now
         requestCode = chatStore.activationRequestCode(now: requestIssuedAt)
+        chatStore.publishActivationRequestCodeToCompanion(requestCode)
+    }
+
+    private func presentActivationCodeInput() {
+        guard let controller = WKExtension.shared().visibleInterfaceController else {
+            feedbackMessage = "当前无法打开输入界面，请返回后重试。"
+            return
+        }
+
+        chatStore.clearCompanionActivationFeedbackMessage()
+        controller.presentTextInputController(withSuggestions: nil, allowedInputMode: .plain) { results in
+            guard let importedText = results?
+                .compactMap({ result -> String? in
+                    if let value = result as? String {
+                        return value
+                    }
+
+                    if let value = result as? NSString {
+                        return value as String
+                    }
+
+                    return nil
+                })
+                .joined(separator: " ")
+                .nonEmptyTrimmed
+            else {
+                return
+            }
+
+            let normalizedCode = OfflineActivation.normalizeActivationInput(importedText)
+            guard normalizedCode.isEmpty == false else {
+                return
+            }
+
+            Task { @MainActor in
+                draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
+                feedbackMessage = nil
+            }
+        }
     }
 
     private func applyActivationCode(_ rawCode: String) async {
@@ -153,6 +224,7 @@ struct ActivationCenterView: View {
             return
         }
 
+        chatStore.clearCompanionActivationFeedbackMessage()
         isSubmitting = true
         defer { isSubmitting = false }
 

@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct ChatBubbleView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+
+    let conversationID: UUID
     let message: ChatMessage
 
     private var isUser: Bool {
@@ -81,6 +84,29 @@ struct ChatBubbleView: View {
                 bubbleShape
                     .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
             )
+            .contextMenu {
+                if message.cleanedText.isEmpty == false {
+                    Button("Pin to This Chat") {
+                        Task {
+                            await chatStore.pinMessage(
+                                id: message.id,
+                                from: conversationID,
+                                scope: .conversation
+                            )
+                        }
+                    }
+
+                    Button("Pin Globally") {
+                        Task {
+                            await chatStore.pinMessage(
+                                id: message.id,
+                                from: conversationID,
+                                scope: .global
+                            )
+                        }
+                    }
+                }
+            }
 
             if isUser == false {
                 Spacer(minLength: 24)

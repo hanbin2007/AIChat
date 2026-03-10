@@ -31,6 +31,16 @@ nonisolated enum ChatMessageStatus: String, Codable, Hashable {
     case failed
 }
 
+nonisolated enum ContextMode: String, Codable, Hashable, CaseIterable, Identifiable {
+    case casual
+    case teaching
+    case task
+
+    var id: String {
+        rawValue
+    }
+}
+
 nonisolated enum AISystemPromptMode: String, Codable, CaseIterable, Hashable, Identifiable {
     case concise
     case `default`
@@ -117,24 +127,28 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
     var thinkingIntensity: AIThinkingIntensity
     var systemPromptMode: AISystemPromptMode
     var customSystemPrompt: String?
+    var usesGlobalPinnedMemory: Bool
 
     private enum CodingKeys: String, CodingKey {
         case model
         case thinkingIntensity
         case systemPromptMode
         case customSystemPrompt
+        case usesGlobalPinnedMemory
     }
 
     init(
         model: String,
         thinkingIntensity: AIThinkingIntensity = .balanced,
         systemPromptMode: AISystemPromptMode = .concise,
-        customSystemPrompt: String? = nil
+        customSystemPrompt: String? = nil,
+        usesGlobalPinnedMemory: Bool = false
     ) {
         self.model = model
         self.thinkingIntensity = thinkingIntensity
         self.systemPromptMode = systemPromptMode
         self.customSystemPrompt = customSystemPrompt?.nonEmptyTrimmed
+        self.usesGlobalPinnedMemory = usesGlobalPinnedMemory
     }
 
     init(from decoder: Decoder) throws {
@@ -143,6 +157,7 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         self.thinkingIntensity = try container.decodeIfPresent(AIThinkingIntensity.self, forKey: .thinkingIntensity) ?? .balanced
         self.systemPromptMode = try container.decodeIfPresent(AISystemPromptMode.self, forKey: .systemPromptMode) ?? .concise
         self.customSystemPrompt = try container.decodeIfPresent(String.self, forKey: .customSystemPrompt)?.nonEmptyTrimmed
+        self.usesGlobalPinnedMemory = try container.decodeIfPresent(Bool.self, forKey: .usesGlobalPinnedMemory) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -151,6 +166,124 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         try container.encode(thinkingIntensity, forKey: .thinkingIntensity)
         try container.encode(systemPromptMode, forKey: .systemPromptMode)
         try container.encode(customSystemPrompt?.nonEmptyTrimmed, forKey: .customSystemPrompt)
+        try container.encode(usesGlobalPinnedMemory, forKey: .usesGlobalPinnedMemory)
+    }
+}
+
+nonisolated struct ConversationFocusState: Identifiable, Codable, Hashable {
+    let id: UUID
+    var kind: ContextMode
+    var title: String
+    var focusNote: String
+    var openLoops: [String]
+    var sourceMessageIDs: [UUID]
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        kind: ContextMode,
+        title: String,
+        focusNote: String,
+        openLoops: [String] = [],
+        sourceMessageIDs: [UUID] = [],
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title.nonEmptyTrimmed ?? "Current Focus"
+        self.focusNote = focusNote.nonEmptyTrimmed ?? ""
+        self.openLoops = openLoops
+            .compactMap(\.nonEmptyTrimmed)
+        self.sourceMessageIDs = sourceMessageIDs
+        self.updatedAt = updatedAt
+    }
+}
+
+nonisolated struct ConversationMemoryItem: Identifiable, Codable, Hashable {
+    let id: UUID
+    var text: String
+    var keywords: [String]
+    var sourceMessageIDs: [UUID]
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        text: String,
+        keywords: [String] = [],
+        sourceMessageIDs: [UUID] = [],
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.text = text.nonEmptyTrimmed ?? ""
+        self.keywords = keywords
+            .compactMap(\.nonEmptyTrimmed)
+        self.sourceMessageIDs = sourceMessageIDs
+        self.updatedAt = updatedAt
+    }
+}
+
+nonisolated enum PinnedMemoryScope: String, Codable, Hashable, CaseIterable, Identifiable {
+    case conversation
+    case global
+
+    var id: String {
+        rawValue
+    }
+}
+
+nonisolated struct PinnedMemoryItem: Identifiable, Codable, Hashable {
+    let id: UUID
+    var text: String
+    var keywords: [String]
+    var scope: PinnedMemoryScope
+    var sourceMessageIDs: [UUID]
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        text: String,
+        keywords: [String] = [],
+        scope: PinnedMemoryScope,
+        sourceMessageIDs: [UUID] = [],
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.text = text.nonEmptyTrimmed ?? ""
+        self.keywords = keywords
+            .compactMap(\.nonEmptyTrimmed)
+        self.scope = scope
+        self.sourceMessageIDs = sourceMessageIDs
+        self.updatedAt = updatedAt
+    }
+}
+
+nonisolated struct ConversationArchiveSegment: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    var summary: String
+    var keywords: [String]
+    var openLoops: [String]
+    var sourceMessageIDs: [UUID]
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        summary: String,
+        keywords: [String] = [],
+        openLoops: [String] = [],
+        sourceMessageIDs: [UUID] = [],
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title.nonEmptyTrimmed ?? "Archived Context"
+        self.summary = summary.nonEmptyTrimmed ?? ""
+        self.keywords = keywords
+            .compactMap(\.nonEmptyTrimmed)
+        self.openLoops = openLoops
+            .compactMap(\.nonEmptyTrimmed)
+        self.sourceMessageIDs = sourceMessageIDs
+        self.updatedAt = updatedAt
     }
 }
 
@@ -190,6 +323,7 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
     var filename: String
     var mimeType: String
     var data: Data
+    var blobFilename: String?
     var pixelWidth: Int?
     var pixelHeight: Int?
     var durationSeconds: Double?
@@ -200,6 +334,7 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
         case filename
         case mimeType
         case data
+        case blobFilename
         case pixelWidth
         case pixelHeight
         case durationSeconds
@@ -211,6 +346,7 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
         filename: String,
         mimeType: String,
         data: Data,
+        blobFilename: String? = nil,
         pixelWidth: Int? = nil,
         pixelHeight: Int? = nil,
         durationSeconds: Double? = nil
@@ -220,6 +356,7 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
         self.filename = filename
         self.mimeType = mimeType
         self.data = data
+        self.blobFilename = blobFilename?.nonEmptyTrimmed
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.durationSeconds = durationSeconds
@@ -241,9 +378,23 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
         self.filename = try container.decode(String.self, forKey: .filename)
         self.mimeType = mimeType
         self.data = try container.decode(Data.self, forKey: .data)
+        self.blobFilename = try container.decodeIfPresent(String.self, forKey: .blobFilename)?.nonEmptyTrimmed
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(filename, forKey: .filename)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encode(data, forKey: .data)
+        try container.encode(blobFilename?.nonEmptyTrimmed, forKey: .blobFilename)
+        try container.encodeIfPresent(pixelWidth, forKey: .pixelWidth)
+        try container.encodeIfPresent(pixelHeight, forKey: .pixelHeight)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
     }
 
     var previewImage: UIImage? {
@@ -409,6 +560,10 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     var updatedAt: Date
     var messages: [ChatMessage]
     var aiConfiguration: ConversationAIConfiguration?
+    var focusState: ConversationFocusState?
+    var memoryItems: [ConversationMemoryItem]
+    var pinnedMemories: [PinnedMemoryItem]
+    var archiveSegments: [ConversationArchiveSegment]
 
     init(
         id: UUID = UUID(),
@@ -416,7 +571,11 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         messages: [ChatMessage] = [],
-        aiConfiguration: ConversationAIConfiguration? = nil
+        aiConfiguration: ConversationAIConfiguration? = nil,
+        focusState: ConversationFocusState? = nil,
+        memoryItems: [ConversationMemoryItem] = [],
+        pinnedMemories: [PinnedMemoryItem] = [],
+        archiveSegments: [ConversationArchiveSegment] = []
     ) {
         self.id = id
         self.title = title
@@ -424,6 +583,10 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         self.updatedAt = updatedAt
         self.messages = messages
         self.aiConfiguration = aiConfiguration
+        self.focusState = focusState
+        self.memoryItems = memoryItems
+        self.pinnedMemories = pinnedMemories
+        self.archiveSegments = archiveSegments
     }
 
     static func empty(
@@ -507,6 +670,10 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
     mutating func clearMessages() {
         messages.removeAll()
+        focusState = nil
+        memoryItems.removeAll()
+        pinnedMemories.removeAll()
+        archiveSegments.removeAll()
         updatedAt = .now
     }
 
@@ -517,6 +684,26 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
     mutating func updateAIConfiguration(_ newConfiguration: ConversationAIConfiguration?) {
         aiConfiguration = newConfiguration
+        updatedAt = .now
+    }
+
+    mutating func updateFocusState(_ newFocusState: ConversationFocusState?) {
+        focusState = newFocusState
+        updatedAt = .now
+    }
+
+    mutating func replaceMemoryItems(_ items: [ConversationMemoryItem]) {
+        memoryItems = items
+        updatedAt = .now
+    }
+
+    mutating func replacePinnedMemories(_ items: [PinnedMemoryItem]) {
+        pinnedMemories = items
+        updatedAt = .now
+    }
+
+    mutating func replaceArchiveSegments(_ segments: [ConversationArchiveSegment]) {
+        archiveSegments = segments
         updatedAt = .now
     }
 
@@ -565,6 +752,30 @@ nonisolated extension String {
 
     func collapseWhitespace() -> String {
         replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    func matches(for pattern: String) -> [String] {
+        let nsRange = NSRange(startIndex..<endIndex, in: self)
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+
+        return regex.matches(in: self, range: nsRange).compactMap { match in
+            Range(match.range, in: self).map { String(self[$0]) }
+        }
+    }
+
+    func cjkBigrams() -> [String] {
+        let scalars = Array(unicodeScalars.filter { scalar in
+            (0x4E00...0x9FFF).contains(scalar.value)
+        })
+        guard scalars.count >= 2 else {
+            return []
+        }
+
+        return (0..<(scalars.count - 1)).map { index in
+            String(String.UnicodeScalarView([scalars[index], scalars[index + 1]]))
+        }
     }
 }
 
