@@ -1,7 +1,9 @@
 #include? "Secrets.xcconfig"
 
+APP_MARKETING_VERSION = 2.0
+APP_BUILD_VERSION = 3
+
 AI_BACKEND_MODE = relay
 GEMINI_MODEL = gemini-3-flash-preview
 GEMINI_TRANSCRIPTION_MODEL = gemini-3-flash-preview
 AI_RELAY_STREAM_PATH = v1/chat/stream
-
