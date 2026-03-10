@@ -13,8 +13,14 @@ struct ChatBubbleView: View {
     let conversationID: UUID
     let message: ChatMessage
 
+    @State private var isShowingMessageActions = false
+
     private var isUser: Bool {
         message.role == .user
+    }
+
+    private var canPinMessage: Bool {
+        message.cleanedText.isEmpty == false
     }
 
     private var bubbleShape: RoundedRectangle {
@@ -80,38 +86,65 @@ struct ChatBubbleView: View {
                 bubbleShape.fill(bubbleBackground)
             }
             .clipShape(bubbleShape)
+            .contentShape(bubbleShape)
             .overlay(
                 bubbleShape
                     .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
             )
-            .contextMenu {
-                if message.cleanedText.isEmpty == false {
-                    Button("Pin to This Chat") {
-                        Task {
-                            await chatStore.pinMessage(
-                                id: message.id,
-                                from: conversationID,
-                                scope: .conversation
-                            )
-                        }
-                    }
-
-                    Button("Pin Globally") {
-                        Task {
-                            await chatStore.pinMessage(
-                                id: message.id,
-                                from: conversationID,
-                                scope: .global
-                            )
-                        }
-                    }
+            #if os(watchOS)
+            .onLongPressGesture(minimumDuration: 0.35) {
+                guard canPinMessage else {
+                    return
                 }
+
+                isShowingMessageActions = true
             }
+            .confirmationDialog(
+                "Message Actions",
+                isPresented: $isShowingMessageActions,
+                titleVisibility: .visible
+            ) {
+                messageActions
+            } message: {
+                Text("Choose how this message should be remembered.")
+            }
+            #else
+            .contextMenu {
+                messageActions
+            }
+            #endif
 
             if isUser == false {
                 Spacer(minLength: 24)
             }
         }
+    }
+
+    @ViewBuilder
+    private var messageActions: some View {
+        if canPinMessage {
+            Button("Pin to This Chat") {
+                Task {
+                    await chatStore.pinMessage(
+                        id: message.id,
+                        from: conversationID,
+                        scope: .conversation
+                    )
+                }
+            }
+
+            Button("Pin Globally") {
+                Task {
+                    await chatStore.pinMessage(
+                        id: message.id,
+                        from: conversationID,
+                        scope: .global
+                    )
+                }
+            }
+        }
+
+        Button("Cancel", role: .cancel) {}
     }
 
     private var bubbleBackground: AnyShapeStyle {
