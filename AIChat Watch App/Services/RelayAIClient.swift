@@ -60,7 +60,11 @@ struct RelayAIClient: AIStreamingService {
                     encoder.keyEncodingStrategy = .convertToSnakeCase
                     request.httpBody = try encoder.encode(makeRelayRequest(for: conversation))
 
-                    let (bytes, response) = try await session.bytes(for: request)
+                    let relaySession = makeRelayURLSession(
+                        configuration: configuration,
+                        fallback: session
+                    )
+                    let (bytes, response) = try await relaySession.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
                         throw RelayAPIError.invalidResponse
                     }
@@ -239,7 +243,11 @@ struct RelayTranscriptionService: AITranscriptionService {
             )
         )
 
-        let (data, response) = try await session.data(for: request)
+        let relaySession = makeRelayURLSession(
+            configuration: configuration,
+            fallback: session
+        )
+        let (data, response) = try await relaySession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw RelayAPIError.invalidResponse
         }
@@ -411,4 +419,45 @@ private func relayClientError(from data: Data) -> Error {
     }
 
     return RelayAPIError.invalidResponse
+}
+
+func makeRelayURLSession(
+    configuration: AppConfiguration,
+    fallback: URLSession
+) -> URLSession {
+    guard configuration.relayAllowsInsecureTLS,
+          let allowedHost = configuration.relayBaseURL?.host?.nonEmptyTrimmed
+    else {
+        return fallback
+    }
+
+    let delegate = RelayTLSDelegate(allowedHost: allowedHost)
+    let sessionConfiguration = URLSessionConfiguration.default
+    sessionConfiguration.waitsForConnectivity = true
+    sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    return URLSession(configuration: sessionConfiguration, delegate: delegate, delegateQueue: nil)
+}
+
+private final class RelayTLSDelegate: NSObject, URLSessionDelegate {
+    private let allowedHost: String
+
+    init(allowedHost: String) {
+        self.allowedHost = allowedHost.lowercased()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              challenge.protectionSpace.host.lowercased() == allowedHost,
+              let serverTrust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        completionHandler(.useCredential, URLCredential(trust: serverTrust))
+    }
 }

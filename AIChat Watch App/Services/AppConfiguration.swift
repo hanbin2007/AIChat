@@ -21,7 +21,7 @@ nonisolated enum AIBackendMode: String, Codable, Equatable {
     }
 }
 
-struct AppConfiguration: Equatable {
+nonisolated struct AppConfiguration: Equatable {
     let backendMode: AIBackendMode
     let geminiAPIKey: String?
     let geminiModel: String
@@ -29,7 +29,30 @@ struct AppConfiguration: Equatable {
     let relayBaseURL: URL?
     let relayBearerToken: String?
     let relayStreamPath: String
+    let relayAllowsInsecureTLS: Bool
     let appGroupIdentifier: String?
+
+    init(
+        backendMode: AIBackendMode,
+        geminiAPIKey: String?,
+        geminiModel: String,
+        geminiTranscriptionModel: String,
+        relayBaseURL: URL?,
+        relayBearerToken: String?,
+        relayStreamPath: String,
+        relayAllowsInsecureTLS: Bool = false,
+        appGroupIdentifier: String?
+    ) {
+        self.backendMode = backendMode
+        self.geminiAPIKey = geminiAPIKey
+        self.geminiModel = geminiModel
+        self.geminiTranscriptionModel = geminiTranscriptionModel
+        self.relayBaseURL = relayBaseURL
+        self.relayBearerToken = relayBearerToken
+        self.relayStreamPath = relayStreamPath
+        self.relayAllowsInsecureTLS = relayAllowsInsecureTLS
+        self.appGroupIdentifier = appGroupIdentifier
+    }
 
     static func load(bundle: Bundle = .main, processInfo: ProcessInfo = .processInfo) -> AppConfiguration {
         let environment = processInfo.environment
@@ -49,6 +72,11 @@ struct AppConfiguration: Equatable {
             .flatMap(URL.init(string:))
         let relayBearerToken = value(for: "AI_RELAY_BEARER_TOKEN", bundle: bundle, environment: environment)
         let relayStreamPath = value(for: "AI_RELAY_STREAM_PATH", bundle: bundle, environment: environment) ?? "v1/chat/stream"
+        let relayAllowsInsecureTLS = boolValue(
+            for: "AI_RELAY_ALLOW_INSECURE_TLS",
+            bundle: bundle,
+            environment: environment
+        )
         let appGroupIdentifier = value(for: "APP_GROUP_IDENTIFIER", bundle: bundle, environment: environment)
 
         return AppConfiguration(
@@ -59,6 +87,7 @@ struct AppConfiguration: Equatable {
             relayBaseURL: relayBaseURL,
             relayBearerToken: relayBearerToken,
             relayStreamPath: relayStreamPath,
+            relayAllowsInsecureTLS: relayAllowsInsecureTLS,
             appGroupIdentifier: appGroupIdentifier
         )
     }
@@ -180,5 +209,22 @@ struct AppConfiguration: Equatable {
     ) -> String? {
         environment[key]?.nonEmptyTrimmed ??
         (bundle.object(forInfoDictionaryKey: key) as? String)?.nonEmptyTrimmed
+    }
+
+    private static func boolValue(
+        for key: String,
+        bundle: Bundle,
+        environment: [String: String]
+    ) -> Bool {
+        guard let rawValue = value(for: key, bundle: bundle, environment: environment)?.lowercased() else {
+            return false
+        }
+
+        switch rawValue {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
     }
 }

@@ -8,6 +8,8 @@
 	<string>$(AI_RELAY_BASE_URL)</string>
 	<key>AI_RELAY_BEARER_TOKEN</key>
 	<string>$(AI_RELAY_BEARER_TOKEN)</string>
+	<key>AI_RELAY_ALLOW_INSECURE_TLS</key>
+	<string>$(AI_RELAY_ALLOW_INSECURE_TLS)</string>
 	<key>AI_RELAY_STREAM_PATH</key>
 	<string>$(AI_RELAY_STREAM_PATH)</string>
 	<key>APP_GROUP_IDENTIFIER</key>

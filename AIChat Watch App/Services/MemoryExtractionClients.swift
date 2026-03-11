@@ -174,7 +174,11 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
         encoder.keyEncodingStrategy = .convertToSnakeCase
         urlRequest.httpBody = try encoder.encode(request)
 
-        let (data, response) = try await session.data(for: urlRequest)
+        let relaySession = makeRelayURLSession(
+            configuration: configuration,
+            fallback: session
+        )
+        let (data, response) = try await relaySession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw RelayAPIError.invalidResponse
         }
