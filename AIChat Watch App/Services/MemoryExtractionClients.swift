@@ -36,6 +36,28 @@ private enum MemoryExtractionConstants {
         """
 }
 
+private actor RelayMemoryExtractionSupportCache {
+    static let shared = RelayMemoryExtractionSupportCache()
+
+    private var unsupportedRelayBaseURLs: Set<String> = []
+
+    func isUnsupported(baseURL: URL) -> Bool {
+        unsupportedRelayBaseURLs.contains(cacheKey(for: baseURL))
+    }
+
+    func markUnsupported(baseURL: URL) {
+        unsupportedRelayBaseURLs.insert(cacheKey(for: baseURL))
+    }
+
+    private func cacheKey(for baseURL: URL) -> String {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.path = ""
+        components?.query = nil
+        components?.fragment = nil
+        return components?.string ?? baseURL.absoluteString
+    }
+}
+
 struct GeminiMemoryExtractionClient: AIMemoryExtractionClient {
     let configuration: AppConfiguration
     var session: URLSession = .shared
@@ -129,9 +151,18 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
         request: ConversationMemoryExtractionRequest
     ) async throws -> ConversationMemoryExtractionResponse {
         guard let url = configuration.relayMemoryExtractURL,
+              let relayBaseURL = configuration.relayBaseURL,
               let bearerToken = configuration.relayBearerToken
         else {
             throw RelayAPIError.missingConfiguration
+        }
+
+        // Mixed-version setups are expected while the watch app and relay app are updated separately.
+        // If an older relay returns 404 for this endpoint, stop retrying for the same base URL.
+        if await RelayMemoryExtractionSupportCache.shared.isUnsupported(baseURL: relayBaseURL) {
+            throw RelayAPIError.remote(
+                message: "Relay does not support memory extraction yet. Update the relay app."
+            )
         }
 
         var urlRequest = URLRequest(url: url)
@@ -149,7 +180,17 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw relayExtractionError(from: data)
+            let error = relayExtractionError(from: data)
+            if httpResponse.statusCode == 404,
+               case let RelayAPIError.remote(message) = error,
+               message == "Not found." {
+                await RelayMemoryExtractionSupportCache.shared.markUnsupported(baseURL: relayBaseURL)
+                throw RelayAPIError.remote(
+                    message: "Relay does not support memory extraction yet. Update the relay app."
+                )
+            }
+
+            throw error
         }
 
         let decoder = JSONDecoder()
