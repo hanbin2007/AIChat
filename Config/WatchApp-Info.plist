@@ -42,6 +42,11 @@
 	<string>$(INFOPLIST_KEY_NSPhotoLibraryUsageDescription)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record voice prompts to send to Gemini.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>

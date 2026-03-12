@@ -181,7 +181,7 @@ nonisolated enum OfflineActivation {
         }
 
         guard state.license.deviceToken == deviceToken else {
-            return .invalid("当前授权不属于这台设备。")
+            return .invalid(L10n.tr("activation.error.license_for_other_device"))
         }
 
         if now < state.license.validFrom {
@@ -642,31 +642,34 @@ nonisolated enum OfflineActivationError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .invalidRequest:
-            return "请求码无效，请在当前设备上重新生成。"
+            return L10n.tr("activation.error.invalid_request")
         case .invalidActivationCode:
-            return "激活码格式不正确。"
+            return L10n.tr("activation.error.invalid_code")
         case .invalidSignature:
-            return "激活码校验失败。"
+            return L10n.tr("activation.error.invalid_signature")
         case .unsupportedVersion:
-            return "激活码版本不受支持。"
+            return L10n.tr("activation.error.unsupported_version")
         case .deviceMismatch:
-            return "这个激活码不属于当前设备。"
+            return L10n.tr("activation.error.device_mismatch")
         case .requestExpired:
-            return "请求码已超过 30 分钟，请在当前设备上刷新后重新生成。"
+            return L10n.tr("activation.error.request_expired")
         case .requestFromFuture:
-            return "请求时间异常，请检查当前设备系统时间。"
+            return L10n.tr("activation.error.request_from_future")
         case .licenseExpired:
-            return "当前授权已过期。"
+            return L10n.tr("activation.error.license_expired")
         case .messageLimitReached:
-            return "当前授权的可发送次数已用完。"
+            return L10n.tr("activation.error.message_limit_reached")
         case .modelNotAllowed:
-            return "当前授权不允许使用这个模型。"
+            return L10n.tr("activation.error.model_not_allowed")
         case .notActivated:
-            return "请先在当前设备上完成激活。"
+            return L10n.tr("activation.error.not_activated")
         case .notYetActive(let startDate):
-            return "授权将在 \(startDate.formatted(date: .abbreviated, time: .shortened)) 生效。"
+            return L10n.format(
+                "activation.error.not_yet_active",
+                startDate.formatted(date: .abbreviated, time: .shortened)
+            )
         case .invalidMessageLimit:
-            return "消息次数限制超出可编码范围。"
+            return L10n.tr("activation.error.invalid_message_limit")
         case .custom(let message):
             return message
         }

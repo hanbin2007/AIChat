@@ -14,9 +14,9 @@ nonisolated enum AIBackendMode: String, Codable, Equatable {
     var displayName: String {
         switch self {
         case .direct:
-            return "Direct Gemini"
+            return L10n.tr("backend.direct")
         case .relay:
-            return "Relay Gateway"
+            return L10n.tr("backend.relay")
         }
     }
 }
@@ -106,19 +106,22 @@ nonisolated struct AppConfiguration: Equatable {
         case .direct:
             return backendMode.displayName
         case .relay:
-            return "\(backendMode.displayName) • \(relayBaseURL?.host() ?? "URL invalid")"
+            return L10n.format(
+                "backend.relay.summary",
+                relayBaseURL?.host() ?? L10n.tr("backend.url_invalid")
+            )
         }
     }
 
     var storageSummary: String {
         if let appGroupIdentifier {
-            return "App Group requested: \(appGroupIdentifier)"
+            return L10n.format("storage.app_group.requested", appGroupIdentifier)
         }
 
         #if os(watchOS)
-        return "Local watch storage"
+        return L10n.tr("storage.local.watch")
         #else
-        return "Local iPhone storage"
+        return L10n.tr("storage.local.iphone")
         #endif
     }
 
@@ -126,14 +129,14 @@ nonisolated struct AppConfiguration: Equatable {
         switch backendMode {
         case .direct:
             guard geminiAPIKey == nil else {
-                return "Gemini is ready."
+                return L10n.tr("configuration.gemini.ready")
             }
-            return "Add GEMINI_API_KEY in Config/Secrets.xcconfig or the scheme environment before sending messages."
+            return L10n.tr("configuration.gemini.missing_api_key")
         case .relay:
             if let relayConfigurationIssue {
                 return relayConfigurationIssue
             }
-            return "Relay gateway is ready."
+            return L10n.tr("configuration.relay.ready")
         }
     }
 
@@ -144,7 +147,7 @@ nonisolated struct AppConfiguration: Equatable {
                 return nil
             }
 
-            return "Voice transcription needs GEMINI_API_KEY because audio is transcribed with Gemini before sending."
+            return L10n.tr("configuration.voice.needs_api_key")
         case .relay:
             if let relayConfigurationIssue {
                 return relayConfigurationIssue
@@ -188,15 +191,15 @@ nonisolated struct AppConfiguration: Equatable {
 
     private var relayConfigurationIssue: String? {
         guard relayBaseURL != nil else {
-            return "Relay mode needs AI_RELAY_BASE_URL in Config/Secrets.xcconfig."
+            return L10n.tr("configuration.relay.missing_base_url")
         }
 
         guard hasValidRelayBaseURL else {
-            return "AI_RELAY_BASE_URL is invalid. In xcconfig, write http:/$()/127.0.0.1:8787 instead of http://127.0.0.1:8787."
+            return L10n.tr("configuration.relay.invalid_base_url")
         }
 
         guard relayBearerToken != nil else {
-            return "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+            return L10n.tr("configuration.relay.missing_bearer")
         }
 
         return nil

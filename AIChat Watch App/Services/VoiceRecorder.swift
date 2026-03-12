@@ -17,11 +17,11 @@ enum VoiceRecorderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .microphoneDenied:
-            return "请允许麦克风权限后再录音。"
+            return L10n.tr("error.voice.microphone_denied")
         case .cannotStart:
-            return "录音启动失败，请重试。"
+            return L10n.tr("error.voice.cannot_start")
         case .missingRecording:
-            return "录音文件未生成，请重新录制。"
+            return L10n.tr("error.voice.missing_recording")
         }
     }
 }

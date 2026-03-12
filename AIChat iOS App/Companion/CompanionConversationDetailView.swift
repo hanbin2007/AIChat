@@ -9,6 +9,12 @@
 import PhotosUI
 import SwiftUI
 
+private enum CompanionConversationScrollLayout {
+    static let coordinateSpaceName = "companion-conversation-scroll"
+    static let interruptionThreshold: CGFloat = 32
+    static let suppressionDuration: TimeInterval = 0.28
+}
+
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -18,6 +24,9 @@ struct CompanionConversationDetailView: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isShowingSettings = false
     @State private var isShowingActivationCenter = false
+    @State private var interruptedAutoScrollMessageID: UUID?
+    @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
+    @State private var messagesViewportHeight: CGFloat = 0
 
     private let bottomAnchorID = "conversation-bottom-anchor"
 
@@ -80,7 +89,9 @@ struct CompanionConversationDetailView: View {
     }
 
     private func conversationContent(_ conversation: ConversationThread) -> some View {
-        ScrollViewReader { proxy in
+        let streamingMessageID = currentStreamingMessageID(in: conversation)
+
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     conversationHeaderCard(conversation: conversation)
@@ -105,12 +116,29 @@ struct CompanionConversationDetailView: View {
 
                     Color.clear
                         .frame(height: 6)
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: CompanionConversationBottomAnchorMaxYPreferenceKey.self,
+                                    value: geometry.frame(in: .named(CompanionConversationScrollLayout.coordinateSpaceName)).maxY
+                                )
+                            }
+                        )
                         .id(bottomAnchorID)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
                 .padding(.bottom, 20)
             }
+            .coordinateSpace(name: CompanionConversationScrollLayout.coordinateSpaceName)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: CompanionConversationViewportHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 composerSurface
@@ -121,17 +149,62 @@ struct CompanionConversationDetailView: View {
                         }
                     }
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { value in
+                        guard abs(value.translation.height) > abs(value.translation.width),
+                              abs(value.translation.height) > 6
+                        else {
+                            return
+                        }
+
+                        interruptAutoScroll(for: streamingMessageID)
+                    }
+            )
+            .onPreferenceChange(CompanionConversationViewportHeightPreferenceKey.self) { height in
+                messagesViewportHeight = height
+            }
+            .onPreferenceChange(CompanionConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
+                handleBottomAnchorPositionChange(maxY, streamingMessageID: streamingMessageID)
+            }
             .onAppear {
-                scrollToBottom(with: proxy, animated: false)
+                interruptedAutoScrollMessageID = nil
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID,
+                    force: true
+                )
             }
             .onChange(of: conversation.messages.count) { _ in
-                scrollToBottom(with: proxy, animated: true)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: true,
+                    streamingMessageID: streamingMessageID
+                )
             }
             .onChange(of: conversation.updatedAt) { _ in
-                scrollToBottom(with: proxy, animated: false)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID
+                )
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _ in
-                scrollToBottom(with: proxy, animated: false)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID
+                )
+            }
+            .onChange(of: streamingMessageID) { newMessageID in
+                interruptedAutoScrollMessageID = nil
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: newMessageID,
+                    force: true
+                )
             }
         }
     }
@@ -144,7 +217,7 @@ struct CompanionConversationDetailView: View {
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
-            Text("在 iPhone 上继续处理这条会话，设置会和手表同步保持一致。")
+            Text("继续这条会话，和手表实时同步。")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.78))
 
@@ -177,14 +250,14 @@ struct CompanionConversationDetailView: View {
 
     private var starterCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(chatStore.isReadOnlyMode ? "当前设备只读" : "从 iPhone 继续")
+            Text(chatStore.isReadOnlyMode ? "当前设备只读" : "继续对话")
                 .font(.headline)
                 .foregroundStyle(.white)
 
             Text(
                 chatStore.isReadOnlyMode ?
-                "这条会话已经同步到 iPhone。完成当前设备激活后，就能在这里继续发消息、录音和上传图片。" :
-                "可以直接输入问题、录一段语音、先转录再发送，或者上传图片走多模态分析。"
+                "先看同步历史；激活后再继续发消息。" :
+                "直接输入、录音，或加图片。"
             )
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.78))
@@ -307,12 +380,17 @@ struct CompanionConversationDetailView: View {
                 if voiceRecorder.isRecording || voiceRecorder.isPreparing {
                     CompanionInlineStatus(
                         iconName: voiceRecorder.isRecording ? "waveform.circle.fill" : "mic.circle",
-                        title: voiceRecorder.isRecording ? "录音中 \(voiceRecorder.elapsedTimeText)" : "准备麦克风..."
+                        title: voiceRecorder.isRecording ?
+                            L10n.format("conversation.recording.zh", voiceRecorder.elapsedTimeText) :
+                            L10n.tr("conversation.microphone.preparing.zh")
                     )
                 } else if isTranscribing {
                     CompanionInlineStatus(
                         iconName: "waveform.and.magnifyingglass",
-                        title: "正在用 \(AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel)) 转录语音"
+                        title: L10n.format(
+                            "conversation.transcribing.zh",
+                            AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel)
+                        )
                     )
                 }
 
@@ -463,6 +541,8 @@ struct CompanionConversationDetailView: View {
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+        scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(CompanionConversationScrollLayout.suppressionDuration)
+
         if animated {
             withAnimation(.easeOut(duration: 0.18)) {
                 proxy.scrollTo(bottomAnchorID, anchor: .bottom)
@@ -478,6 +558,55 @@ struct CompanionConversationDetailView: View {
         }
     }
 
+    private func currentStreamingMessageID(in conversation: ConversationThread) -> UUID? {
+        conversation.messages.last(where: { $0.role == .assistant && $0.status == .streaming })?.id
+    }
+
+    private func scrollToBottomIfNeeded(
+        with proxy: ScrollViewProxy,
+        animated: Bool,
+        streamingMessageID: UUID?,
+        force: Bool = false
+    ) {
+        guard force || shouldAutoScroll(for: streamingMessageID) else {
+            return
+        }
+
+        scrollToBottom(with: proxy, animated: animated)
+    }
+
+    private func shouldAutoScroll(for streamingMessageID: UUID?) -> Bool {
+        guard let streamingMessageID else {
+            return true
+        }
+
+        return interruptedAutoScrollMessageID != streamingMessageID
+    }
+
+    private func interruptAutoScroll(for streamingMessageID: UUID?) {
+        guard let streamingMessageID else {
+            return
+        }
+
+        interruptedAutoScrollMessageID = streamingMessageID
+    }
+
+    private func handleBottomAnchorPositionChange(_ maxY: CGFloat, streamingMessageID: UUID?) {
+        guard let streamingMessageID,
+              Date.now >= scrollInterruptionsSuppressedUntil,
+              messagesViewportHeight > 0
+        else {
+            return
+        }
+
+        let distanceFromBottom = maxY - messagesViewportHeight
+        guard distanceFromBottom > CompanionConversationScrollLayout.interruptionThreshold else {
+            return
+        }
+
+        interruptAutoScroll(for: streamingMessageID)
+    }
+
     private func draftTextBinding() -> Binding<String> {
         Binding(
             get: {
@@ -487,6 +616,22 @@ struct CompanionConversationDetailView: View {
                 chatStore.updateDraftText(newValue, for: conversationID)
             }
         )
+    }
+}
+
+private struct CompanionConversationViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct CompanionConversationBottomAnchorMaxYPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

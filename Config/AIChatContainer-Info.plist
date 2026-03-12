@@ -55,6 +55,11 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record voice prompts to send to Gemini.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select photos to send with your AI prompts.</string>
 	<key>UILaunchScreen</key>

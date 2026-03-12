@@ -102,7 +102,7 @@ nonisolated enum AIModelCatalog {
             id: model,
             title: prettifiedModelName(for: model),
             shortTitle: compactShortLabel(for: model),
-            subtitle: "Configured default"
+            subtitle: L10n.tr("model.subtitle.configured_default")
         )
     }
 
@@ -125,7 +125,7 @@ nonisolated enum AIModelCatalog {
             return version
         }
 
-        return "Custom"
+        return L10n.tr("model.short.custom")
     }
 
     private static func versionToken(in model: String) -> String? {

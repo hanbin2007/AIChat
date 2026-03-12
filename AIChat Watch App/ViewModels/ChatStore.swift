@@ -131,49 +131,65 @@ final class ChatStore: ObservableObject {
     var activationStatusTitle: String {
         switch activationStatus {
         case .inactive:
-            return "未激活"
+            return L10n.tr("activation.status.inactive")
         case .pending:
-            return "授权未生效"
+            return L10n.tr("activation.status.pending")
         case .active:
-            return "已激活"
+            return L10n.tr("activation.status.active")
         case .expired:
-            return "授权已过期"
+            return L10n.tr("activation.status.expired")
         case .exhausted:
-            return "次数已用尽"
+            return L10n.tr("activation.status.exhausted")
         case .invalid:
-            return "授权无效"
+            return L10n.tr("activation.status.invalid")
         }
     }
 
     var activationStatusMessage: String {
         switch activationStatus {
         case .inactive:
-            return "当前只能查看历史消息。发新消息前，需要先完成当前设备的离线激活。"
+            return L10n.tr("activation.message.inactive")
         case .pending(let state):
             return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
         case .active(let state, let remainingMessages):
             var components: [String] = []
             if let validUntil = state.license.validUntil {
-                components.append("有效期至 \(validUntil.formatted(date: .abbreviated, time: .shortened))")
+                components.append(
+                    L10n.format(
+                        "activation.message.active.valid_until",
+                        validUntil.formatted(date: .abbreviated, time: .shortened)
+                    )
+                )
             } else {
-                components.append("长期有效")
+                components.append(L10n.tr("activation.message.active.forever"))
             }
 
             if let remainingMessages {
-                components.append("剩余 \(remainingMessages) 次")
+                components.append(L10n.format("activation.message.active.remaining", remainingMessages))
             } else {
-                components.append("次数不限")
+                components.append(L10n.tr("activation.message.active.unlimited"))
             }
 
-            components.append("模型: \(allowedModelsDescription(for: state.license.allowedModelIDs))")
+            components.append(
+                L10n.format(
+                    "activation.message.active.models",
+                    allowedModelsDescription(for: state.license.allowedModelIDs)
+                )
+            )
             return components.joined(separator: " • ")
         case .expired(let state):
             if let validUntil = state.license.validUntil {
-                return "授权已于 \(validUntil.formatted(date: .abbreviated, time: .shortened)) 过期，请重新激活。"
+                return L10n.format(
+                    "activation.message.expired.with_date",
+                    validUntil.formatted(date: .abbreviated, time: .shortened)
+                )
             }
-            return "当前授权不可用，请重新激活。"
+            return L10n.tr("activation.message.expired.no_date")
         case .exhausted(let state):
-            return "当前授权的 \(state.license.messageLimit ?? 0) 次发送额度已用完，请重新生成激活码。"
+            return L10n.format(
+                "activation.message.exhausted",
+                state.license.messageLimit ?? 0
+            )
         case .invalid(let message):
             return message
         }
@@ -778,7 +794,7 @@ final class ChatStore: ObservableObject {
             conversationErrors[conversationID] = failureMessage(
                 from: finalError,
                 automaticRetryCount: max(0, attemptCount - 1),
-                operation: "语音转录"
+                operation: L10n.tr("operation.voice_transcription")
             )
         }
     }
@@ -1375,6 +1391,29 @@ final class ChatStore: ObservableObject {
                 let streamTask = Task { @MainActor () throws -> (String, String) in
                     var streamedText = ""
                     var streamedThoughtSummary = ""
+                    let flushInterval: TimeInterval = 0.05
+                    var lastFlushAt = Date.distantPast
+                    var hasFlushedVisibleContent = false
+
+                    @MainActor
+                    func flushIfNeeded(force: Bool = false) {
+                        let now = Date.now
+                        guard force || hasFlushedVisibleContent == false || now.timeIntervalSince(lastFlushAt) >= flushInterval else {
+                            return
+                        }
+
+                        upsertAssistantMessage(
+                            id: assistantMessageID,
+                            in: conversationID,
+                            text: streamedText,
+                            thoughtSummary: streamedThoughtSummary,
+                            status: .streaming,
+                            fallbackCreatedAt: assistantMessageCreatedAt
+                        )
+
+                        lastFlushAt = now
+                        hasFlushedVisibleContent = true
+                    }
 
                     for try await event in aiService.streamReply(for: requestConversation) {
                         try Task.checkCancellation()
@@ -1386,15 +1425,10 @@ final class ChatStore: ObservableObject {
                             streamedThoughtSummary.append(delta)
                         }
 
-                        upsertAssistantMessage(
-                            id: assistantMessageID,
-                            in: conversationID,
-                            text: streamedText,
-                            thoughtSummary: streamedThoughtSummary,
-                            status: .streaming,
-                            fallbackCreatedAt: assistantMessageCreatedAt
-                        )
+                        flushIfNeeded(force: hasFlushedVisibleContent == false)
                     }
+
+                    flushIfNeeded(force: true)
 
                     return (streamedText, streamedThoughtSummary)
                 }
@@ -1477,27 +1511,59 @@ final class ChatStore: ObservableObject {
         automaticRetryCount: Int,
         operation: String? = nil
     ) -> String {
+        let errorDescription = detailedErrorDescription(for: error)
+
         guard automaticRetryCount > 0 else {
-            return error.localizedDescription
+            return errorDescription
         }
 
         if let operation {
-            return "\(operation)已自动重试 \(automaticRetryCount) 次后仍失败：\(error.localizedDescription)"
+            let localizedFormat = L10n.tr("error.retry.failure_with_operation")
+            if localizedFormat == "error.retry.failure_with_operation" {
+                return "\(operation) failed after \(automaticRetryCount) retries: \(errorDescription)"
+            }
+
+            return String(
+                format: localizedFormat,
+                locale: Locale.current,
+                arguments: [operation, automaticRetryCount, errorDescription]
+            )
         }
 
-        return "已自动重试 \(automaticRetryCount) 次后仍失败：\(error.localizedDescription)"
+        let localizedFormat = L10n.tr("error.retry.failure")
+        if localizedFormat == "error.retry.failure" {
+            return "Still failed after \(automaticRetryCount) retries: \(errorDescription)"
+        }
+
+        return String(
+            format: localizedFormat,
+            locale: Locale.current,
+            arguments: [automaticRetryCount, errorDescription]
+        )
+    }
+
+    private func detailedErrorDescription(for error: Error) -> String {
+        let nsError = error as NSError
+        let localizedDescription = nsError.localizedDescription.nonEmptyTrimmed ?? String(describing: error)
+        let debugSuffix = "(\(nsError.domain) \(nsError.code))"
+
+        if localizedDescription.contains(debugSuffix) {
+            return localizedDescription
+        }
+
+        return "\(localizedDescription) \(debugSuffix)"
     }
 
     private func allowedModelsDescription(for allowedModelIDs: Set<String>?) -> String {
         guard let allowedModelIDs else {
-            return "全部"
+            return L10n.tr("common.all")
         }
 
         let titles = LicensedModelCatalog.supportedModels
             .filter { allowedModelIDs.contains($0.id) }
             .map(\.title)
 
-        return titles.isEmpty ? "全部" : titles.joined(separator: "、")
+        return titles.isEmpty ? L10n.tr("common.all") : titles.joined(separator: L10n.tr("list.separator"))
     }
 
     private func handleSyncEvent(_ event: CompanionSyncEvent) async {
@@ -1535,9 +1601,12 @@ final class ChatStore: ObservableObject {
 
             do {
                 try await applyActivationCode(normalizedCode)
-                companionActivationFeedbackMessage = "已从 iPhone 导入并应用激活码。"
+                companionActivationFeedbackMessage = L10n.tr("activation.import.success")
             } catch {
-                companionActivationFeedbackMessage = "从 iPhone 导入失败：\(error.localizedDescription)"
+                companionActivationFeedbackMessage = L10n.format(
+                    "activation.import.failure",
+                    error.localizedDescription
+                )
             }
             #endif
         }

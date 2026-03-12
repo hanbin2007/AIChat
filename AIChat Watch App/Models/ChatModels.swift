@@ -52,9 +52,9 @@ nonisolated enum AISystemPromptMode: String, Codable, CaseIterable, Hashable, Id
     var displayName: String {
         switch self {
         case .concise:
-            return "简洁"
+            return L10n.tr("ai.system_prompt.concise")
         case .default:
-            return "默认"
+            return L10n.tr("ai.system_prompt.default")
         }
     }
 }
@@ -72,13 +72,13 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
     var displayName: String {
         switch self {
         case .fast:
-            return "Fast"
+            return L10n.tr("ai.thinking.fast")
         case .balanced:
-            return "Balanced"
+            return L10n.tr("ai.thinking.balanced")
         case .deep:
-            return "Deep"
+            return L10n.tr("ai.thinking.deep")
         case .extreme:
-            return "Extreme"
+            return L10n.tr("ai.thinking.extreme")
         }
     }
 
@@ -190,7 +190,7 @@ nonisolated struct ConversationFocusState: Identifiable, Codable, Hashable {
     ) {
         self.id = id
         self.kind = kind
-        self.title = title.nonEmptyTrimmed ?? "Current Focus"
+        self.title = title.nonEmptyTrimmed ?? L10n.tr("context.current_focus")
         self.focusNote = focusNote.nonEmptyTrimmed ?? ""
         self.openLoops = openLoops
             .compactMap(\.nonEmptyTrimmed)
@@ -276,7 +276,7 @@ nonisolated struct ConversationArchiveSegment: Identifiable, Codable, Hashable {
         updatedAt: Date = .now
     ) {
         self.id = id
-        self.title = title.nonEmptyTrimmed ?? "Archived Context"
+        self.title = title.nonEmptyTrimmed ?? L10n.tr("context.archived")
         self.summary = summary.nonEmptyTrimmed ?? ""
         self.keywords = keywords
             .compactMap(\.nonEmptyTrimmed)
@@ -301,15 +301,15 @@ nonisolated enum AttachmentProcessingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedImage:
-            return "这张图片暂时无法在当前设备上解析。"
+            return L10n.tr("attachment.error.unsupported_image")
         case .unsupportedAudio:
-            return "录音文件无法处理，请重试。"
+            return L10n.tr("attachment.error.unsupported_audio")
         case .imageTooLarge(let maximumBytes):
             let megabytes = Double(maximumBytes) / 1_000_000
-            return "图片过大，请换一张小于 \(String(format: "%.1f", megabytes)) MB 的图片。"
+            return L10n.format("attachment.error.image_too_large", megabytes)
         case .audioTooLarge(let maximumBytes):
             let megabytes = Double(maximumBytes) / 1_000_000
-            return "录音过长，请控制在 \(String(format: "%.1f", megabytes)) MB 以内。"
+            return L10n.format("attachment.error.audio_too_large", megabytes)
         }
     }
 }
@@ -420,9 +420,9 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
     var shortSummary: String {
         switch kind {
         case .image:
-            return "Image"
+            return L10n.tr("attachment.kind.image")
         case .audio:
-            return "Voice"
+            return L10n.tr("attachment.kind.audio")
         }
     }
 
@@ -552,7 +552,14 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
 }
 
 nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
-    static let untitledTitle = "New Chat"
+    static var untitledTitle: String {
+        L10n.tr("conversation.untitled")
+    }
+
+    private static let legacyUntitledTitles = Set([
+        "New Chat",
+        "新对话"
+    ])
 
     let id: UUID
     var title: String
@@ -602,18 +609,18 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
     var previewText: String {
         guard let lastMessage = messages.last(where: \.hasVisibleContent) else {
-            return "Tap to start a conversation"
+            return L10n.tr("conversation.preview.empty")
         }
 
         if lastMessage.status == .streaming, lastMessage.cleanedText.isEmpty {
             if let thoughtSummary = lastMessage.cleanedThoughtSummary {
-                return "Thinking: \(thoughtSummary)"
+                return L10n.format("conversation.preview.thinking", thoughtSummary)
             }
-            return "Streaming response..."
+            return L10n.tr("conversation.preview.streaming")
         }
 
         if lastMessage.status == .failed, lastMessage.cleanedText.isEmpty {
-            return "Last reply failed"
+            return L10n.tr("conversation.preview.failed")
         }
 
         if let text = lastMessage.cleanedText.nonEmptyTrimmed {
@@ -635,7 +642,7 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         messages.append(message)
         updatedAt = max(updatedAt, message.createdAt)
 
-        if title == Self.untitledTitle,
+        if Self.isUntitledTitle(title),
            message.role == .user,
            let suggested = Self.suggestedTitle(
                from: message.text,
@@ -658,11 +665,11 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         }
 
         if attachments.contains(where: \.isAudio) {
-            return "Voice message"
+            return L10n.tr("conversation.title.voice")
         }
 
         if attachments.contains(where: \.isImage) {
-            return "Photo prompt"
+            return L10n.tr("conversation.title.photo")
         }
 
         return nil
@@ -727,16 +734,20 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
         switch (imageCount, audioCount) {
         case (0, 1):
-            return "1 voice note attached"
+            return L10n.tr("conversation.attachment.voice.one")
         case (0, let audioCount) where audioCount > 1:
-            return "\(audioCount) voice notes attached"
+            return L10n.format("conversation.attachment.voice.many", audioCount)
         case (1, 0):
-            return "1 image attached"
+            return L10n.tr("conversation.attachment.image.one")
         case (let imageCount, 0) where imageCount > 1:
-            return "\(imageCount) images attached"
+            return L10n.format("conversation.attachment.image.many", imageCount)
         default:
-            return "\(attachments.count) attachments"
+            return L10n.format("conversation.attachment.total", attachments.count)
         }
+    }
+
+    private static func isUntitledTitle(_ title: String) -> Bool {
+        legacyUntitledTitles.contains(title) || title == untitledTitle
     }
 }
 

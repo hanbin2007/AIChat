@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(watchOS)
+import WatchKit
+#endif
 
 struct ChatBubbleView: View {
     @EnvironmentObject private var chatStore: ChatStore
@@ -14,9 +17,22 @@ struct ChatBubbleView: View {
     let message: ChatMessage
 
     @State private var isShowingMessageActions = false
+    @State private var didTriggerStreamingHaptics = false
+    #if os(watchOS)
+    @State private var replyHapticTask: Task<Void, Never>?
+    #endif
 
     private var isUser: Bool {
         message.role == .user
+    }
+
+    private var isStreamingAssistant: Bool {
+        isUser == false && message.status == .streaming
+    }
+
+    private var hasReceivedStreamingChunk: Bool {
+        isStreamingAssistant &&
+        (message.cleanedText.isEmpty == false || message.cleanedThoughtSummary != nil)
     }
 
     private var canPinMessage: Bool {
@@ -28,96 +44,131 @@ struct ChatBubbleView: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .bottom, spacing: 0) {
             if isUser {
                 Spacer(minLength: 24)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                if message.attachments.isEmpty == false {
-                    AttachmentGridView(attachments: message.attachments)
-                }
-
-                if isUser == false, let thoughtSummary = message.cleanedThoughtSummary {
-                    ThoughtSummaryCard(
-                        thoughtSummary: thoughtSummary,
-                        isStreaming: message.status == .streaming
-                    )
-                }
-
-                if message.status == .streaming, message.cleanedText.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .tint(.white.opacity(0.8))
-                        Text(message.cleanedThoughtSummary == nil ? "Thinking..." : "Drafting answer...")
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
-                } else if message.status == .failed, message.cleanedText.isEmpty {
-                    Text("Reply interrupted")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.8))
-                } else if message.cleanedText.isEmpty == false {
-                    Text(message.cleanedText)
-                        .font(.body)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.leading)
-                }
-
-                HStack(spacing: 6) {
-                    Text(message.createdAt, style: .time)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.68))
-
-                    if message.status == .streaming {
-                        Label("Live", systemImage: "waveform.and.magnifyingglass")
-                            .labelStyle(.iconOnly)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.68))
-                    } else if message.status == .failed {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                    }
-                }
-            }
-            .padding(10)
-            .background {
-                bubbleShape.fill(bubbleBackground)
-            }
-            .clipShape(bubbleShape)
-            .contentShape(bubbleShape)
-            .overlay(
-                bubbleShape
-                    .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
-            )
-            #if os(watchOS)
-            .onLongPressGesture(minimumDuration: 0.35) {
-                guard canPinMessage else {
-                    return
-                }
-
-                isShowingMessageActions = true
-            }
-            .confirmationDialog(
-                "Message Actions",
-                isPresented: $isShowingMessageActions,
-                titleVisibility: .visible
-            ) {
-                messageActions
-            } message: {
-                Text("Choose how this message should be remembered.")
-            }
-            #else
-            .contextMenu {
-                messageActions
-            }
-            #endif
-
-            if isUser == false {
-                Spacer(minLength: 24)
+            bubbleContent
+                .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .onAppear {
+            if hasReceivedStreamingChunk {
+                triggerStreamingHapticsIfNeeded()
             }
         }
+        .compatibleOnChange(of: message.id) { _ in
+            resetStreamingHaptics()
+        }
+        .compatibleOnChange(of: hasReceivedStreamingChunk) { hasReceivedChunk in
+            guard hasReceivedChunk else {
+                return
+            }
+
+            triggerStreamingHapticsIfNeeded()
+        }
+        .compatibleOnChange(of: isStreamingAssistant) { isStreaming in
+            guard isStreaming == false else {
+                return
+            }
+
+            cancelReplyHaptics()
+        }
+        .onDisappear {
+            cancelReplyHaptics()
+        }
+    }
+
+    private var bubbleContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if message.attachments.isEmpty == false {
+                AttachmentGridView(attachments: message.attachments)
+            }
+
+            if isUser == false, let thoughtSummary = message.cleanedThoughtSummary {
+                ThoughtSummaryCard(
+                    thoughtSummary: thoughtSummary,
+                    isStreaming: message.status == .streaming
+                )
+            }
+
+            if message.status == .streaming, message.cleanedText.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white.opacity(0.8))
+                    Text(message.cleanedThoughtSummary == nil ? "Thinking" : "Replying")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            } else if message.status == .failed, message.cleanedText.isEmpty {
+                Text("Stopped")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.8))
+            } else if message.cleanedText.isEmpty == false {
+                Text(message.cleanedText)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if isStreamingAssistant {
+                StreamingReplyStatusView(
+                    title: message.cleanedText.isEmpty ? (message.cleanedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
+                    showsSpinner: message.cleanedText.isEmpty
+                )
+            }
+
+            HStack(spacing: 6) {
+                Text(message.createdAt, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.68))
+
+                if message.status == .streaming {
+                    Image(systemName: "waveform.and.magnifyingglass")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.68))
+                } else if message.status == .failed {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.yellow)
+                }
+            }
+        }
+        .padding(12)
+        .background {
+            bubbleShape.fill(bubbleBackground)
+        }
+        .clipShape(bubbleShape)
+        .contentShape(bubbleShape)
+        .overlay(
+            bubbleShape
+                .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
+        )
+        #if os(watchOS)
+        .onLongPressGesture(minimumDuration: 0.35) {
+            guard canPinMessage else {
+                return
+            }
+
+            isShowingMessageActions = true
+        }
+        .confirmationDialog(
+            "Message Actions",
+            isPresented: $isShowingMessageActions,
+            titleVisibility: .visible
+        ) {
+            messageActions
+        } message: {
+            Text("Choose how this message should be remembered.")
+        }
+        #else
+        .contextMenu {
+            messageActions
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -145,6 +196,54 @@ struct ChatBubbleView: View {
         }
 
         Button("Cancel", role: .cancel) {}
+    }
+
+    private func resetStreamingHaptics() {
+        didTriggerStreamingHaptics = false
+        cancelReplyHaptics()
+    }
+
+    private func triggerStreamingHapticsIfNeeded() {
+        guard didTriggerStreamingHaptics == false else {
+            return
+        }
+
+        didTriggerStreamingHaptics = true
+        startReplyHaptics()
+    }
+
+    private func startReplyHaptics() {
+        #if os(watchOS)
+        cancelReplyHaptics()
+        replyHapticTask = Task {
+            let device = WKInterfaceDevice.current()
+            let pattern: [(WKHapticType, UInt64)] = [
+                (.success, 180_000_000),
+                (.click, 200_000_000),
+                (.click, 250_000_000),
+                (.click, 330_000_000)
+            ]
+
+            for (index, step) in pattern.enumerated() {
+                guard Task.isCancelled == false else {
+                    return
+                }
+
+                device.play(step.0)
+
+                if index < pattern.count - 1 {
+                    try? await Task.sleep(nanoseconds: step.1)
+                }
+            }
+        }
+        #endif
+    }
+
+    private func cancelReplyHaptics() {
+        #if os(watchOS)
+        replyHapticTask?.cancel()
+        replyHapticTask = nil
+        #endif
     }
 
     private var bubbleBackground: AnyShapeStyle {
@@ -186,7 +285,7 @@ private struct ThoughtSummaryCard: View {
                         .font(.caption2)
                         .foregroundStyle(.cyan.opacity(0.9))
 
-                    Text(isStreaming ? "Thinking" : "Thought Summary")
+                    Text(isStreaming ? "Thinking" : "Summary")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.88))
 
@@ -215,6 +314,80 @@ private struct ThoughtSummaryCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+private struct StreamingReplyStatusView: View {
+    let title: String
+    let showsSpinner: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if showsSpinner {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.cyan.opacity(0.92))
+                } else {
+                    Circle()
+                        .fill(Color.cyan.opacity(0.92))
+                        .frame(width: 6, height: 6)
+                }
+
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.84))
+            }
+
+            GeometryReader { proxy in
+                TimelineView(.animation) { context in
+                    let trackWidth = max(proxy.size.width, 1)
+                    let indicatorWidth = max(trackWidth * 0.34, 18)
+                    let phase = context.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: 0.9) / 0.9
+                    let travel = max(trackWidth - indicatorWidth, 0)
+
+                    ZStack(alignment: .leading) {
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.cyan.opacity(0.28),
+                                        Color.cyan.opacity(0.94),
+                                        Color.white.opacity(0.92)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: indicatorWidth)
+                            .offset(x: travel * phase)
+                    }
+                }
+            }
+            .frame(height: 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func compatibleOnChange<Value: Equatable>(
+        of value: Value,
+        perform action: @escaping (Value) -> Void
+    ) -> some View {
+        if #available(iOS 17.0, watchOS 10.0, *) {
+            onChange(of: value) { _, newValue in
+                action(newValue)
+            }
+        } else {
+            onChange(of: value, perform: action)
+        }
     }
 }
 

@@ -24,19 +24,19 @@ nonisolated enum LicensedModelCatalog {
             bitIndex: 0,
             id: "gemini-3-flash-preview",
             title: "Gemini 3 Flash",
-            subtitle: "Fast multimodal"
+            subtitle: L10n.tr("licensed_model.subtitle.fast_multimodal")
         ),
         LicensedModelDefinition(
             bitIndex: 1,
             id: "gemini-3.1-pro-preview",
             title: "Gemini 3.1 Pro",
-            subtitle: "Deeper reasoning"
+            subtitle: L10n.tr("licensed_model.subtitle.deeper_reasoning")
         ),
         LicensedModelDefinition(
             bitIndex: 2,
             id: "gemini-2.5-flash",
             title: "Gemini 2.5 Flash",
-            subtitle: "Stable fallback"
+            subtitle: L10n.tr("licensed_model.subtitle.stable_fallback")
         )
     ]
 

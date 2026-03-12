@@ -158,10 +158,10 @@ struct CompanionConversationSettingsView: View {
     private func systemPromptHint(for configuration: ConversationAIConfiguration) -> String {
         if configuration.systemPromptMode == .default,
            configuration.customSystemPrompt == nil {
-            return "留空时当前会话不会发送系统提示词；输入内容后会改为使用自定义系统提示词。"
+            return L10n.tr("system_prompt.hint.none")
         }
 
-        return "留空时继续使用内置系统提示词。"
+        return L10n.tr("system_prompt.hint.builtin")
     }
 
     private func schedulePromptSave(_ prompt: String) {

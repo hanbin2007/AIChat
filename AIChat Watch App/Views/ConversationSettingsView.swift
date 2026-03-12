@@ -159,10 +159,10 @@ struct ConversationSettingsView: View {
     private func systemPromptHint(for configuration: ConversationAIConfiguration) -> String {
         if configuration.systemPromptMode == .default,
            configuration.customSystemPrompt == nil {
-            return "Leave this empty to send no system prompt. Enter text here to use a custom system prompt."
+            return L10n.tr("system_prompt.hint.none")
         }
 
-        return "Leave this empty to use the built-in system prompt for new replies."
+        return L10n.tr("system_prompt.hint.builtin")
     }
 
     private func schedulePromptSave(_ prompt: String) {

@@ -45,7 +45,7 @@ struct CompanionActivationCenterView: View {
 
                 Section("当前设备") {
                     LabeledContent("设备码", value: chatStore.deviceIdentity.displayToken)
-                    LabeledContent("请求有效", value: "30 分钟")
+                    LabeledContent("请求有效", value: L10n.tr("common.duration.30m"))
                     LabeledContent("生成时间", value: requestIssuedAt.formatted(date: .omitted, time: .shortened))
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -116,7 +116,7 @@ struct CompanionActivationCenterView: View {
                         let pastedValue = UIPasteboard.general.string ?? ""
                         let normalizedCode = OfflineActivation.normalizeActivationInput(pastedValue)
                         guard normalizedCode.isEmpty == false else {
-                            feedbackMessage = "剪贴板里没有可用激活码。"
+                            feedbackMessage = L10n.tr("activation.feedback.no_code_in_clipboard")
                             return
                         }
 
@@ -151,7 +151,7 @@ struct CompanionActivationCenterView: View {
                             Task {
                                 await chatStore.clearActivation()
                                 refreshRequestCode()
-                                feedbackMessage = "已清除本机授权。"
+                                feedbackMessage = L10n.tr("activation.feedback.cleared")
                             }
                         }
                     }
@@ -216,7 +216,7 @@ struct CompanionActivationCenterView: View {
     private func applyActivationCode(_ rawCode: String) async {
         let normalizedCode = OfflineActivation.normalizeActivationInput(rawCode)
         guard normalizedCode.isEmpty == false else {
-            feedbackMessage = "请输入激活码。"
+            feedbackMessage = L10n.tr("activation.feedback.enter_code")
             return
         }
 
@@ -227,7 +227,7 @@ struct CompanionActivationCenterView: View {
             try await chatStore.applyActivationCode(normalizedCode)
             draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
             refreshRequestCode()
-            feedbackMessage = "激活成功，当前设备已解锁发送权限。"
+            feedbackMessage = L10n.tr("activation.feedback.success")
         } catch {
             feedbackMessage = error.localizedDescription
         }
@@ -236,12 +236,12 @@ struct CompanionActivationCenterView: View {
     private func sendActivationCodeToWatch(_ rawCode: String) async {
         let normalizedCode = OfflineActivation.normalizeActivationInput(rawCode)
         guard normalizedCode.isEmpty == false else {
-            feedbackMessage = "请输入激活码。"
+            feedbackMessage = L10n.tr("activation.feedback.enter_code")
             return
         }
 
         guard chatStore.canTransferActivationCodeToPairedWatch else {
-            feedbackMessage = "当前没有可用的 Apple Watch 同步通道。"
+            feedbackMessage = L10n.tr("activation.feedback.no_watch_channel")
             return
         }
 
@@ -250,7 +250,7 @@ struct CompanionActivationCenterView: View {
 
         chatStore.sendActivationCodeToPairedWatch(normalizedCode)
         draftActivationCode = OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
-        feedbackMessage = "已发送到 Apple Watch，手表会自动应用激活码。"
+        feedbackMessage = L10n.tr("activation.feedback.sent_to_watch")
     }
 
     private func attemptAutomaticWatchTransferIfNeeded() {
@@ -274,23 +274,23 @@ struct CompanionActivationCenterView: View {
 
     private func allowedModelsText(for allowedModelIDs: Set<String>?) -> String {
         guard let allowedModelIDs else {
-            return "全部"
+            return L10n.tr("common.all")
         }
 
         let titles = LicensedModelCatalog.supportedModels
             .filter { allowedModelIDs.contains($0.id) }
             .map(\.title)
 
-        return titles.isEmpty ? "全部" : titles.joined(separator: "、")
+        return titles.isEmpty ? L10n.tr("common.all") : titles.joined(separator: L10n.tr("list.separator"))
     }
 
     private func limitText(for state: OfflineActivationState) -> String {
         guard let messageLimit = state.license.messageLimit else {
-            return "不限"
+            return L10n.tr("common.unlimited")
         }
 
         let remaining = state.remainingMessageCount ?? 0
-        return "\(messageLimit) 次，总剩余 \(remaining) 次"
+        return L10n.format("activation.limit.remaining", messageLimit, remaining)
     }
 }
 #endif

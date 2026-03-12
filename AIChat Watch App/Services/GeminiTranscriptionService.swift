@@ -79,11 +79,11 @@ enum VoiceTranscriptionError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "Voice transcription is unavailable in the current configuration."
+            return L10n.tr("error.transcription.unavailable")
         case .invalidAudio:
-            return "The recorded audio could not be prepared for transcription."
+            return L10n.tr("error.transcription.invalid_audio")
         case .emptyTranscript:
-            return "Gemini did not return a usable transcript."
+            return L10n.tr("error.transcription.empty")
         }
     }
 }

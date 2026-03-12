@@ -20,7 +20,7 @@ extension Bundle {
         case let (nil, buildVersion?):
             return buildVersion
         default:
-            return "Unknown"
+            return L10n.tr("app.version.unknown")
         }
     }
 }

@@ -32,6 +32,13 @@ private enum ComposerLayout {
     static let flatActionRowSpacing: CGFloat = 6
 }
 
+private enum ConversationScrollLayout {
+    static let bottomAnchorID = "conversation-bottom-anchor"
+    static let coordinateSpaceName = "conversation-messages-scroll"
+    static let interruptionThreshold: CGFloat = 28
+    static let suppressionDuration: TimeInterval = 0.28
+}
+
 struct ConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -44,6 +51,9 @@ struct ConversationDetailView: View {
     @State private var isShowingThinkingPicker = false
     @State private var isComposerExpanded = true
     @State private var isShowingActivationCenter = false
+    @State private var interruptedAutoScrollMessageID: UUID?
+    @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
+    @State private var messagesViewportHeight: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -150,7 +160,9 @@ struct ConversationDetailView: View {
     }
 
     private func messagesView(conversation: ConversationThread) -> some View {
-        ScrollViewReader { proxy in
+        let streamingMessageID = currentStreamingMessageID(in: conversation)
+
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if conversation.messages.isEmpty {
@@ -173,10 +185,27 @@ struct ConversationDetailView: View {
 
                     Color.clear
                         .frame(height: isComposerExpanded ? ComposerLayout.expandedBottomInset : ComposerLayout.collapsedBottomInset)
-                        .id("bottom")
+                        .background(
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: ConversationBottomAnchorMaxYPreferenceKey.self,
+                                    value: geometry.frame(in: .named(ConversationScrollLayout.coordinateSpaceName)).maxY
+                                )
+                            }
+                        )
+                        .id(ConversationScrollLayout.bottomAnchorID)
                 }
                 .padding(.horizontal, 4)
             }
+            .coordinateSpace(name: ConversationScrollLayout.coordinateSpaceName)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ConversationViewportHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
             .overlay(alignment: .bottomTrailing) {
                 if chatStore.canRetryLatestReply(in: conversationID) {
                     retryButton
@@ -184,30 +213,75 @@ struct ConversationDetailView: View {
                         .padding(.bottom, isComposerExpanded ? 12 : 62)
                 }
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { value in
+                        guard abs(value.translation.height) > abs(value.translation.width),
+                              abs(value.translation.height) > 6
+                        else {
+                            return
+                        }
+
+                        interruptAutoScroll(for: streamingMessageID)
+                    }
+            )
+            .onPreferenceChange(ConversationViewportHeightPreferenceKey.self) { height in
+                messagesViewportHeight = height
+            }
+            .onPreferenceChange(ConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
+                handleBottomAnchorPositionChange(maxY, streamingMessageID: streamingMessageID)
+            }
             .onAppear {
-                scrollToBottom(with: proxy, animated: false)
+                interruptedAutoScrollMessageID = nil
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID,
+                    force: true
+                )
             }
             .onChange(of: conversation.messages.count) { _, _ in
-                scrollToBottom(with: proxy, animated: true)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: true,
+                    streamingMessageID: streamingMessageID
+                )
             }
             .onChange(of: conversation.updatedAt) { _, _ in
-                scrollToBottom(with: proxy, animated: false)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID
+                )
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, _ in
-                scrollToBottom(with: proxy, animated: false)
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID
+                )
+            }
+            .onChange(of: streamingMessageID) { _, newMessageID in
+                interruptedAutoScrollMessageID = nil
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: newMessageID,
+                    force: true
+                )
             }
         }
     }
 
     private var starterCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(chatStore.isReadOnlyMode ? "只读模式" : "Start with anything")
+            Text(chatStore.isReadOnlyMode ? "只读模式" : "Ask Anything")
                 .font(.headline)
 
             Text(
                 chatStore.isReadOnlyMode ?
-                "你现在可以查看历史消息。完成离线激活后，才能在手表上发新消息和传图。" :
-                "Ask a question, record a voice prompt, review the transcript before sending, or attach a photo for visual analysis."
+                "先看历史消息；激活后再发消息或传图。" :
+                "Type, speak, or add a photo."
             )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -290,13 +364,18 @@ struct ConversationDetailView: View {
             if voiceRecorder.isRecording || voiceRecorder.isPreparing {
                 RecordingStatusBanner(
                     iconName: voiceRecorder.isRecording ? "waveform.circle.fill" : "mic.circle",
-                    title: voiceRecorder.isRecording ? "Recording \(voiceRecorder.elapsedTimeText)" : "Preparing microphone...",
+                    title: voiceRecorder.isRecording ?
+                        L10n.format("conversation.recording", voiceRecorder.elapsedTimeText) :
+                        L10n.tr("conversation.microphone.preparing"),
                     tint: voiceRecorder.isRecording ? .red : .white.opacity(0.82)
                 )
             } else if isTranscribing {
                 RecordingStatusBanner(
                     iconName: "waveform.and.magnifyingglass",
-                    title: "Transcribing with \(AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel))...",
+                    title: L10n.format(
+                        "conversation.transcribing",
+                        AITranscriptionModelCatalog.shortLabel(for: chatStore.selectedTranscriptionModel)
+                    ),
                     tint: .cyan
                 )
             }
@@ -542,9 +621,11 @@ struct ConversationDetailView: View {
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+        scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
+
         if animated {
             withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo("bottom", anchor: .bottom)
+                proxy.scrollTo(ConversationScrollLayout.bottomAnchorID, anchor: .bottom)
             }
             return
         }
@@ -553,8 +634,57 @@ struct ConversationDetailView: View {
         transaction.animation = nil
 
         withTransaction(transaction) {
-            proxy.scrollTo("bottom", anchor: .bottom)
+            proxy.scrollTo(ConversationScrollLayout.bottomAnchorID, anchor: .bottom)
         }
+    }
+
+    private func currentStreamingMessageID(in conversation: ConversationThread) -> UUID? {
+        conversation.messages.last(where: { $0.role == .assistant && $0.status == .streaming })?.id
+    }
+
+    private func scrollToBottomIfNeeded(
+        with proxy: ScrollViewProxy,
+        animated: Bool,
+        streamingMessageID: UUID?,
+        force: Bool = false
+    ) {
+        guard force || shouldAutoScroll(for: streamingMessageID) else {
+            return
+        }
+
+        scrollToBottom(with: proxy, animated: animated)
+    }
+
+    private func shouldAutoScroll(for streamingMessageID: UUID?) -> Bool {
+        guard let streamingMessageID else {
+            return true
+        }
+
+        return interruptedAutoScrollMessageID != streamingMessageID
+    }
+
+    private func interruptAutoScroll(for streamingMessageID: UUID?) {
+        guard let streamingMessageID else {
+            return
+        }
+
+        interruptedAutoScrollMessageID = streamingMessageID
+    }
+
+    private func handleBottomAnchorPositionChange(_ maxY: CGFloat, streamingMessageID: UUID?) {
+        guard let streamingMessageID,
+              Date.now >= scrollInterruptionsSuppressedUntil,
+              messagesViewportHeight > 0
+        else {
+            return
+        }
+
+        let distanceFromBottom = maxY - messagesViewportHeight
+        guard distanceFromBottom > ConversationScrollLayout.interruptionThreshold else {
+            return
+        }
+
+        interruptAutoScroll(for: streamingMessageID)
     }
 
     private func sendCurrentDraft() {
@@ -639,6 +769,22 @@ struct ConversationDetailView: View {
                 chatStore.updateDraftText(newValue, for: conversationID)
             }
         )
+    }
+}
+
+private struct ConversationViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ConversationBottomAnchorMaxYPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

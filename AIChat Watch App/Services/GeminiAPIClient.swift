@@ -18,17 +18,17 @@ enum GeminiAPIError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "Gemini API key is missing."
+            return L10n.tr("error.gemini.missing_api_key")
         case .invalidResponse:
-            return "Gemini returned an invalid response."
+            return L10n.tr("error.gemini.invalid_response")
         case .api(let message):
             return message
         case .emptyResponse:
-            return "Gemini returned an empty reply."
+            return L10n.tr("error.gemini.empty_response")
         case .incompleteResponse:
-            return "Reply was interrupted before completion."
+            return L10n.tr("error.reply.incomplete")
         case .truncated:
-            return "Reply hit the output limit before completion. Send a follow-up to continue."
+            return L10n.tr("error.reply.truncated")
         }
     }
 }
@@ -399,6 +399,6 @@ func geminiCompletionError(for finishReason: String?) -> GeminiAPIError? {
     case "MAX_TOKENS":
         return .truncated
     default:
-        return .api(message: "Gemini stopped before completing the reply (\(normalizedReason)).")
+        return .api(message: L10n.format("error.gemini.incomplete_finish", normalizedReason))
     }
 }

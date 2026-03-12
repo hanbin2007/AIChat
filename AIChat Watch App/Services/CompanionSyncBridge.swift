@@ -19,33 +19,33 @@ nonisolated enum CompanionSyncStatus: Equatable {
         switch self {
         case .unavailable:
             #if os(watchOS)
-            return "No phone sync available"
+            return L10n.tr("sync.unavailable.watch")
             #else
-            return "No watch sync available"
+            return L10n.tr("sync.unavailable.iphone")
             #endif
         case .notPaired:
             #if os(watchOS)
-            return "Watch is not paired"
+            return L10n.tr("sync.not_paired.watch")
             #else
-            return "Apple Watch is not paired"
+            return L10n.tr("sync.not_paired.iphone")
             #endif
         case .companionMissing:
             #if os(watchOS)
-            return "Companion iPhone app not installed"
+            return L10n.tr("sync.missing_companion.watch")
             #else
-            return "Watch app not installed"
+            return L10n.tr("sync.missing_companion.iphone")
             #endif
         case .idle:
             #if os(watchOS)
-            return "iPhone sync ready in background"
+            return L10n.tr("sync.idle.watch")
             #else
-            return "Watch sync ready in background"
+            return L10n.tr("sync.idle.iphone")
             #endif
         case .reachable:
             #if os(watchOS)
-            return "iPhone sync live"
+            return L10n.tr("sync.live.watch")
             #else
-            return "Watch sync live"
+            return L10n.tr("sync.live.iphone")
             #endif
         }
     }

@@ -20,13 +20,13 @@ nonisolated enum AITranscriptionModelCatalog {
             id: "gemini-3-flash-preview",
             title: "Gemini 3 Flash",
             shortTitle: "Flash",
-            subtitle: "Faster transcription"
+            subtitle: L10n.tr("transcription.subtitle.faster")
         ),
         AITranscriptionModelOption(
             id: "gemini-3.1-pro-preview",
             title: "Gemini 3.1 Pro",
             shortTitle: "Pro",
-            subtitle: "Higher quality transcription"
+            subtitle: L10n.tr("transcription.subtitle.higher_quality")
         )
     ]
 
@@ -38,8 +38,8 @@ nonisolated enum AITranscriptionModelCatalog {
                 AITranscriptionModelOption(
                     id: defaultModel,
                     title: defaultModel,
-                    shortTitle: "Custom",
-                    subtitle: "Configured default"
+                    shortTitle: L10n.tr("model.short.custom"),
+                    subtitle: L10n.tr("model.subtitle.configured_default")
                 ),
                 at: 0
             )

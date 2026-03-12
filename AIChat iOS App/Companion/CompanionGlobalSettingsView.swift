@@ -78,7 +78,7 @@ struct CompanionGlobalSettingsView: View {
                     ) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("请求失败自动重试")
-                            Text("发送和语音转录失败后最多重试 \(chatStore.sendFailureRetryLimit) 次，最高 10 次。")
+                            Text(L10n.format("settings.retry.ios", chatStore.sendFailureRetryLimit))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

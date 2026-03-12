@@ -194,14 +194,14 @@ actor ConversationRepository {
         overrideRootURL: URL?
     ) -> (url: URL, description: String) {
         if let overrideRootURL {
-            return (overrideRootURL, "Custom storage")
+            return (overrideRootURL, L10n.tr("storage.custom"))
         }
 
         if let appGroupIdentifier,
            let appGroupURL = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
             return (
                 appGroupURL.appendingPathComponent("AIChatStore", isDirectory: true),
-                "App Group storage"
+                L10n.tr("storage.app_group")
             )
         }
 
@@ -221,15 +221,15 @@ actor ConversationRepository {
 
         return (
             fileManager.temporaryDirectory.appendingPathComponent("AIChatStore", isDirectory: true),
-            "Temporary storage fallback"
+            L10n.tr("storage.temporary_fallback")
         )
     }
 
     private static var localStorageDescription: String {
         #if os(watchOS)
-        return "Local watch storage"
+        return L10n.tr("storage.local.watch")
         #else
-        return "Local iPhone storage"
+        return L10n.tr("storage.local.iphone")
         #endif
     }
 }

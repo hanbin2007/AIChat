@@ -209,7 +209,10 @@ private struct CompanionConversationRow: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    CompanionMetaChip(title: "\(conversation.messageCount) 条消息", iconName: "bubble.left.and.bubble.right.fill")
+                    CompanionMetaChip(
+                        title: L10n.format("conversation.count.ios", conversation.messageCount),
+                        iconName: "bubble.left.and.bubble.right.fill"
+                    )
 
                     if conversation.messages.contains(where: { $0.attachments.contains(where: \.isAudio) }) {
                         CompanionMetaChip(title: "语音", iconName: "waveform")

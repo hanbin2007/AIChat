@@ -76,7 +76,7 @@ struct GlobalSettingsView: View {
                             Text("Auto Retry")
                                 .font(.headline)
 
-                            Text("Retry failed sends and voice transcriptions up to \(chatStore.sendFailureRetryLimit) times.")
+                            Text(L10n.format("settings.retry.watch", chatStore.sendFailureRetryLimit))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
