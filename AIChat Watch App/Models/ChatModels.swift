@@ -624,18 +624,34 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         }
 
         if let text = lastMessage.cleanedText.nonEmptyTrimmed {
-            return text
+            return text.previewSnippet(maxLength: 220)
         }
 
         if let thoughtSummary = lastMessage.cleanedThoughtSummary {
-            return thoughtSummary
+            return thoughtSummary.previewSnippet(maxLength: 220)
         }
 
         return attachmentSummary(for: lastMessage.attachments)
     }
 
     var messageCount: Int {
-        messages.filter(\.hasVisibleContent).count
+        messages.lazy.reduce(into: 0) { count, message in
+            if message.hasVisibleContent {
+                count += 1
+            }
+        }
+    }
+
+    var containsAudioAttachments: Bool {
+        messages.lazy.contains { message in
+            message.attachments.contains(where: \.isAudio)
+        }
+    }
+
+    var containsImageAttachments: Bool {
+        messages.lazy.contains { message in
+            message.attachments.contains(where: \.isImage)
+        }
     }
 
     mutating func append(_ message: ChatMessage) {
@@ -763,6 +779,17 @@ nonisolated extension String {
 
     func collapseWhitespace() -> String {
         replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    func previewSnippet(maxLength: Int) -> String {
+        let normalized = collapseWhitespace().trimmed
+        guard normalized.count > maxLength else {
+            return normalized
+        }
+
+        let truncatedLength = max(maxLength - 3, 1)
+        let truncated = String(normalized.prefix(truncatedLength)).trimmed
+        return truncated.isEmpty ? String(normalized.prefix(maxLength)) : "\(truncated)..."
     }
 
     func matches(for pattern: String) -> [String] {

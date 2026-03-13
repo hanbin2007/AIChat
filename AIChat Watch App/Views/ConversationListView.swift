@@ -196,11 +196,11 @@ private struct ConversationRowView: View {
             HStack(spacing: 6) {
                 Label("\(conversation.messageCount)", systemImage: "bubble.left.and.bubble.right")
                     .labelStyle(.titleAndIcon)
-                if conversation.messages.contains(where: { $0.attachments.contains(where: \.isAudio) }) {
+                if conversation.containsAudioAttachments {
                     Label("Voice", systemImage: "waveform")
                         .labelStyle(.titleAndIcon)
                 }
-                if conversation.messages.contains(where: { $0.attachments.contains(where: \.isImage) }) {
+                if conversation.containsImageAttachments {
                     Label("Photo", systemImage: "photo")
                         .labelStyle(.titleAndIcon)
                 }
