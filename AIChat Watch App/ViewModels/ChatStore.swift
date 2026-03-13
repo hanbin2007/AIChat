@@ -776,7 +776,10 @@ final class ChatStore: ObservableObject {
 
                 transcribingConversationIDs.remove(conversationID)
                 var draft = drafts[conversationID] ?? ConversationDraft()
-                draft.text = transcription.text
+                draft.text = appendedDraftText(
+                    existing: draft.text,
+                    addition: transcription.text
+                )
                 drafts[conversationID] = draft
                 return
             } catch {
@@ -796,6 +799,24 @@ final class ChatStore: ObservableObject {
                 automaticRetryCount: max(0, attemptCount - 1),
                 operation: L10n.tr("operation.voice_transcription")
             )
+        }
+    }
+
+    func sendRecordedAudioDirectly(_ audioAttachment: ChatAttachment, in conversationID: UUID) async {
+        guard audioAttachment.isAudio else {
+            conversationErrors[conversationID] = VoiceTranscriptionError.invalidAudio.localizedDescription
+            return
+        }
+
+        guard isSending(conversationID: conversationID) == false,
+              isTranscribing(conversationID: conversationID) == false
+        else {
+            return
+        }
+
+        let draft = ConversationDraft(text: "", attachments: [audioAttachment])
+        await runSendTask(for: conversationID) { store in
+            await store.send(draft: draft, in: conversationID, clearStoredDraft: false)
         }
     }
 
@@ -1552,6 +1573,20 @@ final class ChatStore: ObservableObject {
         }
 
         return "\(localizedDescription) \(debugSuffix)"
+    }
+
+    private func appendedDraftText(existing: String, addition: String) -> String {
+        let normalizedAddition = addition.trimmed
+        guard normalizedAddition.isEmpty == false else {
+            return existing
+        }
+
+        let normalizedExisting = existing.trimmed
+        guard normalizedExisting.isEmpty == false else {
+            return normalizedAddition
+        }
+
+        return normalizedExisting + "\n" + normalizedAddition
     }
 
     private func allowedModelsDescription(for allowedModelIDs: Set<String>?) -> String {

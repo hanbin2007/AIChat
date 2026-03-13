@@ -113,7 +113,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let requestBody = client.makeRequestBody(for: conversation)
 
-        XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextBuilder.conciseSystemPrompt)
+        XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextAssembler.conciseSystemPrompt)
         XCTAssertEqual(requestBody.generationConfig.temperature, 1)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
@@ -345,7 +345,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let request = client.makeRelayRequest(for: conversation)
 
         XCTAssertEqual(request.maxOutputTokens, 65_536)
-        XCTAssertEqual(request.systemPrompt, AIContextBuilder.conciseSystemPrompt)
+        XCTAssertEqual(request.systemPrompt, AIContextAssembler.conciseSystemPrompt)
     }
 
     func testRelayModeProvidesRelayTranscriptionService() {
@@ -398,7 +398,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertFalse(configuration.isAIConfigured)
         XCTAssertEqual(
             configuration.configurationMessage,
-            "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+            L10n.tr("configuration.relay.missing_bearer")
         )
     }
 
@@ -819,8 +819,126 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordedAudioTranscriptionAppendsToExistingDraft() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: MockTranscriptionService(transcript: "Add the second instruction"),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Keep the first instruction", for: conversationID)
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x04, 0x05, 0x06]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 2.4
+        )
+
+        await store.sendRecordedAudio(audioAttachment, in: conversationID)
+
+        XCTAssertEqual(
+            store.draftText(for: conversationID),
+            "Keep the first instruction\nAdd the second instruction"
+        )
+        XCTAssertTrue(store.conversation(id: conversationID)?.messages.isEmpty == true)
+    }
+
+    @MainActor
+    func testRecordedAudioCanBeSentDirectlyWithoutClearingDraft() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let aiService = CapturingAIStreamingService()
+        let store = ChatStore(
+            repository: repository,
+            aiService: aiService,
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Keep this draft", for: conversationID)
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x11, 0x22, 0x33]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 4.1
+        )
+
+        await store.sendRecordedAudioDirectly(audioAttachment, in: conversationID)
+
+        let conversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(conversation.messages.count, 2)
+        XCTAssertEqual(conversation.messages.first?.role, .user)
+        XCTAssertEqual(conversation.messages.first?.text, "")
+        XCTAssertEqual(conversation.messages.first?.attachments.count, 1)
+        XCTAssertTrue(conversation.messages.first?.attachments.first?.isAudio == true)
+        XCTAssertEqual(conversation.messages.last?.text, "Captured reply")
+        XCTAssertEqual(store.draftText(for: conversationID), "Keep this draft")
+
+        let capturedConversation = try XCTUnwrap(aiService.conversations.last)
+        XCTAssertEqual(capturedConversation.messages.last?.role, .user)
+        XCTAssertEqual(capturedConversation.messages.last?.attachments.count, 1)
+        XCTAssertTrue(capturedConversation.messages.last?.attachments.first?.isAudio == true)
+    }
+
+    @MainActor
     func testRecordedAudioRetriesBeforeFailing() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let defaultsSuiteName = "AIChatTests.TranscriptionRetry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
         let configuration = AppConfiguration(
             backendMode: .direct,
             geminiAPIKey: "test",
@@ -846,6 +964,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             transcriptionService: transcriptionService,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
+            defaults: defaults,
             sendRetryDelayNanoseconds: { _ in 0 }
         )
         let activationCode = try OfflineActivation.makeActivationCode(

@@ -15,6 +15,11 @@ private enum CompanionConversationScrollLayout {
     static let suppressionDuration: TimeInterval = 0.28
 }
 
+private enum CompanionVoiceCaptureMode {
+    case transcribe
+    case directSend
+}
+
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -27,6 +32,9 @@ struct CompanionConversationDetailView: View {
     @State private var interruptedAutoScrollMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
     @State private var messagesViewportHeight: CGFloat = 0
+    @State private var voiceCaptureMode: CompanionVoiceCaptureMode = .transcribe
+    @State private var suppressedVoiceTapUntil = Date.distantPast
+    @FocusState private var isDraftFieldFocused: Bool
 
     private let bottomAnchorID = "conversation-bottom-anchor"
 
@@ -327,6 +335,13 @@ struct CompanionConversationDetailView: View {
         let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
         let isSending = chatStore.isSending(conversationID: conversationID)
         let sendEnabled = hasDraftContent && isSending == false && isTranscribing == false && voiceRecorder.isInteractive
+        let voiceButtonLabel =
+            voiceRecorder.isRecording ?
+            (voiceCaptureMode == .directSend ? "停止并发送" : "停止并转录") :
+            "语音"
+        let voiceButtonDisabled =
+            voiceRecorder.isRecording == false &&
+            (isSending || isTranscribing || voiceRecorder.isPreparing)
 
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -381,7 +396,7 @@ struct CompanionConversationDetailView: View {
                     CompanionInlineStatus(
                         iconName: voiceRecorder.isRecording ? "waveform.circle.fill" : "mic.circle",
                         title: voiceRecorder.isRecording ?
-                            L10n.format("conversation.recording.zh", voiceRecorder.elapsedTimeText) :
+                            recordingStatusTitle() :
                             L10n.tr("conversation.microphone.preparing.zh")
                     )
                 } else if isTranscribing {
@@ -410,20 +425,24 @@ struct CompanionConversationDetailView: View {
                             .stroke(Color.white.opacity(0.08), lineWidth: 1)
                     )
                     .tint(.cyan)
+                    .focused($isDraftFieldFocused)
                     .disabled(voiceRecorder.isRecording || isTranscribing)
 
                 HStack(spacing: 10) {
                     Button {
-                        toggleVoiceRecording()
+                        handleVoiceButtonTap()
                     } label: {
-                        Label(voiceRecorder.isRecording ? "停止并转录" : "语音", systemImage: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic")
+                        Label(voiceButtonLabel, systemImage: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .tint(voiceRecorder.isRecording ? .red : .white)
-                    .disabled(
-                        voiceRecorder.isRecording == false &&
-                        (isSending || isTranscribing || voiceRecorder.isPreparing || hasDraftContent)
+                    .disabled(voiceButtonDisabled)
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.45)
+                            .onEnded { _ in
+                                handleVoiceButtonLongPress()
+                            }
                     )
 
                     PhotosPicker(
@@ -491,12 +510,34 @@ struct CompanionConversationDetailView: View {
         selectedPhotoItems = []
     }
 
-    private func toggleVoiceRecording() {
+    private func handleVoiceButtonTap() {
+        guard Date.now >= suppressedVoiceTapUntil else {
+            return
+        }
+
+        toggleVoiceRecording(startMode: .transcribe)
+    }
+
+    private func handleVoiceButtonLongPress() {
+        guard voiceRecorder.isRecording == false,
+              chatStore.isSending(conversationID: conversationID) == false,
+              chatStore.isTranscribing(conversationID: conversationID) == false,
+              voiceRecorder.isPreparing == false
+        else {
+            return
+        }
+
+        suppressedVoiceTapUntil = Date.now.addingTimeInterval(0.75)
+        toggleVoiceRecording(startMode: .directSend)
+    }
+
+    private func toggleVoiceRecording(startMode: CompanionVoiceCaptureMode) {
         if voiceRecorder.isRecording {
             voiceRecorder.stopRecording()
             return
         }
 
+        voiceCaptureMode = startMode
         chatStore.clearError(for: conversationID)
 
         Task {
@@ -505,10 +546,18 @@ struct CompanionConversationDetailView: View {
     }
 
     private func handleRecordedAttachment(_ attachment: ChatAttachment) {
+        let captureMode = voiceCaptureMode
+        voiceCaptureMode = .transcribe
         voiceRecorder.consumeCompletedAttachment()
 
         Task {
-            await chatStore.sendRecordedAudio(attachment, in: conversationID)
+            switch captureMode {
+            case .transcribe:
+                await chatStore.sendRecordedAudio(attachment, in: conversationID)
+            case .directSend:
+                isDraftFieldFocused = false
+                await chatStore.sendRecordedAudioDirectly(attachment, in: conversationID)
+            }
         }
     }
 
@@ -534,6 +583,7 @@ struct CompanionConversationDetailView: View {
         }
 
         chatStore.clearError(for: conversationID)
+        isDraftFieldFocused = false
 
         Task {
             await chatStore.sendMessage(in: conversationID)
@@ -605,6 +655,15 @@ struct CompanionConversationDetailView: View {
         }
 
         interruptAutoScroll(for: streamingMessageID)
+    }
+
+    private func recordingStatusTitle() -> String {
+        let duration = L10n.format("conversation.recording.zh", voiceRecorder.elapsedTimeText)
+        guard voiceCaptureMode == .directSend else {
+            return duration
+        }
+
+        return "直接发送中 \(duration)"
     }
 
     private func draftTextBinding() -> Binding<String> {
