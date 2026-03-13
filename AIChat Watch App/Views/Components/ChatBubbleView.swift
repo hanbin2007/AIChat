@@ -17,7 +17,9 @@ struct ChatBubbleView: View {
     let message: ChatMessage
 
     @State private var isShowingMessageActions = false
-    @State private var didTriggerStreamingHaptics = false
+    @State private var didTriggerStreamingStartHaptics = false
+    @State private var didTriggerStreamingBodyHaptics = false
+    @State private var didTriggerReplyCompletionHaptic = false
     #if os(watchOS)
     @State private var replyHapticTask: Task<Void, Never>?
     #endif
@@ -33,6 +35,10 @@ struct ChatBubbleView: View {
     private var hasReceivedStreamingChunk: Bool {
         isStreamingAssistant &&
         (message.cleanedText.isEmpty == false || message.cleanedThoughtSummary != nil)
+    }
+
+    private var hasStartedStreamingBodyText: Bool {
+        isStreamingAssistant && message.cleanedText.isEmpty == false
     }
 
     private var canPinMessage: Bool {
@@ -55,7 +61,11 @@ struct ChatBubbleView: View {
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         .onAppear {
             if hasReceivedStreamingChunk {
-                triggerStreamingHapticsIfNeeded()
+                triggerStreamingStartHapticsIfNeeded()
+            }
+
+            if hasStartedStreamingBodyText {
+                triggerStreamingBodyHapticsIfNeeded()
             }
         }
         .compatibleOnChange(of: message.id) { _ in
@@ -66,14 +76,17 @@ struct ChatBubbleView: View {
                 return
             }
 
-            triggerStreamingHapticsIfNeeded()
+            triggerStreamingStartHapticsIfNeeded()
         }
-        .compatibleOnChange(of: isStreamingAssistant) { isStreaming in
-            guard isStreaming == false else {
+        .compatibleOnChange(of: hasStartedStreamingBodyText) { hasStartedBodyText in
+            guard hasStartedBodyText else {
                 return
             }
 
-            cancelReplyHaptics()
+            triggerStreamingBodyHapticsIfNeeded()
+        }
+        .compatibleOnChange(of: message.status) { status in
+            handleAssistantStatusChange(status)
         }
         .onDisappear {
             cancelReplyHaptics()
@@ -94,14 +107,9 @@ struct ChatBubbleView: View {
             }
 
             if message.status == .streaming, message.cleanedText.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.white.opacity(0.8))
-                    Text(message.cleanedThoughtSummary == nil ? "Thinking" : "Replying")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
+                Text(message.cleanedThoughtSummary == nil ? "Thinking" : "Replying")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.8))
             } else if message.status == .failed, message.cleanedText.isEmpty {
                 Text("Stopped")
                     .font(.footnote)
@@ -199,17 +207,60 @@ struct ChatBubbleView: View {
     }
 
     private func resetStreamingHaptics() {
-        didTriggerStreamingHaptics = false
+        didTriggerStreamingStartHaptics = false
+        didTriggerStreamingBodyHaptics = false
+        didTriggerReplyCompletionHaptic = false
         cancelReplyHaptics()
     }
 
-    private func triggerStreamingHapticsIfNeeded() {
-        guard didTriggerStreamingHaptics == false else {
+    private func triggerStreamingStartHapticsIfNeeded() {
+        guard didTriggerStreamingStartHaptics == false else {
             return
         }
 
-        didTriggerStreamingHaptics = true
+        didTriggerStreamingStartHaptics = true
         startReplyHaptics()
+    }
+
+    private func triggerStreamingBodyHapticsIfNeeded() {
+        guard didTriggerStreamingBodyHaptics == false else {
+            return
+        }
+
+        didTriggerStreamingBodyHaptics = true
+        extendReplyHapticsForVisibleText()
+    }
+
+    private func triggerReplyCompletionHapticIfNeeded() {
+        guard didTriggerReplyCompletionHaptic == false else {
+            return
+        }
+
+        didTriggerReplyCompletionHaptic = true
+
+        #if os(watchOS)
+        WKInterfaceDevice.current().play(.success)
+        #endif
+    }
+
+    private func handleAssistantStatusChange(_ status: ChatMessageStatus) {
+        guard isUser == false else {
+            return
+        }
+
+        guard status != .streaming else {
+            return
+        }
+
+        cancelReplyHaptics()
+
+        guard status == .sent,
+              message.cleanedText.isEmpty == false || message.cleanedThoughtSummary != nil
+        else {
+            return
+        }
+
+        triggerReplyCompletionHapticIfNeeded()
     }
 
     private func startReplyHaptics() {
@@ -217,23 +268,33 @@ struct ChatBubbleView: View {
         cancelReplyHaptics()
         replyHapticTask = Task {
             let device = WKInterfaceDevice.current()
-            let pattern: [(WKHapticType, UInt64)] = [
-                (.success, 180_000_000),
-                (.click, 200_000_000),
-                (.click, 250_000_000),
-                (.click, 330_000_000)
-            ]
+            device.play(.success)
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard Task.isCancelled == false else {
+                return
+            }
 
-            for (index, step) in pattern.enumerated() {
+            device.play(.click)
+        }
+        #endif
+    }
+
+    private func extendReplyHapticsForVisibleText() {
+        #if os(watchOS)
+        cancelReplyHaptics()
+        replyHapticTask = Task {
+            let device = WKInterfaceDevice.current()
+            let intervalNanoseconds: UInt64 = 750_000_000
+
+            device.play(.click)
+
+            for _ in 0..<4 {
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
                 guard Task.isCancelled == false else {
                     return
                 }
 
-                device.play(step.0)
-
-                if index < pattern.count - 1 {
-                    try? await Task.sleep(nanoseconds: step.1)
-                }
+                device.play(.click)
             }
         }
         #endif
