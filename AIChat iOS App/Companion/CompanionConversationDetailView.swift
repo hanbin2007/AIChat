@@ -135,7 +135,11 @@ struct CompanionConversationDetailView: View {
                         }
 
                         ForEach(visibleMessages) { message in
-                            ChatBubbleView(conversationID: conversationID, message: message)
+                            ChatBubbleView(
+                                conversationID: conversationID,
+                                message: message,
+                                suspendStreamingRender: interruptedAutoScrollMessageID == message.id
+                            )
                                 .equatable()
                                 .id(message.id)
                         }
@@ -186,15 +190,9 @@ struct CompanionConversationDetailView: View {
                     }
             }
             .simultaneousGesture(
-                DragGesture(minimumDistance: 4)
-                    .onChanged { value in
-                        guard abs(value.translation.height) > abs(value.translation.width),
-                              abs(value.translation.height) > 6
-                        else {
-                            return
-                        }
-
-                        interruptAutoScroll(for: streamingMessageID)
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        interruptAutoScrollImmediately(for: streamingMessageID)
                     }
             )
             .onPreferenceChange(CompanionConversationViewportHeightPreferenceKey.self) { height in
@@ -248,12 +246,9 @@ struct CompanionConversationDetailView: View {
                 )
             }
             .onChange(of: streamingMessageID) { newMessageID in
-                interruptedAutoScrollMessageID = nil
-                scrollToBottomIfNeeded(
-                    with: proxy,
-                    animated: false,
-                    streamingMessageID: newMessageID,
-                    force: true
+                handleStreamingMessageChange(
+                    newMessageID,
+                    with: proxy
                 )
             }
         }
@@ -732,10 +727,32 @@ struct CompanionConversationDetailView: View {
 
     private func shouldAutoScroll(for streamingMessageID: UUID?) -> Bool {
         guard let streamingMessageID else {
-            return true
+            return interruptedAutoScrollMessageID == nil
         }
 
         return interruptedAutoScrollMessageID != streamingMessageID
+    }
+
+    private func handleStreamingMessageChange(
+        _ streamingMessageID: UUID?,
+        with proxy: ScrollViewProxy
+    ) {
+        if let streamingMessageID {
+            interruptedAutoScrollMessageID = nil
+            scrollToBottomIfNeeded(
+                with: proxy,
+                animated: false,
+                streamingMessageID: streamingMessageID,
+                force: true
+            )
+            return
+        }
+
+        scrollToBottomIfNeeded(
+            with: proxy,
+            animated: false,
+            streamingMessageID: nil
+        )
     }
 
     private func interruptAutoScroll(for streamingMessageID: UUID?) {
@@ -744,6 +761,15 @@ struct CompanionConversationDetailView: View {
         }
 
         interruptedAutoScrollMessageID = streamingMessageID
+    }
+
+    private func interruptAutoScrollImmediately(for streamingMessageID: UUID?) {
+        guard interruptedAutoScrollMessageID != streamingMessageID else {
+            return
+        }
+
+        scrollInterruptionsSuppressedUntil = .distantPast
+        interruptAutoScroll(for: streamingMessageID)
     }
 
     private func handleBottomAnchorPositionChange(_ maxY: CGFloat, streamingMessageID: UUID?) {

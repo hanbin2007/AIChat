@@ -15,14 +15,29 @@ struct ChatBubbleView: View, Equatable {
 
     let conversationID: UUID
     let message: ChatMessage
+    let suspendStreamingRender: Bool
 
     @State private var isShowingMessageActions = false
     @State private var didTriggerStreamingStartHaptics = false
     @State private var didTriggerStreamingBodyHaptics = false
     @State private var didTriggerReplyCompletionHaptic = false
+    @State private var renderedText: String
+    @State private var renderedThoughtSummary: String?
     #if os(watchOS)
     @State private var replyHapticTask: Task<Void, Never>?
     #endif
+
+    init(
+        conversationID: UUID,
+        message: ChatMessage,
+        suspendStreamingRender: Bool = false
+    ) {
+        self.conversationID = conversationID
+        self.message = message
+        self.suspendStreamingRender = suspendStreamingRender
+        _renderedText = State(initialValue: message.cleanedText)
+        _renderedThoughtSummary = State(initialValue: message.cleanedThoughtSummary)
+    }
 
     private var isUser: Bool {
         message.role == .user
@@ -32,17 +47,29 @@ struct ChatBubbleView: View, Equatable {
         isUser == false && message.status == .streaming
     }
 
+    private var displayedText: String {
+        renderedText
+    }
+
+    private var displayedThoughtSummary: String? {
+        renderedThoughtSummary
+    }
+
     private var hasReceivedStreamingChunk: Bool {
         isStreamingAssistant &&
-        (message.cleanedText.isEmpty == false || message.cleanedThoughtSummary != nil)
+        (displayedText.isEmpty == false || displayedThoughtSummary != nil)
     }
 
     private var hasStartedStreamingBodyText: Bool {
-        isStreamingAssistant && message.cleanedText.isEmpty == false
+        isStreamingAssistant && displayedText.isEmpty == false
+    }
+
+    private var allowsLiveStreamingRender: Bool {
+        suspendStreamingRender == false || message.status != .streaming
     }
 
     private var canPinMessage: Bool {
-        message.cleanedText.isEmpty == false
+        displayedText.isEmpty == false
     }
 
     private var bubbleShape: RoundedRectangle {
@@ -51,7 +78,8 @@ struct ChatBubbleView: View, Equatable {
 
     static func == (lhs: ChatBubbleView, rhs: ChatBubbleView) -> Bool {
         lhs.conversationID == rhs.conversationID &&
-        lhs.message == rhs.message
+        lhs.message == rhs.message &&
+        lhs.suspendStreamingRender == rhs.suspendStreamingRender
     }
 
     var body: some View {
@@ -74,7 +102,24 @@ struct ChatBubbleView: View, Equatable {
             }
         }
         .compatibleOnChange(of: message.id) { _ in
+            syncRenderedContent()
             resetStreamingHaptics()
+        }
+        .compatibleOnChange(of: message.text) { _ in
+            syncRenderedContentIfNeeded()
+        }
+        .compatibleOnChange(of: message.thoughtSummary) { _ in
+            syncRenderedContentIfNeeded()
+        }
+        .compatibleOnChange(of: message.status) { _ in
+            syncRenderedContent()
+        }
+        .compatibleOnChange(of: suspendStreamingRender) { isSuspended in
+            guard isSuspended == false else {
+                return
+            }
+
+            syncRenderedContent()
         }
         .compatibleOnChange(of: hasReceivedStreamingChunk) { hasReceivedChunk in
             guard hasReceivedChunk else {
@@ -104,29 +149,35 @@ struct ChatBubbleView: View, Equatable {
                 AttachmentGridView(attachments: message.attachments)
             }
 
-            if isUser == false, let thoughtSummary = message.cleanedThoughtSummary {
+            if isUser == false, let thoughtSummary = displayedThoughtSummary {
                 ThoughtSummaryCard(
                     thoughtSummary: thoughtSummary,
                     isStreaming: message.status == .streaming
                 )
             }
 
-            if message.status == .streaming, message.cleanedText.isEmpty {
-                Text(message.cleanedThoughtSummary == nil ? "Thinking" : "Replying")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.8))
-            } else if message.status == .failed, message.cleanedText.isEmpty {
+            if message.status == .streaming, displayedText.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white.opacity(0.8))
+                    Text(displayedThoughtSummary == nil ? "Thinking" : "Replying")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            } else if message.status == .failed, displayedText.isEmpty {
                 Text("Stopped")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.8))
-            } else if message.cleanedText.isEmpty == false {
-                MessageBodyTextView(text: message.cleanedText)
+            } else if displayedText.isEmpty == false {
+                MessageBodyTextView(text: displayedText)
             }
 
             if isStreamingAssistant {
                 StreamingReplyStatusView(
-                    title: message.cleanedText.isEmpty ? (message.cleanedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
-                    showsSpinner: message.cleanedText.isEmpty
+                    title: displayedText.isEmpty ? (displayedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
+                    showsSpinner: displayedText.isEmpty,
+                    animatesTrack: suspendStreamingRender == false
                 )
             }
 
@@ -178,6 +229,19 @@ struct ChatBubbleView: View, Equatable {
             messageActions
         }
         #endif
+    }
+
+    private func syncRenderedContentIfNeeded() {
+        guard allowsLiveStreamingRender else {
+            return
+        }
+
+        syncRenderedContent()
+    }
+
+    private func syncRenderedContent() {
+        renderedText = message.cleanedText
+        renderedThoughtSummary = message.cleanedThoughtSummary
     }
 
     @ViewBuilder
@@ -430,6 +494,9 @@ private struct MessageBodyTextView: View {
 private struct StreamingReplyStatusView: View {
     let title: String
     let showsSpinner: Bool
+    let animatesTrack: Bool
+
+    private let trackHeight: CGFloat = 5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -450,38 +517,120 @@ private struct StreamingReplyStatusView: View {
             }
 
             GeometryReader { proxy in
-                TimelineView(.animation) { context in
-                    let trackWidth = max(proxy.size.width, 1)
-                    let indicatorWidth = max(trackWidth * 0.34, 18)
-                    let phase = context.date.timeIntervalSinceReferenceDate
-                        .truncatingRemainder(dividingBy: 0.9) / 0.9
-                    let travel = max(trackWidth - indicatorWidth, 0)
+                let trackWidth = max(proxy.size.width, 1)
+                let leadingCoreWidth = max(trackWidth * 0.22, 18)
+                let trailingCoreWidth = max(trackWidth * 0.12, 12)
 
-                    ZStack(alignment: .leading) {
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.10))
+                if animatesTrack {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                        let cycle = context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: 1.65) / 1.65
+                        let easedPhase = 0.5 - 0.5 * cos(cycle * .pi * 2)
+                        let travel = max(trackWidth - leadingCoreWidth, 0)
+                        let glowOffset = travel * easedPhase
 
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.cyan.opacity(0.28),
-                                        Color.cyan.opacity(0.94),
-                                        Color.white.opacity(0.92)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: indicatorWidth)
-                            .offset(x: travel * phase)
+                        statusTrack(
+                            trackWidth: trackWidth,
+                            leadingCoreWidth: leadingCoreWidth,
+                            trailingCoreWidth: trailingCoreWidth,
+                            leadingOffset: glowOffset,
+                            trailingOffset: max(glowOffset - trackWidth * 0.18, 0),
+                            glowOpacity: 0.96
+                        )
                     }
+                } else {
+                    statusTrack(
+                        trackWidth: trackWidth,
+                        leadingCoreWidth: leadingCoreWidth,
+                        trailingCoreWidth: trailingCoreWidth,
+                        leadingOffset: trackWidth * 0.32,
+                        trailingOffset: trackWidth * 0.18,
+                        glowOpacity: 0.7
+                    )
                 }
             }
-            .frame(height: 4)
+            .frame(height: trackHeight)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
+    }
+
+    private func statusTrack(
+        trackWidth: CGFloat,
+        leadingCoreWidth: CGFloat,
+        trailingCoreWidth: CGFloat,
+        leadingOffset: CGFloat,
+        trailingOffset: CGFloat,
+        glowOpacity: Double
+    ) -> some View {
+        let glowWidth = min(trackWidth * 0.56, 72)
+
+        return ZStack(alignment: .leading) {
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.05),
+                            Color.white.opacity(0.10),
+                            Color.white.opacity(0.06)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.clear,
+                            Color.cyan.opacity(0.08),
+                            Color.cyan.opacity(0.42),
+                            Color.white.opacity(0.90),
+                            Color.cyan.opacity(0.26),
+                            Color.clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: glowWidth)
+                .offset(x: leadingOffset - glowWidth * 0.24)
+                .opacity(glowOpacity)
+                .blur(radius: 7)
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.cyan.opacity(0.14),
+                            Color.cyan.opacity(0.65),
+                            Color.white.opacity(0.95)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: leadingCoreWidth)
+                .offset(x: leadingOffset)
+                .shadow(color: Color.cyan.opacity(0.28), radius: 8, y: 0)
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.cyan.opacity(0.08),
+                            Color.cyan.opacity(0.34),
+                            Color.white.opacity(0.32)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: trailingCoreWidth)
+                .offset(x: trailingOffset)
+        }
+        .clipShape(Capsule(style: .continuous))
     }
 }
 
