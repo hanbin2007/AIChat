@@ -107,11 +107,7 @@ struct ChatBubbleView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.8))
             } else if message.cleanedText.isEmpty == false {
-                Text(message.cleanedText)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                messageTextContent
             }
 
             if isStreamingAssistant {
@@ -169,6 +165,19 @@ struct ChatBubbleView: View {
             messageActions
         }
         #endif
+    }
+
+    @ViewBuilder
+    private var messageTextContent: some View {
+        if isUser == false, message.status != .streaming {
+            AssistantMessageMarkdownView(text: message.cleanedText)
+        } else {
+            Text(message.cleanedText)
+                .font(.body)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     @ViewBuilder
