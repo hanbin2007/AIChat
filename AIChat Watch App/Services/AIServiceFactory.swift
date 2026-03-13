@@ -21,15 +21,18 @@ struct VoiceTranscriptionConfiguration: Equatable {
     var model: String
     var customPrompt: String
     var includesContext: Bool
+    var existingDraftText: String
 
     init(
         model: String,
         customPrompt: String = "",
-        includesContext: Bool = true
+        includesContext: Bool = true,
+        existingDraftText: String = ""
     ) {
         self.model = model
         self.customPrompt = customPrompt
         self.includesContext = includesContext
+        self.existingDraftText = existingDraftText
     }
 }
 

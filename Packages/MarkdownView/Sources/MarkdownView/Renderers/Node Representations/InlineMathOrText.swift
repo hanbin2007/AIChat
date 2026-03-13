@@ -104,14 +104,30 @@ struct InlineMath: View {
                 style: .inline
             )
         } else {
-            ViewThatFits(in: .horizontal) {
+            #if os(watchOS)
+            WatchZoomableMathContainer(
+                latexMath: latexText,
+                expandedFont: Math.Font(name: .latinModern, size: 24),
+                accessibilityIdentifier: "math.zoom.trigger.inline",
+                accessibilityHint: "Double tap to enlarge the formula."
+            ) {
+                fittedInlineMath
+            }
+            #else
+            fittedInlineMath
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private var fittedInlineMath: some View {
+        ViewThatFits(in: .horizontal) {
+            Math(latexText)
+                .mathTypesettingStyle(.text)
+
+            ScrollView(.horizontal) {
                 Math(latexText)
                     .mathTypesettingStyle(.text)
-
-                ScrollView(.horizontal) {
-                    Math(latexText)
-                        .mathTypesettingStyle(.text)
-                }
             }
         }
     }

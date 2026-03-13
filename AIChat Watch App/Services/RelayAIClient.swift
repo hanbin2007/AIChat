@@ -232,6 +232,7 @@ struct RelayTranscriptionService: AITranscriptionService {
                 for: conversation,
                 customPrompt: transcriptionConfiguration.customPrompt,
                 includesContext: transcriptionConfiguration.includesContext,
+                existingDraftText: transcriptionConfiguration.existingDraftText,
                 maxContextMessages: maxContextMessages,
                 maxContextCharacters: maxContextCharacters
             ),

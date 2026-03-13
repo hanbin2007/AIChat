@@ -16,8 +16,14 @@ private enum RootPage: Hashable {
 
 struct ContentView: View {
     @EnvironmentObject private var chatStore: ChatStore
+    let initialConversationID: UUID?
     @State private var navigationPath: [UUID] = []
     @State private var selectedPage: RootPage = .conversations
+    @State private var hasAppliedInitialRoute = false
+
+    init(initialConversationID: UUID? = nil) {
+        self.initialConversationID = initialConversationID
+    }
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -38,6 +44,16 @@ struct ContentView: View {
         }
         .task {
             await chatStore.loadConversationsIfNeeded()
+
+            guard hasAppliedInitialRoute == false,
+                  let initialConversationID
+            else {
+                return
+            }
+
+            hasAppliedInitialRoute = true
+            selectedPage = .conversations
+            navigationPath = [initialConversationID]
         }
     }
 }

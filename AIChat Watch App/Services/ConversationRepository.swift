@@ -58,13 +58,7 @@ actor ConversationRepository {
             return hydrateAttachments(in: conversation)
         }
 
-        return conversations.sorted { lhs, rhs in
-            if lhs.updatedAt == rhs.updatedAt {
-                return lhs.createdAt > rhs.createdAt
-            }
-
-            return lhs.updatedAt > rhs.updatedAt
-        }
+        return conversations.sorted(by: ConversationThread.sortsByMostRecentFirst)
     }
 
     func save(_ conversation: ConversationThread) throws {

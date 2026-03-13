@@ -42,22 +42,14 @@ fileprivate struct DisplayMath: View {
                 style: .block
             )
         } else {
-            ViewThatFits(in: .horizontal) {
-                latex
-
-                ScrollView(.horizontal) {
-                    latex
-                }
-            }
+            latex
         }
     }
     
     @ViewBuilder
     private var latex: some View {
         if let latexMath {
-            Math(latexMath)
-                .mathTypesettingStyle(.display)
-                .frame(maxWidth: .infinity, alignment: .center)
+            AdaptiveDisplayMathView(latexMath: latexMath)
         }
     }
 }

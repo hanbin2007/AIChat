@@ -654,6 +654,18 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         )
     }
 
+    static func sortsByMostRecentFirst(_ lhs: ConversationThread, _ rhs: ConversationThread) -> Bool {
+        if lhs.updatedAt == rhs.updatedAt {
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id.uuidString > rhs.id.uuidString
+            }
+
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        return lhs.updatedAt > rhs.updatedAt
+    }
+
     var previewText: String {
         guard let lastMessage = messages.last(where: \.hasVisibleContent) else {
             return L10n.tr("conversation.preview.empty")

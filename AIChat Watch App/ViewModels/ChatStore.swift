@@ -17,6 +17,84 @@ struct ConversationDraft: Equatable {
     }
 }
 
+nonisolated enum DraftTextComposer {
+    private static let sentencePunctuation = CharacterSet(charactersIn: ".?!。！？…")
+    private static let clausePunctuation = CharacterSet(charactersIn: ",;:，；：")
+    private static let leadingJoinPunctuation = CharacterSet(charactersIn: ".,;:!?%)]}，。！？；：、）】》」』'")
+
+    static func appended(existing: String, addition: String) -> String {
+        let normalizedAddition = normalizeSegment(addition)
+        guard normalizedAddition.isEmpty == false else {
+            return existing
+        }
+
+        let normalizedExisting = existing.trimmed
+        guard normalizedExisting.isEmpty == false else {
+            return normalizedAddition
+        }
+
+        return normalizedExisting + separatorBetween(existing: normalizedExisting, addition: normalizedAddition) + normalizedAddition
+    }
+
+    private static func normalizeSegment(_ text: String) -> String {
+        text
+            .collapseWhitespace()
+            .replacingOccurrences(of: "\\s+([，。！？；：,.!?;:])", with: "$1", options: .regularExpression)
+            .trimmed
+    }
+
+    private static func separatorBetween(existing: String, addition: String) -> String {
+        guard let existingScalar = existing.unicodeScalars.last,
+              let additionScalar = addition.unicodeScalars.first
+        else {
+            return " "
+        }
+
+        if CharacterSet.newlines.contains(existingScalar) || CharacterSet.newlines.contains(additionScalar) {
+            return ""
+        }
+
+        if leadingJoinPunctuation.contains(additionScalar) {
+            return ""
+        }
+
+        if sentencePunctuation.contains(existingScalar) || clausePunctuation.contains(existingScalar) {
+            return needsInterWordSpace(before: existingScalar, after: additionScalar) ? " " : ""
+        }
+
+        if isCJK(existingScalar) && isCJK(additionScalar) {
+            return "，"
+        }
+
+        return needsInterWordSpace(before: existingScalar, after: additionScalar) ? " " : ""
+    }
+
+    private static func needsInterWordSpace(
+        before existingScalar: UnicodeScalar,
+        after additionScalar: UnicodeScalar
+    ) -> Bool {
+        isLatinLike(existingScalar) && isLatinLike(additionScalar)
+    }
+
+    private static func isLatinLike(_ scalar: UnicodeScalar) -> Bool {
+        CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_"
+    }
+
+    private static func isCJK(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.value {
+        case 0x2E80...0x2FDF,
+             0x3040...0x30FF,
+             0x3400...0x4DBF,
+             0x4E00...0x9FFF,
+             0xF900...0xFAFF,
+             0xFF66...0xFF9F:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 @MainActor
 final class ChatStore: ObservableObject {
     static let defaultSendFailureRetryLimit = 3
@@ -274,7 +352,7 @@ final class ChatStore: ObservableObject {
         let conversation = ConversationThread.empty(
             aiConfiguration: defaultConversationConfiguration
         )
-        conversations.insert(conversation, at: 0)
+        upsertConversation(conversation)
         await persist(conversation, sync: true)
         return conversation.id
     }
@@ -842,7 +920,8 @@ final class ChatStore: ObservableObject {
         let transcriptionConfiguration = VoiceTranscriptionConfiguration(
             model: selectedTranscriptionModel,
             customPrompt: selectedTranscriptionCustomPrompt,
-            includesContext: isTranscriptionContextEnabled
+            includesContext: isTranscriptionContextEnabled,
+            existingDraftText: drafts[conversationID]?.text ?? ""
         )
         let maximumRetryCount = sendFailureRetryLimit
         var finalError: Error?
@@ -1024,7 +1103,8 @@ final class ChatStore: ObservableObject {
 
     private func upsertConversation(_ conversation: ConversationThread) {
         conversations.removeAll { $0.id == conversation.id }
-        conversations.insert(conversation, at: 0)
+        conversations.append(conversation)
+        conversations.sort(by: ConversationThread.sortsByMostRecentFirst)
     }
 
     private func mutateConversation(id: UUID, mutation: (inout ConversationThread) -> Void) {
@@ -1678,17 +1758,7 @@ final class ChatStore: ObservableObject {
     }
 
     private func appendedDraftText(existing: String, addition: String) -> String {
-        let normalizedAddition = addition.trimmed
-        guard normalizedAddition.isEmpty == false else {
-            return existing
-        }
-
-        let normalizedExisting = existing.trimmed
-        guard normalizedExisting.isEmpty == false else {
-            return normalizedAddition
-        }
-
-        return normalizedExisting + "\n" + normalizedAddition
+        DraftTextComposer.appended(existing: existing, addition: addition)
     }
 
     private func allowedModelsDescription(for allowedModelIDs: Set<String>?) -> String {
@@ -1962,13 +2032,7 @@ extension ChatStore {
             syncBridge: CompanionSyncBridge()
         )
 
-        store.conversations = conversations.sorted { lhs, rhs in
-            if lhs.updatedAt == rhs.updatedAt {
-                return lhs.createdAt > rhs.createdAt
-            }
-
-            return lhs.updatedAt > rhs.updatedAt
-        }
+        store.conversations = conversations.sorted(by: ConversationThread.sortsByMostRecentFirst)
         store.drafts = drafts
         store.sendingConversationIDs = sendingConversationIDs
         store.transcribingConversationIDs = []

@@ -20,17 +20,20 @@ nonisolated enum VoiceTranscriptionPromptBuilder {
         Use the provided conversation context only to disambiguate names, references, and homophones.
         Preserve the user's language and intent.
         Remove only obvious filler words or false starts when the intended wording is clear.
+        Add obvious punctuation and capitalization when you are confident.
         """
 
     static func prompt(
         for conversation: ConversationThread,
         customPrompt: String,
         includesContext: Bool,
+        existingDraftText: String,
         maxContextMessages: Int,
         maxContextCharacters: Int
     ) -> String {
         prompt(
             customPrompt: customPrompt,
+            existingDraftText: existingDraftText,
             contextSummary: includesContext ?
                 AIContextAssembler.transcriptionContextSummary(for: conversation) :
                 nil
@@ -39,6 +42,7 @@ nonisolated enum VoiceTranscriptionPromptBuilder {
 
     static func prompt(
         customPrompt: String,
+        existingDraftText: String,
         contextSummary: String?
     ) -> String {
         var prompt =
@@ -46,6 +50,19 @@ nonisolated enum VoiceTranscriptionPromptBuilder {
             Transcribe the attached audio as the user's next chat message.
             Output only the transcript text.
             """
+
+        if let existingDraftText = existingDraftText.nonEmptyTrimmed.map(normalizedDraftContext(_:)) {
+            prompt.append(
+                """
+
+                Existing text already typed in the compose field:
+                \(existingDraftText)
+
+                Treat the new audio as a continuation of that draft unless the speaker clearly starts a new paragraph.
+                Return only the new text to append, and avoid repeating words that are already present above.
+                """
+            )
+        }
 
         if let customPrompt = customPrompt.nonEmptyTrimmed {
             prompt.append(
@@ -68,6 +85,15 @@ nonisolated enum VoiceTranscriptionPromptBuilder {
         }
 
         return prompt
+    }
+
+    private static func normalizedDraftContext(_ draftText: String) -> String {
+        let normalizedDraft = draftText.collapseWhitespace().trimmed
+        guard normalizedDraft.count > 320 else {
+            return normalizedDraft
+        }
+
+        return String(normalizedDraft.suffix(320))
     }
 }
 
@@ -189,6 +215,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
                                 for: conversation,
                                 customPrompt: transcriptionConfiguration.customPrompt,
                                 includesContext: transcriptionConfiguration.includesContext,
+                                existingDraftText: transcriptionConfiguration.existingDraftText,
                                 maxContextMessages: maxContextMessages,
                                 maxContextCharacters: maxContextCharacters
                             ),
