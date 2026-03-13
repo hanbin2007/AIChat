@@ -176,7 +176,6 @@ struct ChatBubbleView: View, Equatable {
             if isStreamingAssistant {
                 StreamingReplyStatusView(
                     title: displayedText.isEmpty ? (displayedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
-                    showsSpinner: displayedText.isEmpty,
                     animatesTrack: suspendStreamingRender == false
                 )
             }
@@ -502,7 +501,6 @@ private struct MessageBodyTextView: View {
 
 private struct StreamingReplyStatusView: View {
     let title: String
-    let showsSpinner: Bool
     let animatesTrack: Bool
 
     private let trackHeight: CGFloat = 5
@@ -510,15 +508,9 @@ private struct StreamingReplyStatusView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                if showsSpinner {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.cyan.opacity(0.92))
-                } else {
-                    Circle()
-                        .fill(Color.cyan.opacity(0.92))
-                        .frame(width: 6, height: 6)
-                }
+                Circle()
+                    .fill(Color.cyan.opacity(0.92))
+                    .frame(width: 6, height: 6)
 
                 Text(title)
                     .font(.caption2.weight(.semibold))
