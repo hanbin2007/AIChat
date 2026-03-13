@@ -47,7 +47,6 @@ struct FavoritesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle(L10n.tr("favorites.title"))
     }
 
     private var emptyState: some View {

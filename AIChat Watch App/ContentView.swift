@@ -20,6 +20,8 @@ struct ContentView: View {
     @State private var navigationPath: [UUID] = []
     @State private var selectedPage: RootPage = .conversations
     @State private var hasAppliedInitialRoute = false
+    @State private var isShowingGlobalSettings = false
+    @State private var isShowingNewPromptPresetEditor = false
 
     init(initialConversationID: UUID? = nil) {
         self.initialConversationID = initialConversationID
@@ -34,13 +36,53 @@ struct ContentView: View {
                 ConversationListView(navigationPath: $navigationPath)
                     .tag(RootPage.conversations)
 
-                PromptLibraryView()
+                PromptLibraryView(isShowingNewPresetEditor: $isShowingNewPromptPresetEditor)
                     .tag(RootPage.promptLibrary)
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))
-                .navigationDestination(for: UUID.self) { conversationID in
-                    ConversationDetailView(conversationID: conversationID)
+            .navigationTitle(rootNavigationTitle)
+            .toolbar {
+                if navigationPath.isEmpty && selectedPage == .conversations {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            isShowingGlobalSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Global settings")
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Task {
+                                let newConversationID = await chatStore.createConversation()
+                                navigationPath = [newConversationID]
+                            }
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityLabel("New conversation")
+                        .disabled(chatStore.isReadOnlyMode)
+                    }
                 }
+
+                if navigationPath.isEmpty && selectedPage == .promptLibrary {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingNewPromptPresetEditor = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel(L10n.tr("prompt_preset.create"))
+                    }
+                }
+            }
+            .navigationDestination(for: UUID.self) { conversationID in
+                ConversationDetailView(conversationID: conversationID)
+            }
+        }
+        .sheet(isPresented: $isShowingGlobalSettings) {
+            GlobalSettingsView()
         }
         .task {
             await chatStore.loadConversationsIfNeeded()
@@ -54,6 +96,17 @@ struct ContentView: View {
             hasAppliedInitialRoute = true
             selectedPage = .conversations
             navigationPath = [initialConversationID]
+        }
+    }
+
+    private var rootNavigationTitle: String {
+        switch selectedPage {
+        case .favorites:
+            return L10n.tr("favorites.title")
+        case .conversations:
+            return "AIChat"
+        case .promptLibrary:
+            return L10n.tr("prompt_preset.library.title")
         }
     }
 }
