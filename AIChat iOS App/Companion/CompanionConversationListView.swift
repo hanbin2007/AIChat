@@ -257,11 +257,11 @@ struct CompanionConversationRow: View {
                         iconName: "bubble.left.and.bubble.right.fill"
                     )
 
-                    if conversation.messages.contains(where: { $0.attachments.contains(where: \.isAudio) }) {
+                    if conversation.containsAudioAttachments {
                         CompanionMetaChip(title: "语音", iconName: "waveform")
                     }
 
-                    if conversation.messages.contains(where: { $0.attachments.contains(where: \.isImage) }) {
+                    if conversation.containsImageAttachments {
                         CompanionMetaChip(title: "图片", iconName: "photo")
                     }
 

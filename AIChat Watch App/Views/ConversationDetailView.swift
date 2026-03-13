@@ -44,6 +44,14 @@ private enum VoiceCaptureMode {
     case directSend
 }
 
+private enum ConversationRendering {
+    static let prewarmedMessageBatch = 10
+    static let initialMessageBatch = 32
+    static let olderMessageBatch = 64
+    static let deferredLoadingThreshold = 48
+    static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
+}
+
 struct ConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -61,6 +69,10 @@ struct ConversationDetailView: View {
     @State private var messagesViewportHeight: CGFloat = 0
     @State private var voiceCaptureMode: VoiceCaptureMode = .transcribe
     @State private var suppressedVoiceTapUntil = Date.distantPast
+    @State private var renderedMessageCount = ConversationRendering.prewarmedMessageBatch
+    @State private var lastObservedMessageCount = 0
+    @State private var isPreparingHistory = true
+    @State private var initialHistoryLoadTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -163,11 +175,17 @@ struct ConversationDetailView: View {
             chatStore.presentError(errorMessage, for: conversationID)
             voiceRecorder.clearError()
         }
+        .onDisappear {
+            initialHistoryLoadTask?.cancel()
+            initialHistoryLoadTask = nil
+        }
         .animation(.easeOut(duration: 0.2), value: isComposerExpanded)
     }
 
     private func messagesView(conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
+        let visibleMessages = visibleMessages(in: conversation)
+        let hiddenMessageCount = max(conversation.messages.count - visibleMessages.count, 0)
 
         return ScrollViewReader { proxy in
             ScrollView {
@@ -175,8 +193,18 @@ struct ConversationDetailView: View {
                     if conversation.messages.isEmpty {
                         starterCard
                     } else {
-                        ForEach(conversation.messages) { message in
+                        if isPreparingHistory {
+                            historyLoadingCard(totalCount: conversation.messages.count)
+                        } else if hiddenMessageCount > 0 {
+                            loadEarlierMessagesCard(
+                                hiddenMessageCount: hiddenMessageCount,
+                                totalCount: conversation.messages.count
+                            )
+                        }
+
+                        ForEach(visibleMessages) { message in
                             ChatBubbleView(conversationID: conversationID, message: message)
+                                .equatable()
                                 .id(message.id)
                         }
                     }
@@ -240,6 +268,7 @@ struct ConversationDetailView: View {
             }
             .onAppear {
                 interruptedAutoScrollMessageID = nil
+                prepareInitialHistoryIfNeeded(totalCount: conversation.messages.count)
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
@@ -247,11 +276,24 @@ struct ConversationDetailView: View {
                     force: true
                 )
             }
-            .onChange(of: conversation.messages.count) { _, _ in
+            .onChange(of: conversation.messages.count) { _, newCount in
+                reconcileRenderedMessages(totalCount: newCount)
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: true,
                     streamingMessageID: streamingMessageID
+                )
+            }
+            .onChange(of: renderedMessageCount) { _, newCount in
+                guard newCount > 0 else {
+                    return
+                }
+
+                scrollToBottomIfNeeded(
+                    with: proxy,
+                    animated: false,
+                    streamingMessageID: streamingMessageID,
+                    force: true
                 )
             }
             .onChange(of: conversation.updatedAt) { _, _ in
@@ -325,6 +367,70 @@ struct ConversationDetailView: View {
         .controlSize(.small)
         .tint(.white.opacity(0.8))
         .font(.caption2)
+    }
+
+    private func historyLoadingCard(totalCount: Int) -> some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.cyan)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("正在准备历史消息")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Text("先显示最近 \(min(renderedMessageCount, totalCount)) / \(totalCount) 条。")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.32))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private func loadEarlierMessagesCard(hiddenMessageCount: Int, totalCount: Int) -> some View {
+        Button {
+            loadOlderMessages(totalCount: totalCount)
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("加载更早消息")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    Text("还有 \(hiddenMessageCount) 条未显示。")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.cyan)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(0.28))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func composerView() -> some View {
@@ -735,6 +841,90 @@ struct ConversationDetailView: View {
         }
 
         interruptAutoScroll(for: streamingMessageID)
+    }
+
+    private func visibleMessages(in conversation: ConversationThread) -> ArraySlice<ChatMessage> {
+        let totalCount = conversation.messages.count
+        guard totalCount > 0 else {
+            return conversation.messages.suffix(0)
+        }
+
+        let clampedCount = min(max(renderedMessageCount, 0), totalCount)
+        return conversation.messages.suffix(clampedCount)
+    }
+
+    private func prepareInitialHistoryIfNeeded(totalCount: Int) {
+        initialHistoryLoadTask?.cancel()
+        lastObservedMessageCount = totalCount
+        renderedMessageCount = min(totalCount, ConversationRendering.prewarmedMessageBatch)
+
+        guard totalCount > ConversationRendering.deferredLoadingThreshold else {
+            renderedMessageCount = totalCount
+            isPreparingHistory = false
+            return
+        }
+
+        isPreparingHistory = true
+        initialHistoryLoadTask = Task {
+            try? await Task.sleep(nanoseconds: ConversationRendering.initialLoadDelayNanoseconds)
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await MainActor.run {
+                renderedMessageCount = min(
+                    lastObservedMessageCount,
+                    ConversationRendering.initialMessageBatch
+                )
+                isPreparingHistory = false
+                initialHistoryLoadTask = nil
+            }
+        }
+    }
+
+    private func reconcileRenderedMessages(totalCount: Int) {
+        let previousCount = lastObservedMessageCount
+        lastObservedMessageCount = totalCount
+
+        guard previousCount != totalCount else {
+            return
+        }
+
+        if totalCount <= ConversationRendering.deferredLoadingThreshold {
+            renderedMessageCount = totalCount
+            isPreparingHistory = false
+            return
+        }
+
+        if totalCount < previousCount {
+            renderedMessageCount = min(renderedMessageCount, totalCount)
+            return
+        }
+
+        let delta = totalCount - previousCount
+        let wasShowingAll = renderedMessageCount >= previousCount
+
+        if isPreparingHistory {
+            renderedMessageCount = min(
+                totalCount,
+                max(renderedMessageCount + delta, ConversationRendering.prewarmedMessageBatch)
+            )
+            return
+        }
+
+        if wasShowingAll {
+            renderedMessageCount = totalCount
+        } else {
+            renderedMessageCount = min(totalCount, renderedMessageCount + delta)
+        }
+    }
+
+    private func loadOlderMessages(totalCount: Int) {
+        renderedMessageCount = min(
+            totalCount,
+            max(renderedMessageCount, ConversationRendering.initialMessageBatch) +
+                ConversationRendering.olderMessageBatch
+        )
     }
 
     private func sendCurrentDraft() {

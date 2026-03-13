@@ -10,7 +10,7 @@ import SwiftUI
 import WatchKit
 #endif
 
-struct ChatBubbleView: View {
+struct ChatBubbleView: View, Equatable {
     @EnvironmentObject private var chatStore: ChatStore
 
     let conversationID: UUID
@@ -47,6 +47,11 @@ struct ChatBubbleView: View {
 
     private var bubbleShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
+    }
+
+    static func == (lhs: ChatBubbleView, rhs: ChatBubbleView) -> Bool {
+        lhs.conversationID == rhs.conversationID &&
+        lhs.message == rhs.message
     }
 
     var body: some View {
@@ -115,11 +120,7 @@ struct ChatBubbleView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.8))
             } else if message.cleanedText.isEmpty == false {
-                Text(message.cleanedText)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                MessageBodyTextView(text: message.cleanedText)
             }
 
             if isStreamingAssistant {
@@ -375,6 +376,54 @@ private struct ThoughtSummaryCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+private enum MessageBodyLayout {
+    static let collapsedLineLimit = 12
+    static let collapseCharacterThreshold = 1_400
+    static let collapseLineThreshold = 14
+}
+
+private struct MessageBodyTextView: View {
+    let text: String
+
+    @State private var isExpanded = false
+
+    private var shouldCollapse: Bool {
+        let newlineCount = text.reduce(into: 0) { count, character in
+            if character == "\n" {
+                count += 1
+            }
+        }
+
+        return text.count > MessageBodyLayout.collapseCharacterThreshold ||
+            newlineCount >= MessageBodyLayout.collapseLineThreshold
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: shouldCollapse ? 8 : 0) {
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(shouldCollapse && isExpanded == false ? MessageBodyLayout.collapsedLineLimit : nil)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if shouldCollapse {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "收起全文" : "展开全文", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.cyan.opacity(0.92))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
