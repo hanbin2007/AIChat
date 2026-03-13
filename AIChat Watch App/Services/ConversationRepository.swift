@@ -91,6 +91,23 @@ actor ConversationRepository {
         try data.write(to: globalPinnedMemoriesURL(), options: [.atomic])
     }
 
+    func loadPromptPresets() throws -> [PromptPreset] {
+        try ensureDirectoryExists()
+        let url = promptPresetsURL()
+        guard fileManager.fileExists(atPath: url.path()) else {
+            return []
+        }
+
+        let data = try Data(contentsOf: url)
+        return try decoder.decode([PromptPreset].self, from: data)
+    }
+
+    func savePromptPresets(_ items: [PromptPreset]) throws {
+        try ensureDirectoryExists()
+        let data = try encoder.encode(items)
+        try data.write(to: promptPresetsURL(), options: [.atomic])
+    }
+
     func deleteConversation(id: UUID) throws {
         let url = fileURL(for: id)
         guard fileManager.fileExists(atPath: url.path()) else {
@@ -116,6 +133,10 @@ actor ConversationRepository {
 
     private func globalPinnedMemoriesURL() -> URL {
         rootURL.appendingPathComponent("_global_pinned_memories.json", isDirectory: false)
+    }
+
+    private func promptPresetsURL() -> URL {
+        rootURL.appendingPathComponent("_prompt_presets.json", isDirectory: false)
     }
 
     private func persistAttachmentBlobs(for conversation: ConversationThread) throws -> ConversationThread {

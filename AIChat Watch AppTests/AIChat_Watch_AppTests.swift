@@ -250,6 +250,25 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
     }
 
+    func testPromptPresetLibraryIncludesBuiltInsByDefault() {
+        let presets = PromptPreset.resolvedLibrary(from: [])
+
+        XCTAssertTrue(
+            presets.contains(where: {
+                $0.id == PromptPreset.builtInConversationID &&
+                $0.kind == .conversation &&
+                $0.isBuiltIn
+            })
+        )
+        XCTAssertTrue(
+            presets.contains(where: {
+                $0.id == PromptPreset.builtInTranscriptionID &&
+                $0.kind == .transcription &&
+                $0.isBuiltIn
+            })
+        )
+    }
+
     func testGemini25RequestUsesThinkingBudget() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Summarize this thread")],

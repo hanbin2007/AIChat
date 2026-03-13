@@ -17,6 +17,7 @@ struct CompanionConversationSettingsView: View {
     @State private var draftTitle = ""
     @State private var draftSystemPrompt = ""
     @State private var promptSaveTask: Task<Void, Never>?
+    @State private var isShowingPromptPresetPicker = false
 
     var body: some View {
         NavigationStack {
@@ -67,6 +68,11 @@ struct CompanionConversationSettingsView: View {
                             )
                             .textFieldStyle(.roundedBorder)
                             .disabled(chatStore.isReadOnlyMode)
+
+                            Button(L10n.tr("prompt_preset.pick")) {
+                                isShowingPromptPresetPicker = true
+                            }
+                            .disabled(chatStore.isReadOnlyMode || chatStore.promptPresets(of: .conversation).isEmpty)
 
                             Text(systemPromptHint(for: aiConfiguration))
                                 .font(.footnote)
@@ -138,6 +144,15 @@ struct CompanionConversationSettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .sheet(isPresented: $isShowingPromptPresetPicker) {
+                PromptPresetPickerView(
+                    kind: .conversation,
+                    title: L10n.tr("prompt_preset.library.title"),
+                    onSelect: { preset in
+                        draftSystemPrompt = preset.content
+                    }
+                )
             }
             .onAppear {
                 draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""

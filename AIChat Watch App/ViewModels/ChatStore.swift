@@ -39,6 +39,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var transcriptionCustomPrompt: String
     @Published private(set) var transcriptionIncludesContext: Bool
     @Published private(set) var globalPinnedMemories: [PinnedMemoryItem] = []
+    @Published private(set) var promptPresets: [PromptPreset] = PromptPreset.builtInPresets
 
     let configuration: AppConfiguration
     let storageDescription: String
@@ -106,6 +107,10 @@ final class ChatStore: ObservableObject {
 
         syncBridge.setGlobalPinnedMemoriesProvider { [weak self] in
             self?.globalPinnedMemories ?? []
+        }
+
+        syncBridge.setPromptPresetsProvider { [weak self] in
+            self?.promptPresets ?? PromptPreset.builtInPresets
         }
 
         syncBridge.setEventHandler { [weak self] event in
@@ -213,6 +218,7 @@ final class ChatStore: ObservableObject {
         do {
             conversations = try await repository.loadConversations()
             globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
+            promptPresets = PromptPreset.resolvedLibrary(from: try await repository.loadPromptPresets())
             syncBridge.requestBootstrapIfPossible()
         } catch {
             startupError = error.localizedDescription
@@ -291,6 +297,10 @@ final class ChatStore: ObservableObject {
         }
 
         return licensedConfiguration(from: defaultConversationConfiguration)
+    }
+
+    var favoriteConversations: [ConversationThread] {
+        conversations.filter(\.isFavorite)
     }
 
     func availableModelOptions() -> [AIModelOption] {
@@ -444,6 +454,14 @@ final class ChatStore: ObservableObject {
 
     func draftText(for conversationID: UUID) -> String {
         drafts[conversationID]?.text ?? ""
+    }
+
+    func promptPreset(id: UUID) -> PromptPreset? {
+        promptPresets.first { $0.id == id }
+    }
+
+    func promptPresets(of kind: PromptPresetKind) -> [PromptPreset] {
+        promptPresets.filter { $0.kind == kind }
     }
 
     func updateDraftText(_ text: String, for conversationID: UUID) {
@@ -617,6 +635,79 @@ final class ChatStore: ObservableObject {
 
         transcriptionIncludesContext = includesContext
         defaults.set(includesContext, forKey: DefaultsKeys.transcriptionIncludesContext)
+    }
+
+    func setConversationFavorite(
+        _ isFavorite: Bool,
+        for conversationID: UUID
+    ) async {
+        guard var conversation = conversation(id: conversationID),
+              conversation.isFavorite != isFavorite
+        else {
+            return
+        }
+
+        conversation.updateFavorite(isFavorite)
+        upsertConversation(conversation)
+        await persist(conversation, sync: true)
+    }
+
+    func createPromptPreset(
+        kind: PromptPresetKind,
+        title: String,
+        content: String
+    ) async {
+        let normalizedTitle = title.nonEmptyTrimmed
+        let normalizedContent = content.nonEmptyTrimmed
+        guard let normalizedTitle, let normalizedContent else {
+            return
+        }
+
+        let preset = PromptPreset(
+            kind: kind,
+            title: normalizedTitle,
+            content: normalizedContent
+        )
+        promptPresets = PromptPreset.resolvedLibrary(from: promptPresets + [preset])
+        await persistPromptPresets(sync: true)
+    }
+
+    func updatePromptPreset(
+        id presetID: UUID,
+        kind: PromptPresetKind,
+        title: String,
+        content: String
+    ) async {
+        guard let existingPreset = promptPreset(id: presetID),
+              existingPreset.isBuiltIn == false,
+              let normalizedTitle = title.nonEmptyTrimmed,
+              let normalizedContent = content.nonEmptyTrimmed
+        else {
+            return
+        }
+
+        let updatedPreset = existingPreset.updated(
+            kind: kind,
+            title: normalizedTitle,
+            content: normalizedContent
+        )
+        promptPresets = PromptPreset.resolvedLibrary(
+            from: promptPresets.map { $0.id == presetID ? updatedPreset : $0 }
+        )
+        await persistPromptPresets(sync: true)
+    }
+
+    func deletePromptPreset(id presetID: UUID) async {
+        guard let existingPreset = promptPreset(id: presetID),
+              existingPreset.isBuiltIn == false
+        else {
+            return
+        }
+
+        promptPresets = PromptPreset.resolvedLibrary(
+            from: promptPresets.filter { $0.id != presetID }
+        )
+        await persistPromptPresets(sync: true)
     }
 
     func pinMessage(
@@ -895,6 +986,17 @@ final class ChatStore: ObservableObject {
             try await repository.saveGlobalPinnedMemories(globalPinnedMemories)
             if sync {
                 syncBridge.pushGlobalPinnedMemories(globalPinnedMemories)
+            }
+        } catch {
+            startupError = error.localizedDescription
+        }
+    }
+
+    private func persistPromptPresets(sync: Bool) async {
+        do {
+            try await repository.savePromptPresets(promptPresets)
+            if sync {
+                syncBridge.pushPromptPresets(promptPresets)
             }
         } catch {
             startupError = error.localizedDescription
@@ -1621,6 +1723,8 @@ final class ChatStore: ObservableObject {
             }
         case .globalPinnedMemories(let items):
             await mergeGlobalPinnedMemories(items, syncMergedState: true)
+        case .promptPresets(let presets):
+            await replacePromptPresets(presets, syncMergedState: false)
         case .activationRequestCode(let requestCode):
             #if os(iOS)
             pairedWatchActivationRequestCode = OfflineActivation.formatForDisplay(requestCode, groupSize: 4)
@@ -1675,6 +1779,19 @@ final class ChatStore: ObservableObject {
 
         globalPinnedMemories = mergedItems
         await persistGlobalPinnedMemories(sync: syncMergedState)
+    }
+
+    private func replacePromptPresets(
+        _ incomingPresets: [PromptPreset],
+        syncMergedState: Bool
+    ) async {
+        let resolvedPresets = PromptPreset.resolvedLibrary(from: incomingPresets)
+        guard resolvedPresets != promptPresets else {
+            return
+        }
+
+        promptPresets = resolvedPresets
+        await persistPromptPresets(sync: syncMergedState)
     }
 
     private func requestConversation(from conversation: ConversationThread) -> ConversationThread {
