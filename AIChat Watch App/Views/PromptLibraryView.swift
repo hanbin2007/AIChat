@@ -11,8 +11,8 @@ import SwiftUI
 struct PromptLibraryView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
+    @Binding var isShowingNewPresetEditor: Bool
     @State private var editingPreset: PromptPreset?
-    @State private var isShowingNewPresetEditor = false
 
     var body: some View {
         ZStack {
@@ -52,17 +52,6 @@ struct PromptLibraryView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-        }
-        .navigationTitle(L10n.tr("prompt_preset.library.title"))
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isShowingNewPresetEditor = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel(L10n.tr("prompt_preset.create"))
-            }
         }
         .sheet(item: $editingPreset) { preset in
             PromptPresetEditorView(preset: preset)

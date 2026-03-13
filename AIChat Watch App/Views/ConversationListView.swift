@@ -12,7 +12,6 @@ struct ConversationListView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
-    @State private var isShowingGlobalSettings = false
 
     var body: some View {
         ZStack {
@@ -102,35 +101,8 @@ struct ConversationListView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("AIChat")
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
-        }
-        .sheet(isPresented: $isShowingGlobalSettings) {
-            GlobalSettingsView()
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    isShowingGlobalSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .accessibilityLabel("Global settings")
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task {
-                        let newConversationID = await chatStore.createConversation()
-                        navigationPath = [newConversationID]
-                    }
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-                .accessibilityLabel("New conversation")
-                .disabled(chatStore.isReadOnlyMode)
-            }
         }
     }
 
