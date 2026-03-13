@@ -70,6 +70,9 @@ struct ConversationListView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                favoriteSwipeAction(for: conversation)
+                            }
                         }
                     } else {
                         ForEach(chatStore.conversations) { conversation in
@@ -81,10 +84,16 @@ struct ConversationListView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
-                        }
-                        .onDelete { offsets in
-                            Task {
-                                await chatStore.deleteConversations(at: offsets)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                favoriteSwipeAction(for: conversation)
+
+                                Button(role: .destructive) {
+                                    Task {
+                                        await chatStore.deleteConversation(id: conversation.id)
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -167,10 +176,25 @@ struct ConversationListView: View {
                 )
         )
     }
+
+    @ViewBuilder
+    private func favoriteSwipeAction(for conversation: ConversationThread) -> some View {
+        Button {
+            Task {
+                await chatStore.setConversationFavorite(conversation.isFavorite == false, for: conversation.id)
+            }
+        } label: {
+            Label(
+                conversation.isFavorite ? L10n.tr("favorites.remove") : L10n.tr("favorites.add"),
+                systemImage: conversation.isFavorite ? "star.slash" : "star"
+            )
+        }
+        .tint(conversation.isFavorite ? .orange : .yellow)
+    }
 }
 #endif
 
-private struct ConversationRowView: View {
+struct ConversationRowView: View {
     let conversation: ConversationThread
     let aiConfiguration: ConversationAIConfiguration
 
@@ -180,6 +204,12 @@ private struct ConversationRowView: View {
                 Text(conversation.title)
                     .font(.headline)
                     .lineLimit(2)
+
+                if conversation.isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.yellow)
+                }
 
                 Spacer(minLength: 4)
 

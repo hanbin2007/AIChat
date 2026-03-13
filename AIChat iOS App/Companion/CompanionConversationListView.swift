@@ -16,6 +16,8 @@ struct CompanionConversationListView: View {
 
     @State private var isShowingActivationCenter = false
     @State private var isShowingGlobalSettings = false
+    @State private var isShowingFavorites = false
+    @State private var isShowingPromptLibrary = false
 
     var body: some View {
         ZStack {
@@ -84,7 +86,22 @@ struct CompanionConversationListView: View {
                             .tag(conversation.id)
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: chatStore.isReadOnlyMode == false) {
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    Task {
+                                        await chatStore.setConversationFavorite(
+                                            conversation.isFavorite == false,
+                                            for: conversation.id
+                                        )
+                                    }
+                                } label: {
+                                    Label(
+                                        conversation.isFavorite ? L10n.tr("favorites.remove") : L10n.tr("favorites.add"),
+                                        systemImage: conversation.isFavorite ? "star.slash" : "star"
+                                    )
+                                }
+                                .tint(conversation.isFavorite ? .orange : .yellow)
+
                                 if chatStore.isReadOnlyMode == false {
                                     Button(role: .destructive) {
                                         Task {
@@ -109,6 +126,12 @@ struct CompanionConversationListView: View {
         .sheet(isPresented: $isShowingGlobalSettings) {
             CompanionGlobalSettingsView()
         }
+        .sheet(isPresented: $isShowingFavorites) {
+            CompanionFavoritesView(selectedConversationID: $selectedConversationID)
+        }
+        .sheet(isPresented: $isShowingPromptLibrary) {
+            CompanionPromptLibraryView()
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
                 Button {
@@ -124,6 +147,20 @@ struct CompanionConversationListView: View {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("全局设置")
+
+                Button {
+                    isShowingFavorites = true
+                } label: {
+                    Image(systemName: "star")
+                }
+                .accessibilityLabel(L10n.tr("favorites.title"))
+
+                Button {
+                    isShowingPromptLibrary = true
+                } label: {
+                    Image(systemName: "text.book.closed")
+                }
+                .accessibilityLabel(L10n.tr("prompt_preset.library.title"))
             }
 
             ToolbarItem(placement: .topBarTrailing) {
@@ -183,7 +220,7 @@ private struct CompanionConversationEmptyState: View {
     }
 }
 
-private struct CompanionConversationRow: View {
+struct CompanionConversationRow: View {
     let conversation: ConversationThread
     let aiConfiguration: ConversationAIConfiguration
 
@@ -194,6 +231,12 @@ private struct CompanionConversationRow: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .lineLimit(2)
+
+                if conversation.isFavorite {
+                    Image(systemName: "star.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                }
 
                 Spacer(minLength: 0)
 

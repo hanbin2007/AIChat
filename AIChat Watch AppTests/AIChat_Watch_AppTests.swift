@@ -113,7 +113,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let requestBody = client.makeRequestBody(for: conversation)
 
-        XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextBuilder.conciseSystemPrompt)
+        XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextAssembler.conciseSystemPrompt)
         XCTAssertEqual(requestBody.generationConfig.temperature, 1)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
@@ -250,6 +250,25 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
     }
 
+    func testPromptPresetLibraryIncludesBuiltInsByDefault() {
+        let presets = PromptPreset.resolvedLibrary(from: [])
+
+        XCTAssertTrue(
+            presets.contains(where: {
+                $0.id == PromptPreset.builtInConversationID &&
+                $0.kind == .conversation &&
+                $0.isBuiltIn
+            })
+        )
+        XCTAssertTrue(
+            presets.contains(where: {
+                $0.id == PromptPreset.builtInTranscriptionID &&
+                $0.kind == .transcription &&
+                $0.isBuiltIn
+            })
+        )
+    }
+
     func testGemini25RequestUsesThinkingBudget() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Summarize this thread")],
@@ -345,7 +364,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let request = client.makeRelayRequest(for: conversation)
 
         XCTAssertEqual(request.maxOutputTokens, 65_536)
-        XCTAssertEqual(request.systemPrompt, AIContextBuilder.conciseSystemPrompt)
+        XCTAssertEqual(request.systemPrompt, AIContextAssembler.conciseSystemPrompt)
     }
 
     func testRelayModeProvidesRelayTranscriptionService() {
@@ -398,7 +417,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertFalse(configuration.isAIConfigured)
         XCTAssertEqual(
             configuration.configurationMessage,
-            "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig."
+            L10n.tr("configuration.relay.missing_bearer")
         )
     }
 

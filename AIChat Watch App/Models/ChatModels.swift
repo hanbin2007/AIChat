@@ -565,6 +565,7 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     var title: String
     var createdAt: Date
     var updatedAt: Date
+    var isFavorite: Bool
     var messages: [ChatMessage]
     var aiConfiguration: ConversationAIConfiguration?
     var focusState: ConversationFocusState?
@@ -572,11 +573,26 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     var pinnedMemories: [PinnedMemoryItem]
     var archiveSegments: [ConversationArchiveSegment]
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case createdAt
+        case updatedAt
+        case isFavorite
+        case messages
+        case aiConfiguration
+        case focusState
+        case memoryItems
+        case pinnedMemories
+        case archiveSegments
+    }
+
     init(
         id: UUID = UUID(),
         title: String = ConversationThread.untitledTitle,
         createdAt: Date = .now,
         updatedAt: Date = .now,
+        isFavorite: Bool = false,
         messages: [ChatMessage] = [],
         aiConfiguration: ConversationAIConfiguration? = nil,
         focusState: ConversationFocusState? = nil,
@@ -588,12 +604,43 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         self.title = title
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.isFavorite = isFavorite
         self.messages = messages
         self.aiConfiguration = aiConfiguration
         self.focusState = focusState
         self.memoryItems = memoryItems
         self.pinnedMemories = pinnedMemories
         self.archiveSegments = archiveSegments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.title = try container.decodeIfPresent(String.self, forKey: .title) ?? ConversationThread.untitledTitle
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+        self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? self.createdAt
+        self.isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        self.messages = try container.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
+        self.aiConfiguration = try container.decodeIfPresent(ConversationAIConfiguration.self, forKey: .aiConfiguration)
+        self.focusState = try container.decodeIfPresent(ConversationFocusState.self, forKey: .focusState)
+        self.memoryItems = try container.decodeIfPresent([ConversationMemoryItem].self, forKey: .memoryItems) ?? []
+        self.pinnedMemories = try container.decodeIfPresent([PinnedMemoryItem].self, forKey: .pinnedMemories) ?? []
+        self.archiveSegments = try container.decodeIfPresent([ConversationArchiveSegment].self, forKey: .archiveSegments) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(isFavorite, forKey: .isFavorite)
+        try container.encode(messages, forKey: .messages)
+        try container.encodeIfPresent(aiConfiguration, forKey: .aiConfiguration)
+        try container.encodeIfPresent(focusState, forKey: .focusState)
+        try container.encode(memoryItems, forKey: .memoryItems)
+        try container.encode(pinnedMemories, forKey: .pinnedMemories)
+        try container.encode(archiveSegments, forKey: .archiveSegments)
     }
 
     static func empty(
@@ -691,6 +738,11 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
 
     mutating func updateAIConfiguration(_ newConfiguration: ConversationAIConfiguration?) {
         aiConfiguration = newConfiguration
+        updatedAt = .now
+    }
+
+    mutating func updateFavorite(_ newValue: Bool) {
+        isFavorite = newValue
         updatedAt = .now
     }
 

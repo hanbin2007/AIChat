@@ -56,6 +56,7 @@ nonisolated enum CompanionSyncEvent {
     case delete(UUID)
     case snapshot([ConversationThread])
     case globalPinnedMemories([PinnedMemoryItem])
+    case promptPresets([PromptPreset])
     case activationRequestCode(String)
     case activationCodeImport(code: String, transferID: String?)
 }
@@ -65,6 +66,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias StatusHandler = @MainActor (CompanionSyncStatus) -> Void
     typealias SnapshotProvider = @MainActor () -> [ConversationThread]
     typealias GlobalPinnedMemoriesProvider = @MainActor () -> [PinnedMemoryItem]
+    typealias PromptPresetsProvider = @MainActor () -> [PromptPreset]
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -72,6 +74,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     private var statusHandler: StatusHandler?
     private var snapshotProvider: SnapshotProvider?
     private var globalPinnedMemoriesProvider: GlobalPinnedMemoriesProvider?
+    private var promptPresetsProvider: PromptPresetsProvider?
 
     private(set) var currentStatus: CompanionSyncStatus = .unavailable
 
@@ -106,6 +109,10 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
 
     func setGlobalPinnedMemoriesProvider(_ provider: GlobalPinnedMemoriesProvider?) {
         globalPinnedMemoriesProvider = provider
+    }
+
+    func setPromptPresetsProvider(_ provider: PromptPresetsProvider?) {
+        promptPresetsProvider = provider
     }
 
     func pushConversation(_ conversation: ConversationThread) {
@@ -148,6 +155,29 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             let data = try encoder.encode(items)
             let payload: [String: Any] = [
                 "type": "global_pinned_memories",
+                "payload": data.base64EncodedString()
+            ]
+            let session = WCSession.default
+
+            if session.isReachable {
+                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+            }
+
+            session.transferUserInfo(payload)
+        } catch {
+            return
+        }
+    }
+
+    func pushPromptPresets(_ items: [PromptPreset]) {
+        guard WCSession.isSupported() else {
+            return
+        }
+
+        do {
+            let data = try encoder.encode(items)
+            let payload: [String: Any] = [
+                "type": "prompt_presets",
                 "payload": data.base64EncodedString()
             ]
             let session = WCSession.default
@@ -331,6 +361,14 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                     eventHandler?(.globalPinnedMemories(items))
                 }
             }
+
+            if let base64Payload = payload["promptPresetsPayload"] as? String,
+               let data = Data(base64Encoded: base64Payload),
+               let presets = try? decoder.decode([PromptPreset].self, from: data) {
+                Task { @MainActor in
+                    eventHandler?(.promptPresets(presets))
+                }
+            }
         case "global_pinned_memories":
             guard let base64Payload = payload["payload"] as? String,
                   let data = Data(base64Encoded: base64Payload),
@@ -341,6 +379,17 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
 
             Task { @MainActor in
                 eventHandler?(.globalPinnedMemories(items))
+            }
+        case "prompt_presets":
+            guard let base64Payload = payload["payload"] as? String,
+                  let data = Data(base64Encoded: base64Payload),
+                  let presets = try? decoder.decode([PromptPreset].self, from: data)
+            else {
+                return
+            }
+
+            Task { @MainActor in
+                eventHandler?(.promptPresets(presets))
             }
         case "activation_request_code":
             guard let requestCode = payload["requestCode"] as? String else {
@@ -378,8 +427,10 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
 
             let conversations = self.snapshotProvider?() ?? []
             let globalPinnedMemories = self.globalPinnedMemoriesProvider?() ?? []
+            let promptPresets = self.promptPresetsProvider?() ?? []
             guard let conversationsData = try? self.encoder.encode(conversations),
-                  let globalPinnedData = try? self.encoder.encode(globalPinnedMemories)
+                  let globalPinnedData = try? self.encoder.encode(globalPinnedMemories),
+                  let promptPresetsData = try? self.encoder.encode(promptPresets)
             else {
                 return
             }
@@ -389,7 +440,8 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                     [
                         "type": "bootstrap_snapshot",
                         "conversationsPayload": conversationsData.base64EncodedString(),
-                        "globalPinnedPayload": globalPinnedData.base64EncodedString()
+                        "globalPinnedPayload": globalPinnedData.base64EncodedString(),
+                        "promptPresetsPayload": promptPresetsData.base64EncodedString()
                     ]
                 )
             } catch {

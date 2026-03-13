@@ -11,6 +11,8 @@ import SwiftUI
 struct CompanionGlobalSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var chatStore: ChatStore
+    @State private var isShowingConversationPresetPicker = false
+    @State private var isShowingTranscriptionPresetPicker = false
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,11 @@ struct CompanionGlobalSettingsView: View {
                         )
                         .textFieldStyle(.roundedBorder)
 
+                        Button(L10n.tr("prompt_preset.pick")) {
+                            isShowingConversationPresetPicker = true
+                        }
+                        .disabled(chatStore.promptPresets(of: .conversation).isEmpty)
+
                         Text("新建对话时会自动带上这里的系统提示词；留空时继续使用应用内置提示词。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -64,6 +71,11 @@ struct CompanionGlobalSettingsView: View {
                             axis: .vertical
                         )
                         .textFieldStyle(.roundedBorder)
+
+                        Button(L10n.tr("prompt_preset.pick")) {
+                            isShowingTranscriptionPresetPicker = true
+                        }
+                        .disabled(chatStore.promptPresets(of: .transcription).isEmpty)
 
                         Text("会附加到语音识别提示词里，用来帮助识别专有名词、口头习惯或领域术语。")
                             .font(.footnote)
@@ -125,6 +137,24 @@ struct CompanionGlobalSettingsView: View {
                         dismiss()
                     }
                 }
+            }
+            .sheet(isPresented: $isShowingConversationPresetPicker) {
+                PromptPresetPickerView(
+                    kind: .conversation,
+                    title: L10n.tr("prompt_preset.library.title"),
+                    onSelect: { preset in
+                        chatStore.updateDefaultConversationSystemPrompt(preset.content)
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingTranscriptionPresetPicker) {
+                PromptPresetPickerView(
+                    kind: .transcription,
+                    title: L10n.tr("prompt_preset.library.title"),
+                    onSelect: { preset in
+                        chatStore.updateTranscriptionCustomPrompt(preset.content)
+                    }
+                )
             }
         }
     }

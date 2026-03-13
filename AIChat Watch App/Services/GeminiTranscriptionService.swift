@@ -11,7 +11,7 @@ private enum VoiceTranscriptionLimits {
     static let maxOutputTokens = 5_120
 }
 
-enum VoiceTranscriptionPromptBuilder {
+nonisolated enum VoiceTranscriptionPromptBuilder {
     static let systemPrompt =
         """
         You transcribe short voice prompts for AIChat on Apple devices.

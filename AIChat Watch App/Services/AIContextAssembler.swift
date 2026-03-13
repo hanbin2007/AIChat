@@ -14,7 +14,7 @@ struct AssembledContext: Equatable {
     var recentMessages: [ChatMessage]
 }
 
-enum AIContextAssembler {
+nonisolated enum AIContextAssembler {
     static let conciseSystemPrompt =
         """
         You are AIChat on Apple devices.
