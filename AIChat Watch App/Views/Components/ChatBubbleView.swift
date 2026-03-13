@@ -124,8 +124,7 @@ struct ChatBubbleView: View {
 
             if isStreamingAssistant {
                 StreamingReplyStatusView(
-                    title: message.cleanedText.isEmpty ? (message.cleanedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
-                    showsSpinner: message.cleanedText.isEmpty
+                    title: message.cleanedText.isEmpty ? (message.cleanedThoughtSummary == nil ? "Thinking" : "Replying") : "Live"
                 )
             }
 
@@ -380,20 +379,13 @@ private struct ThoughtSummaryCard: View {
 
 private struct StreamingReplyStatusView: View {
     let title: String
-    let showsSpinner: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                if showsSpinner {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.cyan.opacity(0.92))
-                } else {
-                    Circle()
-                        .fill(Color.cyan.opacity(0.92))
-                        .frame(width: 6, height: 6)
-                }
+                Circle()
+                    .fill(Color.cyan.opacity(0.92))
+                    .frame(width: 6, height: 6)
 
                 Text(title)
                     .font(.caption2.weight(.semibold))
