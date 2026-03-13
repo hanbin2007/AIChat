@@ -1028,6 +1028,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		D10000012F60000000000004 /* MarkdownView */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = D10000012F60000000000003 /* XCLocalSwiftPackageReference "Packages/MarkdownView" */;
 			productName = MarkdownView;
 		};
 /* End XCSwiftPackageProductDependency section */
