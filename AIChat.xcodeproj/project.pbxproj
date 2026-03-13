@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D10000012F60000000000001 /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = D10000012F60000000000004 /* MarkdownView */; };
+		D10000012F60000000000002 /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = D10000012F60000000000004 /* MarkdownView */; };
 		FD4A0A232F5C50E700E9D16E /* AIChat Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -99,6 +101,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D10000012F60000000000001 /* MarkdownView in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +116,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D10000012F60000000000002 /* MarkdownView in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,6 +228,7 @@
 			);
 			name = AIChat;
 			packageProductDependencies = (
+				D10000012F60000000000004 /* MarkdownView */,
 			);
 			productName = AIChat;
 			productReference = FD4A0A1C2F5C50E700E9D16E /* AIChat.app */;
@@ -247,6 +252,7 @@
 			);
 			name = "AIChat Watch App";
 			packageProductDependencies = (
+				D10000012F60000000000004 /* MarkdownView */,
 			);
 			productName = "AIChat Watch App";
 			productReference = FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */;
@@ -361,10 +367,13 @@
 				Base,
 				"zh-Hans",
 			);
-			mainGroup = FD4A0A152F5C50E700E9D16E;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = FD4A0A1D2F5C50E700E9D16E /* Products */;
+				mainGroup = FD4A0A152F5C50E700E9D16E;
+				minimizedProjectReferenceProxies = 1;
+				packageReferences = (
+					D10000012F60000000000003 /* XCLocalSwiftPackageReference "Packages/MarkdownView" */,
+				);
+				preferredProjectObjectVersion = 77;
+				productRefGroup = FD4A0A1D2F5C50E700E9D16E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -764,7 +773,7 @@
 				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/AIChatContainer-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = "$(APP_MARKETING_VERSION)";
 				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -788,7 +797,7 @@
 				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/AIChatContainer-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = "$(APP_MARKETING_VERSION)";
 				PRODUCT_BUNDLE_IDENTIFIER = hanbin.AIChat;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1008,6 +1017,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D10000012F60000000000003 /* XCLocalSwiftPackageReference "Packages/MarkdownView" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MarkdownView;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D10000012F60000000000004 /* MarkdownView */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownView;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FD4A0A162F5C50E700E9D16E /* Project object */;
 }

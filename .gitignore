@@ -1,6 +1,8 @@
 DerivedData/
 .build/
 /build/
+.package-cache/
+AIChat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 *.xcuserstate
 *.xcuserdata/
 Config/Secrets.xcconfig

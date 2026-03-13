@@ -218,12 +218,11 @@ struct GeminiTranscriptionService: AITranscriptionService {
     }
 
     private func extractTranscript(from responseEnvelope: GeminiGenerateContentResponse) -> String {
-        responseEnvelope.candidates
+        let parts = responseEnvelope.candidates
             .compactMap { $0.content?.parts }
-            .first?
-            .filter { $0.thought != true }
-            .compactMap(\.text)
-            .joined(separator: "\n") ?? ""
+            .first ?? []
+
+        return mergedGeminiText(from: parts, includeThoughts: false) ?? ""
     }
 
     private func extractFinishReason(from responseEnvelope: GeminiGenerateContentResponse) -> String? {

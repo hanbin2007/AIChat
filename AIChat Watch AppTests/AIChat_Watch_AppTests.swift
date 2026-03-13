@@ -339,6 +339,40 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(currentText, "Hello world")
     }
 
+    func testMergedGeminiTextPreservesFormulaSplitAcrossParts() {
+        let parts = [
+            GeminiPart(text: "因此 $b$ 的取值范围为：\n**$b \\in (0", inlineData: nil),
+            GeminiPart(text: ", \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**", inlineData: nil),
+            GeminiPart(text: "ignored", inlineData: nil, thought: true)
+        ]
+
+        XCTAssertEqual(
+            mergedGeminiText(from: parts, includeThoughts: false),
+            "因此 $b$ 的取值范围为：\n**$b \\in (0, \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**"
+        )
+        XCTAssertEqual(mergedGeminiText(from: parts, includeThoughts: true), "ignored")
+    }
+
+    func testNormalizedDeltaPreservesWhitespaceAndSplitMathBoundaries() {
+        var currentText = ""
+
+        XCTAssertEqual(
+            normalizedDelta(chunkText: "**$b \\in (0", currentText: &currentText),
+            "**$b \\in (0"
+        )
+        XCTAssertEqual(
+            normalizedDelta(
+                chunkText: "**$b \\in (0, \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**",
+                currentText: &currentText
+            ),
+            ", \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**"
+        )
+
+        currentText = "Answer"
+        XCTAssertEqual(normalizedDelta(chunkText: "Answer ", currentText: &currentText), " ")
+        XCTAssertEqual(currentText, "Answer ")
+    }
+
     func testRelayRequestCarriesThinkingOutputTokenBudget() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Write a deeper analysis")],

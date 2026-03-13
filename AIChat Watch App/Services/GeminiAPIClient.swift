@@ -210,17 +210,8 @@ struct GeminiAPIClient: AIStreamingService {
             .compactMap { $0.content?.parts }
             .first ?? []
 
-        let answerText = parts
-            .filter { $0.thought != true }
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .nonEmptyTrimmed
-
-        let thoughtSummary = parts
-            .filter { $0.thought == true }
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .nonEmptyTrimmed
+        let answerText = mergedGeminiText(from: parts, includeThoughts: false)
+        let thoughtSummary = mergedGeminiText(from: parts, includeThoughts: true)
 
         let finishReason = responseEnvelope.candidates
             .compactMap(\.finishReason)
@@ -279,23 +270,37 @@ struct GeminiAPIClient: AIStreamingService {
 }
 
 func normalizedDelta(chunkText: String, currentText: inout String) -> String? {
-    let normalizedChunk = chunkText.nonEmptyTrimmed
-    guard let normalizedChunk else {
+    guard chunkText.isEmpty == false else {
         return nil
     }
 
-    if normalizedChunk.hasPrefix(currentText) {
-        let delta = String(normalizedChunk.dropFirst(currentText.count))
-        currentText = normalizedChunk
+    if chunkText.hasPrefix(currentText) {
+        let delta = String(chunkText.dropFirst(currentText.count))
+        currentText = chunkText
         return delta
     }
 
-    if currentText.hasPrefix(normalizedChunk) {
+    if currentText.hasPrefix(chunkText) {
         return nil
     }
 
-    currentText.append(normalizedChunk)
-    return normalizedChunk
+    currentText.append(chunkText)
+    return chunkText
+}
+
+func mergedGeminiText(
+    from parts: [GeminiPart],
+    includeThoughts: Bool
+) -> String? {
+    let merged = parts.reduce(into: "") { partialResult, part in
+        guard (part.thought == true) == includeThoughts, let text = part.text else {
+            return
+        }
+
+        partialResult.append(text)
+    }
+
+    return merged.isEmpty ? nil : merged
 }
 
 func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {

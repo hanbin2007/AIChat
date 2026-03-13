@@ -170,7 +170,7 @@ struct ChatBubbleView: View, Equatable {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.8))
             } else if displayedText.isEmpty == false {
-                MessageBodyTextView(text: displayedText)
+                messageTextContent
             }
 
             if isStreamingAssistant {
@@ -242,6 +242,15 @@ struct ChatBubbleView: View, Equatable {
     private func syncRenderedContent() {
         renderedText = message.cleanedText
         renderedThoughtSummary = message.cleanedThoughtSummary
+    }
+
+    @ViewBuilder
+    private var messageTextContent: some View {
+        if isUser == false, message.status != .streaming {
+            AssistantMessageMarkdownView(text: displayedText)
+        } else {
+            MessageBodyTextView(text: displayedText)
+        }
     }
 
     @ViewBuilder
