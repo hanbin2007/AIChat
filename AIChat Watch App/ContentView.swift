@@ -33,11 +33,11 @@ struct ContentView: View {
                 FavoritesView(navigationPath: $navigationPath)
                     .tag(RootPage.favorites)
 
-                ConversationListView(navigationPath: $navigationPath)
-                    .tag(RootPage.conversations)
-
                 PromptLibraryView(isShowingNewPresetEditor: $isShowingNewPromptPresetEditor)
                     .tag(RootPage.promptLibrary)
+
+                ConversationListView(navigationPath: $navigationPath)
+                    .tag(RootPage.conversations)
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))
             .navigationTitle(rootNavigationTitle)

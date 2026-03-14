@@ -7,6 +7,11 @@
 
 import Foundation
 
+private struct DeletedConversationTombstone: Codable, Hashable {
+    let id: UUID
+    let deletedAt: Date
+}
+
 actor ConversationRepository {
     nonisolated let storageDescription: String
     nonisolated let resolvedRootURL: URL
@@ -102,6 +107,32 @@ actor ConversationRepository {
         try data.write(to: promptPresetsURL(), options: [.atomic])
     }
 
+    func loadDeletedConversationTombstones() throws -> [UUID: Date] {
+        try ensureDirectoryExists()
+        let url = deletedConversationTombstonesURL()
+        guard fileManager.fileExists(atPath: url.path()) else {
+            return [:]
+        }
+
+        let data = try Data(contentsOf: url)
+        let tombstones = try decoder.decode([DeletedConversationTombstone].self, from: data)
+        return Dictionary(uniqueKeysWithValues: tombstones.map { ($0.id, $0.deletedAt) })
+    }
+
+    func saveDeletedConversationTombstones(_ items: [UUID: Date]) throws {
+        try ensureDirectoryExists()
+        let tombstones = items.map { DeletedConversationTombstone(id: $0.key, deletedAt: $0.value) }
+            .sorted { lhs, rhs in
+                if lhs.deletedAt == rhs.deletedAt {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+
+                return lhs.deletedAt > rhs.deletedAt
+            }
+        let data = try encoder.encode(tombstones)
+        try data.write(to: deletedConversationTombstonesURL(), options: [.atomic])
+    }
+
     func deleteConversation(id: UUID) throws {
         let url = fileURL(for: id)
         guard fileManager.fileExists(atPath: url.path()) else {
@@ -131,6 +162,10 @@ actor ConversationRepository {
 
     private func promptPresetsURL() -> URL {
         rootURL.appendingPathComponent("_prompt_presets.json", isDirectory: false)
+    }
+
+    private func deletedConversationTombstonesURL() -> URL {
+        rootURL.appendingPathComponent("_deleted_conversation_tombstones.json", isDirectory: false)
     }
 
     private func persistAttachmentBlobs(for conversation: ConversationThread) throws -> ConversationThread {

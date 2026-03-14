@@ -135,6 +135,7 @@ final class ChatStore: ObservableObject {
     private var hasLoadedConversations = false
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
     private var lastHandledCompanionActivationTransferID: String?
+    private var deletedConversationTombstones: [UUID: Date] = [:]
 
     init(
         repository: ConversationRepository,
@@ -294,7 +295,17 @@ final class ChatStore: ObservableObject {
         await refreshActivationState()
 
         do {
-            conversations = try await repository.loadConversations()
+            let loadedConversations = try await repository.loadConversations()
+            let loadedDeletedConversationTombstones = try await repository.loadDeletedConversationTombstones()
+            let reconciledState = reconcileLoadedConversations(
+                loadedConversations,
+                with: loadedDeletedConversationTombstones
+            )
+            conversations = reconciledState.conversations
+            deletedConversationTombstones = reconciledState.tombstones
+            if reconciledState.tombstonesChanged {
+                try await repository.saveDeletedConversationTombstones(reconciledState.tombstones)
+            }
             globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
             promptPresets = PromptPreset.resolvedLibrary(from: try await repository.loadPromptPresets())
             syncBridge.requestBootstrapIfPossible()
@@ -1052,6 +1063,9 @@ final class ChatStore: ObservableObject {
     private func persist(_ conversation: ConversationThread, sync: Bool) async {
         do {
             try await repository.save(conversation)
+            if deletedConversationTombstones.removeValue(forKey: conversation.id) != nil {
+                try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
+            }
             if sync {
                 syncBridge.pushConversation(conversation)
             }
@@ -1092,6 +1106,9 @@ final class ChatStore: ObservableObject {
         transcribingConversationIDs.remove(id)
 
         do {
+            let deletedAt = max(deletedConversationTombstones[id] ?? .distantPast, .now)
+            deletedConversationTombstones[id] = deletedAt
+            try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
             try await repository.deleteConversation(id: id)
             if sync {
                 syncBridge.pushDeletion(conversationID: id)
@@ -1105,6 +1122,32 @@ final class ChatStore: ObservableObject {
         conversations.removeAll { $0.id == conversation.id }
         conversations.append(conversation)
         conversations.sort(by: ConversationThread.sortsByMostRecentFirst)
+    }
+
+    func mergeRemoteConversation(_ conversation: ConversationThread) async {
+        guard shouldAcceptRemoteConversation(conversation) else {
+            return
+        }
+
+        upsertConversation(conversation)
+        await persist(conversation, sync: false)
+    }
+
+    func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
+        for remoteConversation in remoteConversations {
+            guard shouldAcceptRemoteConversation(remoteConversation) else {
+                continue
+            }
+
+            if let localConversation = conversation(id: remoteConversation.id),
+               localConversation.updatedAt > remoteConversation.updatedAt {
+                syncBridge.pushConversation(localConversation)
+                continue
+            }
+
+            upsertConversation(remoteConversation)
+            await persist(remoteConversation, sync: false)
+        }
     }
 
     private func mutateConversation(id: UUID, mutation: (inout ConversationThread) -> Void) {
@@ -1776,21 +1819,11 @@ final class ChatStore: ObservableObject {
     private func handleSyncEvent(_ event: CompanionSyncEvent) async {
         switch event {
         case .upsert(let conversation):
-            upsertConversation(conversation)
-            await persist(conversation, sync: false)
+            await mergeRemoteConversation(conversation)
         case .delete(let conversationID):
             await deleteConversation(id: conversationID, sync: false)
         case .snapshot(let conversations):
-            for remoteConversation in conversations {
-                if let localConversation = conversation(id: remoteConversation.id),
-                   localConversation.updatedAt > remoteConversation.updatedAt {
-                    syncBridge.pushConversation(localConversation)
-                    continue
-                }
-
-                upsertConversation(remoteConversation)
-                await persist(remoteConversation, sync: false)
-            }
+            await mergeRemoteConversationSnapshot(conversations)
         case .globalPinnedMemories(let items):
             await mergeGlobalPinnedMemories(items, syncMergedState: true)
         case .promptPresets(let presets):
@@ -1819,6 +1852,44 @@ final class ChatStore: ObservableObject {
             }
             #endif
         }
+    }
+
+    private func shouldAcceptRemoteConversation(_ conversation: ConversationThread) -> Bool {
+        guard let deletedAt = deletedConversationTombstones[conversation.id] else {
+            return true
+        }
+
+        return conversation.updatedAt > deletedAt
+    }
+
+    private func reconcileLoadedConversations(
+        _ loadedConversations: [ConversationThread],
+        with tombstones: [UUID: Date]
+    ) -> (conversations: [ConversationThread], tombstones: [UUID: Date], tombstonesChanged: Bool) {
+        var remainingTombstones = tombstones
+        var visibleConversations: [ConversationThread] = []
+        var tombstonesChanged = false
+
+        for conversation in loadedConversations {
+            guard let deletedAt = remainingTombstones[conversation.id] else {
+                visibleConversations.append(conversation)
+                continue
+            }
+
+            guard conversation.updatedAt > deletedAt else {
+                continue
+            }
+
+            remainingTombstones.removeValue(forKey: conversation.id)
+            tombstonesChanged = true
+            visibleConversations.append(conversation)
+        }
+
+        return (
+            visibleConversations.sorted(by: ConversationThread.sortsByMostRecentFirst),
+            remainingTombstones,
+            tombstonesChanged
+        )
     }
 
     private func mergeGlobalPinnedMemories(

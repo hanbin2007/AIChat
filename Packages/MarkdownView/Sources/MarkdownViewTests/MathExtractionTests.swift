@@ -6,7 +6,9 @@
 //
 
 import Testing
+import Markdown
 @_spi(MarkdownMath) import MarkdownView
+@testable import MarkdownView
 
 @MainActor
 struct MathExtractionTests {
@@ -100,6 +102,29 @@ struct MathExtractionTests {
         )
         #expect(
             parser.formatIssues.map(\.message) == ["Missing closing delimiter $$"]
+        )
+    }
+
+    @Test(
+        arguments: [
+            ("**$x^2$**", "strong"),
+            ("*$x^2$*", "emphasis"),
+            ("~~$x^2$~~", "strikethrough"),
+        ]
+    )
+    func keepsInlineMathViewsInsideStyledMarkdown(
+        _ source: String,
+        _ styleName: String
+    ) async throws {
+        var configuration = MarkdownRendererConfiguration()
+        configuration.math.shouldRender = true
+
+        var visitor = CmarkNodeVisitor(configuration: configuration)
+        let rendered = visitor.visit(Document(parsing: source))
+
+        #expect(
+            rendered.contentType == .view,
+            "\(styleName) markdown should preserve inline math views"
         )
     }
 }

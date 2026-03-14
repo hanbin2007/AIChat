@@ -57,4 +57,20 @@ final class ConversationRepositoryTests: XCTestCase {
             loadedPresets.contains(where: { $0.title == "Meeting Summary" && $0.kind == .conversation })
         )
     }
+
+    func testSaveAndLoadDeletedConversationTombstones() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = ConversationRepository(rootURL: rootURL)
+        let deletedConversationID = UUID()
+        let deletedAt = Date(timeIntervalSince1970: 1_763_000_000)
+
+        try await repository.saveDeletedConversationTombstones([
+            deletedConversationID: deletedAt
+        ])
+
+        let loadedTombstones = try await repository.loadDeletedConversationTombstones()
+
+        XCTAssertEqual(loadedTombstones[deletedConversationID], deletedAt)
+    }
 }

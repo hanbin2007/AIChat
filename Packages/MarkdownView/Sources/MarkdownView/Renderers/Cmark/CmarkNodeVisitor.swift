@@ -192,45 +192,24 @@ struct CmarkNodeVisitor: @preconcurrency MarkupVisitor {
     }
     
     func visitEmphasis(_ emphasis: Markdown.Emphasis) -> MarkdownNodeView {
-        var attributedString = AttributedString()
-        for child in emphasis.children {
-            var renderer = self
-            guard let text = renderer.visit(child).asAttributedString else { continue }
-            let intent = text.inlinePresentationIntent ?? []
-            attributedString += text.mergingAttributes(
-                AttributeContainer()
-                    .inlinePresentationIntent(intent.union(.emphasized))
-            )
-        }
-        return MarkdownNodeView(attributedString)
+        inlinePresentationNode(
+            for: emphasis,
+            appending: .emphasized
+        )
     }
     
     func visitStrong(_ strong: Strong) -> MarkdownNodeView {
-        var attributedString = AttributedString()
-        for child in strong.children {
-            var renderer = self
-            guard let text = renderer.visit(child).asAttributedString else { continue }
-            let intent = text.inlinePresentationIntent ?? []
-            attributedString += text.mergingAttributes(
-                AttributeContainer()
-                    .inlinePresentationIntent(intent.union(.stronglyEmphasized))
-            )
-        }
-        return MarkdownNodeView(attributedString)
+        inlinePresentationNode(
+            for: strong,
+            appending: .stronglyEmphasized
+        )
     }
     
     func visitStrikethrough(_ strikethrough: Strikethrough) -> MarkdownNodeView {
-        var attributedString = AttributedString()
-        for child in strikethrough.children {
-            var renderer = self
-            guard let text = renderer.visit(child).asAttributedString else { continue }
-            let intent = text.inlinePresentationIntent ?? []
-            attributedString += text.mergingAttributes(
-                AttributeContainer()
-                    .inlinePresentationIntent(intent.union(.strikethrough))
-            )
-        }
-        return MarkdownNodeView(attributedString)
+        inlinePresentationNode(
+            for: strikethrough,
+            appending: .strikethrough
+        )
     }
     
     mutating func visitLink(_ link: Markdown.Link) -> MarkdownNodeView {
@@ -255,5 +234,33 @@ struct CmarkNodeVisitor: @preconcurrency MarkupVisitor {
                 .foregroundStyle(configuration.linkTintColor)
             }
         }
+    }
+
+    private func inlinePresentationNode(
+        for markup: any Markup,
+        appending presentationIntent: InlinePresentationIntent
+    ) -> MarkdownNodeView {
+        var nodeViews = [MarkdownNodeView]()
+
+        for child in markup.children {
+            var renderer = self
+            let nodeView = renderer.visit(child)
+
+            if let text = nodeView.asAttributedString {
+                let currentIntent = text.inlinePresentationIntent ?? []
+                nodeViews.append(
+                    MarkdownNodeView(
+                        text.mergingAttributes(
+                            AttributeContainer()
+                                .inlinePresentationIntent(currentIntent.union(presentationIntent))
+                        )
+                    )
+                )
+            } else {
+                nodeViews.append(nodeView)
+            }
+        }
+
+        return MarkdownNodeView(nodeViews)
     }
 }

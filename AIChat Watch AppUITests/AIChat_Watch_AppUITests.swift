@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import XCTest
 
 final class AIChat_Watch_AppUITests: XCTestCase {
@@ -83,6 +84,64 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             attachDebugHierarchy(app, named: "Missing zoom sheet after inline tap hierarchy")
             XCTFail("Missing zoom sheet after tapping inline math.")
         }
+    }
+
+    @MainActor
+    func testLastFormulaRendersAndCapturesEvidence() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "formula_zoom"
+        app.launch()
+
+        let harness = app.descendants(matching: .any)["formula.zoom.harness"]
+        XCTAssertTrue(harness.waitForExistence(timeout: 10))
+
+        let fullContent = app.descendants(matching: .any)["formula.zoom.full_content.container"]
+        XCTAssertTrue(fullContent.waitForExistence(timeout: 10))
+
+        let targetContainer = app.descendants(matching: .any)["formula.zoom.last_formula.container"]
+        if !targetContainer.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing last formula container hierarchy")
+            XCTFail("Missing deterministic target for the last formula.")
+            return
+        }
+
+        let invalidFormula = targetContainer.descendants(matching: .any)["math.invalid.inline"]
+        if invalidFormula.exists {
+            attachScreenshot(app, named: "last-formula-invalid")
+            XCTFail("The last formula rendered as an invalid math view.")
+            return
+        }
+
+        XCTAssertFalse(targetContainer.staticTexts["Formula format issue"].exists)
+        XCTAssertFalse(targetContainer.staticTexts["Formula unsupported"].exists)
+
+        attachScreenshot(app, named: "last-formula-card")
+
+        let inlineFormulaQuery = targetContainer
+            .descendants(matching: .any)
+            .matching(identifier: "math.zoom.trigger.inline")
+        XCTAssertEqual(inlineFormulaQuery.count, 1)
+
+        let targetFormula = inlineFormulaQuery.firstMatch
+        if !targetFormula.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing last formula trigger hierarchy")
+            XCTFail("Missing tappable inline math trigger for the last formula.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(targetFormula, timeout: 5))
+
+        targetFormula.tap()
+
+        let zoomSheet = app.descendants(matching: .any)["math.zoom.sheet"]
+        if !zoomSheet.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing zoom sheet for last formula hierarchy")
+            XCTFail("Missing zoom sheet for the last formula.")
+            return
+        }
+
+        XCTAssertTrue(app.buttons["math.zoom.close"].waitForExistence(timeout: 5))
+        attachScreenshot(app, named: "last-formula-zoomed")
     }
 
     @MainActor
@@ -172,5 +231,39 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    @discardableResult
+    private func attachScreenshot(_ app: XCUIApplication, named name: String) -> URL? {
+        let screenshot = app.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        let fileURL = screenshotArtifactsDirectory().appendingPathComponent("\(name).png")
+        do {
+            try screenshot.pngRepresentation.write(to: fileURL)
+            let pathAttachment = XCTAttachment(string: fileURL.path)
+            pathAttachment.name = "\(name)-path"
+            pathAttachment.lifetime = .keepAlways
+            add(pathAttachment)
+            return fileURL
+        } catch {
+            let errorAttachment = XCTAttachment(string: "Failed to persist screenshot \(name): \(error)")
+            errorAttachment.name = "\(name)-write-error"
+            errorAttachment.lifetime = .keepAlways
+            add(errorAttachment)
+            return nil
+        }
+    }
+
+    private func screenshotArtifactsDirectory() -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
+
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 }

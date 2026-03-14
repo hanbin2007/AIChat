@@ -47,6 +47,10 @@ struct ChatBubbleView: View, Equatable {
         isUser == false && message.status == .streaming
     }
 
+    private var isStreamingPaused: Bool {
+        isStreamingAssistant && suspendStreamingRender
+    }
+
     private var displayedText: String {
         renderedText
     }
@@ -175,8 +179,9 @@ struct ChatBubbleView: View, Equatable {
 
             if isStreamingAssistant {
                 StreamingReplyStatusView(
-                    title: displayedText.isEmpty ? (displayedThoughtSummary == nil ? "Thinking" : "Replying") : "Live",
-                    animatesTrack: suspendStreamingRender == false
+                    title: isStreamingPaused ? "Pause" : (displayedText.isEmpty ? (displayedThoughtSummary == nil ? "Thinking" : "Replying") : "Live"),
+                    animatesTrack: suspendStreamingRender == false,
+                    isPaused: isStreamingPaused
                 )
             }
 
@@ -502,14 +507,23 @@ private struct MessageBodyTextView: View {
 private struct StreamingReplyStatusView: View {
     let title: String
     let animatesTrack: Bool
+    let isPaused: Bool
 
     private let trackHeight: CGFloat = 5
+
+    private var statusTint: Color {
+        isPaused ? Color.gray.opacity(0.88) : Color.cyan.opacity(0.92)
+    }
+
+    private var highlightTint: Color {
+        isPaused ? Color.white.opacity(0.82) : Color.white.opacity(0.95)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.cyan.opacity(0.92))
+                    .fill(statusTint)
                     .frame(width: 6, height: 6)
 
                 Text(title)
@@ -585,10 +599,10 @@ private struct StreamingReplyStatusView: View {
                     LinearGradient(
                         colors: [
                             Color.clear,
-                            Color.cyan.opacity(0.08),
-                            Color.cyan.opacity(0.42),
-                            Color.white.opacity(0.90),
-                            Color.cyan.opacity(0.26),
+                            statusTint.opacity(0.08),
+                            statusTint.opacity(0.42),
+                            highlightTint.opacity(0.90),
+                            statusTint.opacity(0.26),
                             Color.clear
                         ],
                         startPoint: .leading,
@@ -604,9 +618,9 @@ private struct StreamingReplyStatusView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.cyan.opacity(0.14),
-                            Color.cyan.opacity(0.65),
-                            Color.white.opacity(0.95)
+                            statusTint.opacity(0.14),
+                            statusTint.opacity(0.65),
+                            highlightTint.opacity(0.95)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -614,15 +628,15 @@ private struct StreamingReplyStatusView: View {
                 )
                 .frame(width: leadingCoreWidth)
                 .offset(x: leadingOffset)
-                .shadow(color: Color.cyan.opacity(0.28), radius: 8, y: 0)
+                .shadow(color: statusTint.opacity(0.28), radius: 8, y: 0)
 
             Capsule(style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.cyan.opacity(0.08),
-                            Color.cyan.opacity(0.34),
-                            Color.white.opacity(0.32)
+                            statusTint.opacity(0.08),
+                            statusTint.opacity(0.34),
+                            highlightTint.opacity(0.32)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing

@@ -1280,6 +1280,87 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletedConversationDoesNotReturnFromOlderRemoteSnapshotAfterRestart() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_400_200)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "AIChatTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        let activationRepository = ActivationRepository(defaults: defaults)
+        let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
+        let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
+        let deviceIdentity = WatchDeviceIdentity(
+            rawIdentifier: rawDeviceIdentifier,
+            deviceToken: deviceToken,
+            displayToken: OfflineActivation.displayToken(for: deviceToken)
+        )
+        let repository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: activationRepository,
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+
+        let conversationID = await store.createConversation()
+        await store.renameConversation(id: conversationID, title: "Delete Me")
+        let deletedConversation = try XCTUnwrap(store.conversation(id: conversationID))
+
+        await store.deleteConversation(id: conversationID)
+        XCTAssertTrue(store.conversations.isEmpty)
+
+        let restartedRepository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let restartedStore = ChatStore(
+            repository: restartedRepository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: activationRepository,
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+
+        await restartedStore.loadConversationsIfNeeded()
+        XCTAssertTrue(restartedStore.conversations.isEmpty)
+
+        await restartedStore.mergeRemoteConversationSnapshot([deletedConversation])
+
+        XCTAssertTrue(restartedStore.conversations.isEmpty)
+        let loadedTombstones = try await restartedRepository.loadDeletedConversationTombstones()
+        XCTAssertNotNil(loadedTombstones[conversationID])
+    }
+
+    @MainActor
     func testGlobalPinnedMemoryIsInjectedOnlyWhenConversationOptsIn() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(

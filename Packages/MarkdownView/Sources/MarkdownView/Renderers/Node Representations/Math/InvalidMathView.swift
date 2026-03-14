@@ -42,6 +42,7 @@ struct InvalidMathView: View {
                         .fill(titleColor.opacity(0.08))
                 )
         )
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private var title: String {
@@ -59,6 +60,15 @@ struct InvalidMathView: View {
             return .yellow
         case .unsupported:
             return .orange
+        }
+    }
+
+    private var accessibilityIdentifier: String {
+        switch style {
+        case .inline:
+            return "math.invalid.inline"
+        case .block:
+            return "math.invalid.block"
         }
     }
 }
