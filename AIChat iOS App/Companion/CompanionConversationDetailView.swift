@@ -464,10 +464,19 @@ struct CompanionConversationDetailView: View {
         let aiConfiguration = chatStore.aiConfiguration(for: conversationID)
         let attachments = chatStore.draftAttachments(for: conversationID)
         let draftText = chatStore.draftText(for: conversationID)
-        let hasDraftContent = draftText.nonEmptyTrimmed != nil || attachments.isEmpty == false
+        let previousUserMessageText = chatStore.latestReusableUserMessageText(for: conversationID)
+        let hasDraftText = draftText.nonEmptyTrimmed != nil
+        let hasDraftContent = hasDraftText || attachments.isEmpty == false
         let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
         let isSending = chatStore.isSending(conversationID: conversationID)
         let sendEnabled = hasDraftContent && isSending == false && isTranscribing == false && voiceRecorder.isInteractive
+        let canRestorePreviousMessage =
+            attachments.isEmpty &&
+            hasDraftText == false &&
+            previousUserMessageText != nil &&
+            isSending == false &&
+            isTranscribing == false &&
+            voiceRecorder.isInteractive
         let voiceButtonLabel =
             voiceRecorder.isRecording ?
             (voiceCaptureMode == .directSend ? "停止并发送" : "停止并转录") :
@@ -596,14 +605,21 @@ struct CompanionConversationDetailView: View {
                     .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
 
                     Button {
-                        sendCurrentDraft()
+                        if canRestorePreviousMessage {
+                            restorePreviousUserMessage()
+                        } else {
+                            sendCurrentDraft()
+                        }
                     } label: {
-                        Label("发送", systemImage: "arrow.up.circle.fill")
+                        Label(
+                            canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "发送",
+                            systemImage: canRestorePreviousMessage ? "arrow.uturn.backward.circle.fill" : "arrow.up.circle.fill"
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.cyan)
-                    .disabled(sendEnabled == false)
+                    .disabled((sendEnabled || canRestorePreviousMessage) == false)
                 }
             }
             .padding(.horizontal, 16)
@@ -760,6 +776,15 @@ struct CompanionConversationDetailView: View {
         Task {
             await chatStore.sendMessage(in: conversationID)
         }
+    }
+
+    private func restorePreviousUserMessage() {
+        guard chatStore.restoreLatestUserMessageToDraft(for: conversationID) else {
+            return
+        }
+
+        chatStore.clearError(for: conversationID)
+        isDraftFieldFocused = true
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {

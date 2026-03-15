@@ -123,6 +123,7 @@
 "activation.import.success" = "Imported and applied from iPhone.";
 "activation.import.failure" = "Import from iPhone failed: %@";
 "operation.voice_transcription" = "Voice transcription";
+"conversation.restore_previous_message" = "Restore last message";
 "activation.feedback.cleared" = "Cleared the current license.";
 "activation.feedback.enter_code" = "Enter an activation code.";
 "activation.feedback.success" = "Activation complete. Sending is now unlocked on this device.";
@@ -155,6 +156,10 @@
 "conversation.recording" = "Recording %@";
 "conversation.transcribing" = "Transcribing %@...";
 "conversation.microphone.preparing" = "Mic...";
+"transcription.feedback.title" = "Transcription ready";
+"transcription.feedback.body" = "The transcript has been added to your draft.";
+"assistant_reply.feedback.title" = "Reply ready";
+"assistant_reply.feedback.body" = "AIChat has finished the latest response.";
 "conversation.recording.zh" = "Recording %@";
 "conversation.transcribing.zh" = "Transcribing %@...";
 "conversation.microphone.preparing.zh" = "Mic...";

@@ -92,12 +92,11 @@ struct CompanionRootView: View {
             reconcileSelection(with: chatStore.conversations.map(\.id))
         }
         .onOpenURL { url in
-            guard let activationCode = activationCodeImport(from: url) else {
+            guard let deepLink = AIChatDeepLink(url) else {
                 return
             }
 
-            importedActivationCode = activationCode
-            isShowingActivationCenter = true
+            handleDeepLink(deepLink)
         }
         .onChange(of: chatStore.conversations.map(\.id)) { ids in
             reconcileSelection(with: ids)
@@ -136,32 +135,18 @@ struct CompanionRootView: View {
         }
     }
 
-    private func activationCodeImport(from url: URL) -> String? {
-        guard url.scheme?.lowercased() == "aichat" else {
-            return nil
-        }
+    private func handleDeepLink(_ deepLink: AIChatDeepLink) {
+        switch deepLink {
+        case let .activationImport(activationCode):
+            importedActivationCode = activationCode
+            isShowingActivationCenter = true
+        case .newConversation:
+            guard chatStore.isReadOnlyMode == false else {
+                return
+            }
 
-        guard url.host?.lowercased() == "activation" else {
-            return nil
+            createConversation()
         }
-
-        let normalizedPath = url.path.lowercased()
-        guard normalizedPath.isEmpty || normalizedPath == "/" || normalizedPath == "/import" else {
-            return nil
-        }
-
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let code = components.queryItems?.first(where: { $0.name == "code" })?.value
-        else {
-            return nil
-        }
-
-        let normalizedCode = OfflineActivation.normalizeActivationInput(code)
-        guard normalizedCode.isEmpty == false else {
-            return nil
-        }
-
-        return OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
     }
 }
 

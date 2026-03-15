@@ -1,0 +1,52 @@
+import Foundation
+
+enum AIChatDeepLink: Equatable {
+    case activationImport(String)
+    case newConversation
+
+    init?(_ url: URL) {
+        guard url.scheme?.lowercased() == "aichat" else {
+            return nil
+        }
+
+        switch url.host?.lowercased() {
+        case "activation":
+            guard let activationCode = Self.activationCode(from: url) else {
+                return nil
+            }
+            self = .activationImport(activationCode)
+        case "conversation":
+            guard Self.isNewConversationPath(url.path) else {
+                return nil
+            }
+            self = .newConversation
+        default:
+            return nil
+        }
+    }
+
+    private static func activationCode(from url: URL) -> String? {
+        let normalizedPath = url.path.lowercased()
+        guard normalizedPath.isEmpty || normalizedPath == "/" || normalizedPath == "/import" else {
+            return nil
+        }
+
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value
+        else {
+            return nil
+        }
+
+        let normalizedCode = OfflineActivation.normalizeActivationInput(code)
+        guard normalizedCode.isEmpty == false else {
+            return nil
+        }
+
+        return OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
+    }
+
+    private static func isNewConversationPath(_ path: String) -> Bool {
+        let normalizedPath = path.lowercased()
+        return normalizedPath == "/new" || normalizedPath == "/create"
+    }
+}

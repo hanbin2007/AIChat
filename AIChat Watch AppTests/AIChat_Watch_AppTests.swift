@@ -20,6 +20,21 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(title, "Build a production ready A...")
     }
 
+    func testAIChatDeepLinkParsesActivationImport() {
+        let url = URL(string: "aichat://activation/import?code=abcd-1234-efgh")!
+
+        XCTAssertEqual(
+            AIChatDeepLink(url),
+            .activationImport("ABCD-1234-EFGH")
+        )
+    }
+
+    func testAIChatDeepLinkParsesNewConversation() {
+        let url = URL(string: "aichat://conversation/new")!
+
+        XCTAssertEqual(AIChatDeepLink(url), .newConversation)
+    }
+
     func testContextWindowMapsRolesAndPreservesLatestMessages() {
         let imageData = Data([0x01, 0x02, 0x03])
         let attachment = ChatImageAttachment(
@@ -1269,6 +1284,56 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordedAudioTranscriptionTriggersCompletionFeedback() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let feedbackProvider = MockTranscriptionCompletionFeedbackProvider()
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: MockTranscriptionService(transcript: "Transcript ready"),
+            completionFeedbackProvider: feedbackProvider,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        let audioAttachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x01, 0x02, 0x03]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.0
+        )
+
+        await store.sendRecordedAudio(audioAttachment, in: conversationID)
+
+        XCTAssertEqual(feedbackProvider.prepareCallCount, 1)
+        XCTAssertEqual(feedbackProvider.notifiedEvents, [.transcriptionCompleted])
+    }
+
+    @MainActor
     func testRecordedAudioTranscriptionAppendsToExistingDraft() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
@@ -1379,6 +1444,99 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(capturedConversation.messages.last?.role, .user)
         XCTAssertEqual(capturedConversation.messages.last?.attachments.count, 1)
         XCTAssertTrue(capturedConversation.messages.last?.attachments.first?.isAudio == true)
+    }
+
+    @MainActor
+    func testRestoreLatestUserMessageToDraftUsesMostRecentUserText() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+
+        store.updateDraftText("First prompt", for: conversationID)
+        await store.sendMessage(in: conversationID)
+        store.updateDraftText("Second prompt", for: conversationID)
+        await store.sendMessage(in: conversationID)
+
+        XCTAssertEqual(store.latestReusableUserMessageText(for: conversationID), "Second prompt")
+        XCTAssertTrue(store.restoreLatestUserMessageToDraft(for: conversationID))
+        XCTAssertEqual(store.draftText(for: conversationID), "Second prompt")
+    }
+
+    @MainActor
+    func testSendMessageTriggersAssistantReplyCompletionFeedback() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let feedbackProvider = MockTranscriptionCompletionFeedbackProvider()
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            completionFeedbackProvider: feedbackProvider,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Ping", for: conversationID)
+
+        await store.sendMessage(in: conversationID)
+
+        XCTAssertEqual(feedbackProvider.prepareCallCount, 1)
+        XCTAssertEqual(feedbackProvider.notifiedEvents, [.assistantReplyCompleted])
     }
 
     @MainActor
@@ -2393,6 +2551,20 @@ private struct MockTranscriptionService: AITranscriptionService {
             text: transcript,
             model: configuration.model
         )
+    }
+}
+
+@MainActor
+private final class MockTranscriptionCompletionFeedbackProvider: CompletionFeedbackProviding {
+    private(set) var prepareCallCount = 0
+    private(set) var notifiedEvents: [CompletionFeedbackEvent] = []
+
+    func prepareForPossibleBackgroundFeedback() async {
+        prepareCallCount += 1
+    }
+
+    func notifyCompletion(of event: CompletionFeedbackEvent) async {
+        notifiedEvents.append(event)
     }
 }
 

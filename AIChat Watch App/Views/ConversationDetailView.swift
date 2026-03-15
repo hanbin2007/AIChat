@@ -464,8 +464,10 @@ struct ConversationDetailView: View {
         let aiConfiguration = chatStore.aiConfiguration(for: conversationID)
         let attachments = chatStore.draftAttachments(for: conversationID)
         let draftText = chatStore.draftText(for: conversationID)
+        let previousUserMessageText = chatStore.latestReusableUserMessageText(for: conversationID)
         let hasAttachments = attachments.isEmpty == false
-        let hasDraftContent = draftText.nonEmptyTrimmed != nil || hasAttachments
+        let hasDraftText = draftText.nonEmptyTrimmed != nil
+        let hasDraftContent = hasDraftText || hasAttachments
         let isTranscribing = chatStore.isTranscribing(conversationID: conversationID)
         let isSendingReply = chatStore.isSending(conversationID: conversationID)
         let inputRowHeight = hasAttachments ? ComposerLayout.compactInputRowHeight : ComposerLayout.regularInputRowHeight
@@ -475,6 +477,19 @@ struct ConversationDetailView: View {
             isTranscribing == false &&
             voiceRecorder.isInteractive &&
             hasDraftContent
+        let canRestorePreviousMessage =
+            hasAttachments == false &&
+            hasDraftText == false &&
+            previousUserMessageText != nil &&
+            isSendingReply == false &&
+            isTranscribing == false &&
+            voiceRecorder.isInteractive
+        let primaryButtonSymbolName =
+            isSendingReply ? "stop.fill" :
+            (canRestorePreviousMessage ? "arrow.uturn.backward.circle.fill" : "arrow.up.circle.fill")
+        let primaryButtonAccessibilityLabel =
+            isSendingReply ? "Stop response" :
+            (canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "Send")
         let voiceButtonLabel =
             voiceRecorder.isRecording ?
             (voiceCaptureMode == .directSend ? "Stop & Send" : "Stop & Transcribe") :
@@ -547,17 +562,25 @@ struct ConversationDetailView: View {
                 Button {
                     if isSendingReply {
                         stopCurrentReply()
+                    } else if canRestorePreviousMessage {
+                        restorePreviousUserMessage()
                     } else {
                         sendCurrentDraft()
                     }
                 } label: {
                     ComposerActionButtonLabel(
-                        systemName: isSendingReply ? "stop.fill" : "arrow.up.circle.fill",
+                        systemName: primaryButtonSymbolName,
                         dimension: sendButtonSize,
                         fillStyle: AnyShapeStyle(
-                            isSendingReply ? Color.red.opacity(0.94) : Color.cyan.opacity(sendEnabled ? 0.96 : 0.42)
+                            isSendingReply ?
+                                Color.red.opacity(0.94) :
+                                Color.cyan.opacity((sendEnabled || canRestorePreviousMessage) ? 0.96 : 0.42)
                         ),
-                        strokeColor: Color.white.opacity(isSendingReply ? 0.16 : (sendEnabled ? 0.10 : 0.05))
+                        strokeColor: Color.white.opacity(
+                            isSendingReply ?
+                                0.16 :
+                                ((sendEnabled || canRestorePreviousMessage) ? 0.10 : 0.05)
+                        )
                     )
                 }
                 .buttonStyle(.plain)
@@ -565,8 +588,8 @@ struct ConversationDetailView: View {
                     width: sendButtonSize,
                     height: sendButtonSize
                 )
-                .disabled(isSendingReply ? false : sendEnabled == false)
-                .accessibilityLabel(isSendingReply ? "Stop response" : "Send")
+                .disabled(isSendingReply ? false : (sendEnabled || canRestorePreviousMessage) == false)
+                .accessibilityLabel(primaryButtonAccessibilityLabel)
             }
 
             HStack(spacing: ComposerLayout.flatActionRowSpacing) {
@@ -1146,6 +1169,14 @@ struct ConversationDetailView: View {
         Task {
             await chatStore.sendMessage(in: conversationID)
         }
+    }
+
+    private func restorePreviousUserMessage() {
+        guard chatStore.restoreLatestUserMessageToDraft(for: conversationID) else {
+            return
+        }
+
+        chatStore.clearError(for: conversationID)
     }
 
     private func retryLatestReply() {
