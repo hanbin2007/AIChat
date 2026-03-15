@@ -136,6 +136,7 @@ struct ConversationDetailView: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("Conversation settings")
+                .accessibilityIdentifier("conversation.settings.open")
             }
         }
         .sheet(isPresented: $isShowingSettings) {

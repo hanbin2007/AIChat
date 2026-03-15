@@ -1135,7 +1135,18 @@ final class ChatStore: ObservableObject {
         await streamAssistantReply(for: requestConversation, in: conversationID)
     }
 
-    private func persist(_ conversation: ConversationThread, sync: Bool) async {
+    private func persist(
+        _ conversation: ConversationThread,
+        sync: Bool,
+        allowResurrectionFromDeletedState: Bool = false
+    ) async {
+        guard shouldAllowConversationMutation(
+            for: conversation,
+            allowResurrectionFromDeletedState: allowResurrectionFromDeletedState
+        ) else {
+            return
+        }
+
         do {
             try await repository.save(conversation)
             if deletedConversationTombstones.removeValue(forKey: conversation.id) != nil {
@@ -1215,7 +1226,17 @@ final class ChatStore: ObservableObject {
         AssistantMessageContentNormalizer.normalized(conversation: conversation).conversation
     }
 
-    private func upsertConversation(_ conversation: ConversationThread) {
+    private func upsertConversation(
+        _ conversation: ConversationThread,
+        allowResurrectionFromDeletedState: Bool = false
+    ) {
+        guard shouldAllowConversationMutation(
+            for: conversation,
+            allowResurrectionFromDeletedState: allowResurrectionFromDeletedState
+        ) else {
+            return
+        }
+
         var updatedConversations = conversations.filter { $0.id != conversation.id }
         updatedConversations.append(conversation)
         updatedConversations.sort(by: ConversationThread.sortsByMostRecentFirst)
@@ -1233,14 +1254,40 @@ final class ChatStore: ObservableObject {
         )
     }
 
+    private func shouldAllowConversationMutation(
+        for conversation: ConversationThread,
+        allowResurrectionFromDeletedState: Bool
+    ) -> Bool {
+        guard let deletedAt = deletedConversationTombstones[conversation.id] else {
+            return true
+        }
+
+        if conversations.contains(where: { $0.id == conversation.id }) {
+            return true
+        }
+
+        guard allowResurrectionFromDeletedState else {
+            return false
+        }
+
+        return conversation.updatedAt > deletedAt
+    }
+
     func mergeRemoteConversation(_ conversation: ConversationThread) async {
         guard shouldAcceptRemoteConversation(conversation) else {
             return
         }
 
         let normalizedConversation = normalizedConversationForStorage(conversation)
-        upsertConversation(normalizedConversation)
-        await persist(normalizedConversation, sync: false)
+        upsertConversation(
+            normalizedConversation,
+            allowResurrectionFromDeletedState: true
+        )
+        await persist(
+            normalizedConversation,
+            sync: false,
+            allowResurrectionFromDeletedState: true
+        )
     }
 
     func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
@@ -1256,8 +1303,15 @@ final class ChatStore: ObservableObject {
             }
 
             let normalizedConversation = normalizedConversationForStorage(remoteConversation)
-            upsertConversation(normalizedConversation)
-            await persist(normalizedConversation, sync: false)
+            upsertConversation(
+                normalizedConversation,
+                allowResurrectionFromDeletedState: true
+            )
+            await persist(
+                normalizedConversation,
+                sync: false,
+                allowResurrectionFromDeletedState: true
+            )
         }
     }
 

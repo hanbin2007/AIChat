@@ -141,6 +141,7 @@ struct ConversationSettingsView: View {
                             dismiss()
                         }
                     }
+                    .accessibilityIdentifier("conversation.settings.delete")
                     .disabled(chatStore.isReadOnlyMode)
                 }
             }

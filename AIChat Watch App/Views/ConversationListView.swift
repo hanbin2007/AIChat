@@ -95,6 +95,7 @@ struct ConversationListView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                                .accessibilityIdentifier("conversation.delete.\(conversation.id.uuidString)")
                             }
                         }
                     }

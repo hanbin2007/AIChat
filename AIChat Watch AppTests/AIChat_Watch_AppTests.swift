@@ -2026,6 +2026,96 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletedConversationDoesNotReturnWhenBackgroundRefreshFinishesLate() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_400_320)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "AIChatTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        let activationRepository = ActivationRepository(defaults: defaults)
+        let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
+        let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
+        let deviceIdentity = WatchDeviceIdentity(
+            rawIdentifier: rawDeviceIdentifier,
+            deviceToken: deviceToken,
+            displayToken: OfflineActivation.displayToken(for: deviceToken)
+        )
+        let memoryMaintenanceService = BlockingMemoryMaintenanceService()
+        let repository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            memoryMaintenanceService: memoryMaintenanceService,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: activationRepository,
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Remember that I prefer concise release notes.", for: conversationID)
+
+        let sendTask = Task {
+            await store.sendMessage(in: conversationID)
+        }
+
+        await fulfillment(of: [memoryMaintenanceService.refreshStarted], timeout: 5)
+
+        await store.deleteConversation(id: conversationID)
+        XCTAssertTrue(store.conversations.isEmpty)
+
+        memoryMaintenanceService.resume()
+        await sendTask.value
+
+        XCTAssertTrue(store.conversations.isEmpty)
+
+        let restartedRepository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let restartedStore = ChatStore(
+            repository: restartedRepository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            memoryMaintenanceService: HeuristicMemoryMaintenanceService(),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: activationRepository,
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+        await restartedStore.loadConversationsIfNeeded()
+
+        XCTAssertTrue(restartedStore.conversations.isEmpty)
+        let loadedTombstones = try await restartedRepository.loadDeletedConversationTombstones()
+        XCTAssertNotNil(loadedTombstones[conversationID])
+    }
+
+    @MainActor
     func testGlobalPinnedMemoryIsInjectedOnlyWhenConversationOptsIn() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
@@ -2671,6 +2761,48 @@ private final class CapturingAIStreamingService: AIStreamingService {
             continuation.yield(.answerDelta("Captured reply"))
             continuation.finish()
         }
+    }
+}
+
+private final class BlockingMemoryMaintenanceService: AIMemoryMaintenanceService {
+    let refreshStarted = XCTestExpectation(description: "Memory refresh started")
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func refreshArtifacts(for conversation: ConversationThread) async -> ConversationMemoryArtifacts {
+        refreshStarted.fulfill()
+
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+        }
+
+        return ConversationMemoryArtifacts(
+            focusState: ConversationFocusState(
+                kind: .task,
+                title: "Release Notes",
+                focusNote: "Keep the summary concise.",
+                sourceMessageIDs: conversation.messages.map(\.id)
+            ),
+            memoryItems: [
+                ConversationMemoryItem(
+                    text: "User prefers concise release notes.",
+                    keywords: ["concise", "release", "notes"],
+                    sourceMessageIDs: conversation.messages.map(\.id)
+                )
+            ],
+            archiveSegments: []
+        )
+    }
+
+    func resume() {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume()
     }
 }
 

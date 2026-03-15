@@ -140,8 +140,147 @@ private struct UITestBootstrap {
                 initialConversationID: nil,
                 launchDestination: .root
             )
+        case "conversation_delete_persistence":
+            return makeDeletePersistenceBootstrap(environment: environment)
         default:
             return nil
+        }
+    }
+
+    private static func makeDeletePersistenceBootstrap(
+        environment: [String: String]
+    ) -> UITestBootstrap? {
+        let storageRootURL = URL(
+            fileURLWithPath: environment["AIChat_UI_TEST_STORAGE_ROOT"] ??
+                FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatUITestDeletePersistence", isDirectory: true)
+                .path,
+            isDirectory: true
+        )
+        let defaultsSuiteName = environment["AIChat_UI_TEST_DEFAULTS_SUITE"] ??
+            "AIChatUITests.DeletePersistence"
+        let shouldResetStorage = environment["AIChat_UI_TEST_DELETE_RESET"] == "1"
+        let defaults = UserDefaults(suiteName: defaultsSuiteName) ?? .standard
+
+        if shouldResetStorage {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+            try? FileManager.default.removeItem(at: storageRootURL)
+        }
+
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "ui-test-key",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: storageRootURL
+        )
+        let rawDeviceIdentifier = "UI-TEST-WATCH-DELETE-PERSISTENCE"
+        let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
+        let deviceIdentity = WatchDeviceIdentity(
+            rawIdentifier: rawDeviceIdentifier,
+            deviceToken: deviceToken,
+            displayToken: OfflineActivation.displayToken(for: deviceToken)
+        )
+
+        seedUITestActivationStateIfNeeded(
+            defaults: defaults,
+            deviceToken: deviceToken
+        )
+
+        if shouldResetStorage {
+            seedDeletePersistenceConversationIfNeeded(
+                at: storageRootURL,
+                conversationID: UUID(uuidString: "00000000-0000-0000-0000-000000000301") ?? UUID()
+            )
+        }
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: AIServiceFactory.makeService(configuration: configuration),
+            transcriptionService: AIServiceFactory.makeTranscriptionService(configuration: configuration),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: ActivationRepository(defaults: defaults),
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+
+        return UITestBootstrap(
+            store: store,
+            initialConversationID: nil,
+            launchDestination: .root
+        )
+    }
+
+    private static func seedUITestActivationStateIfNeeded(
+        defaults: UserDefaults,
+        deviceToken: UInt64
+    ) {
+        let storageKey = "offline_activation_state_v1"
+        guard defaults.data(forKey: storageKey) == nil else {
+            return
+        }
+
+        let activeState = OfflineActivationState(
+            license: OfflineActivationLicense(
+                deviceToken: deviceToken,
+                requestIssuedAt: .now,
+                validFrom: .now,
+                validUntil: nil,
+                messageLimit: nil,
+                modelMask: LicensedModelCatalog.unrestrictedMask
+            ),
+            activationCodeFingerprint: "ui-test",
+            activatedAt: .now,
+            usedMessageCount: 0
+        )
+
+        if let data = try? JSONEncoder().encode(activeState) {
+            defaults.set(data, forKey: storageKey)
+        }
+    }
+
+    private static func seedDeletePersistenceConversationIfNeeded(
+        at storageRootURL: URL,
+        conversationID: UUID
+    ) {
+        try? FileManager.default.createDirectory(at: storageRootURL, withIntermediateDirectories: true)
+
+        let conversationFileURL = storageRootURL.appendingPathComponent(
+            "\(conversationID.uuidString).json",
+            isDirectory: false
+        )
+        guard FileManager.default.fileExists(atPath: conversationFileURL.path) == false else {
+            return
+        }
+
+        let seededDate = Date(timeIntervalSince1970: 1_762_400_400)
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Delete Persistence",
+            createdAt: seededDate,
+            updatedAt: seededDate,
+            isFavorite: false,
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "Delete this conversation, relaunch the app, and confirm it stays gone.",
+                    createdAt: seededDate
+                )
+            ]
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(conversation) {
+            try? data.write(to: conversationFileURL, options: [.atomic])
         }
     }
 }

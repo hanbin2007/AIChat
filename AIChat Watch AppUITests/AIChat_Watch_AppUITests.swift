@@ -228,6 +228,58 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testDeletingConversationPersistsAcrossRelaunch() throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatUITests-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "AIChatUITests.DeletePersistence.\(UUID().uuidString)"
+        let conversationID = "00000000-0000-0000-0000-000000000301"
+        let rowIdentifier = "conversation.row.\(conversationID)"
+        let deleteIdentifier = "conversation.delete.\(conversationID)"
+        let app = XCUIApplication()
+
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_delete_persistence"
+        app.launchEnvironment["AIChat_UI_TEST_STORAGE_ROOT"] = storageRoot.path
+        app.launchEnvironment["AIChat_UI_TEST_DEFAULTS_SUITE"] = defaultsSuiteName
+        app.launchEnvironment["AIChat_UI_TEST_DELETE_RESET"] = "1"
+        app.launch()
+
+        let row = app.descendants(matching: .any)[rowIdentifier]
+        if !row.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing seeded delete-persistence row hierarchy")
+            XCTFail("Missing seeded conversation row for delete persistence test.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(row, timeout: 5))
+        row.swipeLeft()
+
+        let deleteButton = app.buttons[deleteIdentifier]
+        if !deleteButton.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing delete action hierarchy")
+            XCTFail("Missing delete swipe action for the seeded conversation.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(deleteButton, timeout: 5))
+        deleteButton.tap()
+
+        XCTAssertFalse(row.waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launchEnvironment["AIChat_UI_TEST_DELETE_RESET"] = "0"
+        app.launch()
+
+        let relaunchedRow = app.descendants(matching: .any)[rowIdentifier]
+        XCTAssertFalse(relaunchedRow.waitForExistence(timeout: 5))
+
+        let startChatButton = app.buttons["Start Chat"]
+        if !startChatButton.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing empty state after relaunch hierarchy")
+            XCTFail("Deleted conversation returned after relaunch or empty state did not appear.")
+        }
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
