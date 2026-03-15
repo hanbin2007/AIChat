@@ -1633,6 +1633,99 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteDeletionTombstoneRemovesStaleLocalConversation() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_400_260)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let watchRepositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-Watch-\(UUID().uuidString)", isDirectory: true)
+        let iphoneRepositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-iPhone-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "AIChatTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        let activationRepository = ActivationRepository(defaults: defaults)
+        let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
+        let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
+        let deviceIdentity = WatchDeviceIdentity(
+            rawIdentifier: rawDeviceIdentifier,
+            deviceToken: deviceToken,
+            displayToken: OfflineActivation.displayToken(for: deviceToken)
+        )
+
+        let watchRepository = ConversationRepository(configuration: configuration, rootURL: watchRepositoryRootURL)
+        let watchStore = ChatStore(
+            repository: watchRepository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: activationRepository,
+            deviceIdentity: deviceIdentity,
+            defaults: defaults
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: watchStore.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await watchStore.applyActivationCode(activationCode, now: now)
+
+        let conversationID = await watchStore.createConversation()
+        let sharedConversation = try XCTUnwrap(watchStore.conversation(id: conversationID))
+
+        let iphoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)
+        let iphoneStore = ChatStore(
+            repository: iphoneRepository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        await iphoneStore.mergeRemoteConversationSnapshot([sharedConversation])
+        XCTAssertEqual(iphoneStore.conversations.map(\.id), [conversationID])
+
+        await watchStore.deleteConversation(id: conversationID)
+        let watchTombstones = try await watchRepository.loadDeletedConversationTombstones()
+        let deletedAt = try XCTUnwrap(watchTombstones[conversationID])
+
+        let restartedIPhoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)
+        let restartedIPhoneStore = ChatStore(
+            repository: restartedIPhoneRepository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        await restartedIPhoneStore.loadConversationsIfNeeded()
+        XCTAssertEqual(restartedIPhoneStore.conversations.map(\.id), [conversationID])
+
+        await restartedIPhoneStore.mergeRemoteDeletedConversationTombstones([
+            CompanionDeletedConversationTombstone(id: conversationID, deletedAt: deletedAt)
+        ])
+
+        XCTAssertTrue(restartedIPhoneStore.conversations.isEmpty)
+        let iphoneTombstones = try await restartedIPhoneRepository.loadDeletedConversationTombstones()
+        XCTAssertEqual(iphoneTombstones[conversationID], deletedAt)
+    }
+
+    @MainActor
     func testGlobalPinnedMemoryIsInjectedOnlyWhenConversationOptsIn() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(

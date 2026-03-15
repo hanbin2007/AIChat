@@ -8,6 +8,11 @@
 import Foundation
 import WatchConnectivity
 
+nonisolated struct CompanionDeletedConversationTombstone: Codable, Equatable {
+    let id: UUID
+    let deletedAt: Date
+}
+
 nonisolated enum CompanionSyncStatus: Equatable {
     case unavailable
     case notPaired
@@ -53,7 +58,8 @@ nonisolated enum CompanionSyncStatus: Equatable {
 
 nonisolated enum CompanionSyncEvent {
     case upsert(ConversationThread)
-    case delete(UUID)
+    case delete(UUID, deletedAt: Date)
+    case deletedConversationTombstones([CompanionDeletedConversationTombstone])
     case snapshot([ConversationThread])
     case globalPinnedMemories([PinnedMemoryItem])
     case promptPresets([PromptPreset])
@@ -65,6 +71,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias EventHandler = @MainActor (CompanionSyncEvent) -> Void
     typealias StatusHandler = @MainActor (CompanionSyncStatus) -> Void
     typealias SnapshotProvider = @MainActor () -> [ConversationThread]
+    typealias DeletedConversationTombstonesProvider = @MainActor () -> [CompanionDeletedConversationTombstone]
     typealias GlobalPinnedMemoriesProvider = @MainActor () -> [PinnedMemoryItem]
     typealias PromptPresetsProvider = @MainActor () -> [PromptPreset]
 
@@ -73,6 +80,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     private var eventHandler: EventHandler?
     private var statusHandler: StatusHandler?
     private var snapshotProvider: SnapshotProvider?
+    private var deletedConversationTombstonesProvider: DeletedConversationTombstonesProvider?
     private var globalPinnedMemoriesProvider: GlobalPinnedMemoriesProvider?
     private var promptPresetsProvider: PromptPresetsProvider?
 
@@ -107,6 +115,10 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         snapshotProvider = provider
     }
 
+    func setDeletedConversationTombstonesProvider(_ provider: DeletedConversationTombstonesProvider?) {
+        deletedConversationTombstonesProvider = provider
+    }
+
     func setGlobalPinnedMemoriesProvider(_ provider: GlobalPinnedMemoriesProvider?) {
         globalPinnedMemoriesProvider = provider
     }
@@ -133,17 +145,23 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         }
     }
 
-    func pushDeletion(conversationID: UUID) {
+    func pushDeletion(conversationID: UUID, deletedAt: Date) {
         guard WCSession.isSupported() else {
             return
         }
 
-        WCSession.default.transferUserInfo(
-            [
-                "type": "conversation_delete",
-                "conversationID": conversationID.uuidString
-            ]
-        )
+        let payload: [String: Any] = [
+            "type": "conversation_delete",
+            "conversationID": conversationID.uuidString,
+            "deletedAt": deletedAt.timeIntervalSince1970
+        ]
+        let session = WCSession.default
+
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+
+        session.transferUserInfo(payload)
     }
 
     func pushGlobalPinnedMemories(_ items: [PinnedMemoryItem]) {
@@ -331,8 +349,12 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
+            let deletedAt = (payload["deletedAt"] as? TimeInterval)
+                .map(Date.init(timeIntervalSince1970:))
+                ?? .now
+
             Task { @MainActor in
-                eventHandler?(.delete(conversationID))
+                eventHandler?(.delete(conversationID, deletedAt: deletedAt))
             }
         case "conversation_snapshot":
             guard let base64Payload = payload["payload"] as? String,
@@ -346,27 +368,34 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 eventHandler?(.snapshot(conversations))
             }
         case "bootstrap_snapshot":
-            if let base64Payload = payload["conversationsPayload"] as? String,
-               let data = Data(base64Encoded: base64Payload),
-               let conversations = try? decoder.decode([ConversationThread].self, from: data) {
-                Task { @MainActor in
+            let conversations = (payload["conversationsPayload"] as? String)
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { try? decoder.decode([ConversationThread].self, from: $0) }
+            let deletedConversationTombstones = (payload["deletedConversationTombstonesPayload"] as? String)
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { try? decoder.decode([CompanionDeletedConversationTombstone].self, from: $0) }
+            let globalPinnedMemories = (payload["globalPinnedPayload"] as? String)
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { try? decoder.decode([PinnedMemoryItem].self, from: $0) }
+            let promptPresets = (payload["promptPresetsPayload"] as? String)
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { try? decoder.decode([PromptPreset].self, from: $0) }
+
+            Task { @MainActor in
+                if let deletedConversationTombstones {
+                    eventHandler?(.deletedConversationTombstones(deletedConversationTombstones))
+                }
+
+                if let conversations {
                     eventHandler?(.snapshot(conversations))
                 }
-            }
 
-            if let base64Payload = payload["globalPinnedPayload"] as? String,
-               let data = Data(base64Encoded: base64Payload),
-               let items = try? decoder.decode([PinnedMemoryItem].self, from: data) {
-                Task { @MainActor in
-                    eventHandler?(.globalPinnedMemories(items))
+                if let globalPinnedMemories {
+                    eventHandler?(.globalPinnedMemories(globalPinnedMemories))
                 }
-            }
 
-            if let base64Payload = payload["promptPresetsPayload"] as? String,
-               let data = Data(base64Encoded: base64Payload),
-               let presets = try? decoder.decode([PromptPreset].self, from: data) {
-                Task { @MainActor in
-                    eventHandler?(.promptPresets(presets))
+                if let promptPresets {
+                    eventHandler?(.promptPresets(promptPresets))
                 }
             }
         case "global_pinned_memories":
@@ -426,9 +455,11 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             }
 
             let conversations = self.snapshotProvider?() ?? []
+            let deletedConversationTombstones = self.deletedConversationTombstonesProvider?() ?? []
             let globalPinnedMemories = self.globalPinnedMemoriesProvider?() ?? []
             let promptPresets = self.promptPresetsProvider?() ?? []
             guard let conversationsData = try? self.encoder.encode(conversations),
+                  let deletedConversationTombstonesData = try? self.encoder.encode(deletedConversationTombstones),
                   let globalPinnedData = try? self.encoder.encode(globalPinnedMemories),
                   let promptPresetsData = try? self.encoder.encode(promptPresets)
             else {
@@ -440,6 +471,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                     [
                         "type": "bootstrap_snapshot",
                         "conversationsPayload": conversationsData.base64EncodedString(),
+                        "deletedConversationTombstonesPayload": deletedConversationTombstonesData.base64EncodedString(),
                         "globalPinnedPayload": globalPinnedData.base64EncodedString(),
                         "promptPresetsPayload": promptPresetsData.base64EncodedString()
                     ]
