@@ -185,6 +185,12 @@ final class ChatStore: ObservableObject {
             self?.conversations ?? []
         }
 
+        syncBridge.setDeletedConversationTombstonesProvider { [weak self] in
+            self?.deletedConversationTombstones.map {
+                CompanionDeletedConversationTombstone(id: $0.key, deletedAt: $0.value)
+            } ?? []
+        }
+
         syncBridge.setGlobalPinnedMemoriesProvider { [weak self] in
             self?.globalPinnedMemories ?? []
         }
@@ -1137,7 +1143,7 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    private func deleteConversation(id: UUID, sync: Bool) async {
+    private func deleteConversation(id: UUID, deletedAt candidateDeletedAt: Date? = nil, sync: Bool) async {
         sendTasks[id]?.cancel()
         sendTasks[id] = nil
         setConversations(conversations.filter { $0.id != id })
@@ -1147,12 +1153,12 @@ final class ChatStore: ObservableObject {
         transcribingConversationIDs.remove(id)
 
         do {
-            let deletedAt = max(deletedConversationTombstones[id] ?? .distantPast, .now)
+            let deletedAt = max(deletedConversationTombstones[id] ?? .distantPast, candidateDeletedAt ?? .now)
             deletedConversationTombstones[id] = deletedAt
             try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
             try await repository.deleteConversation(id: id)
             if sync {
-                syncBridge.pushDeletion(conversationID: id)
+                syncBridge.pushDeletion(conversationID: id, deletedAt: deletedAt)
             }
         } catch {
             startupError = error.localizedDescription
@@ -1224,6 +1230,20 @@ final class ChatStore: ObservableObject {
             let normalizedConversation = normalizedConversationForStorage(remoteConversation)
             upsertConversation(normalizedConversation)
             await persist(normalizedConversation, sync: false)
+        }
+    }
+
+    func mergeRemoteDeletedConversationTombstones(
+        _ incomingTombstones: [CompanionDeletedConversationTombstone]
+    ) async {
+        for tombstone in mergedDeletedConversationTombstones(incomingTombstones) {
+            if let localConversation = conversation(id: tombstone.id),
+               localConversation.updatedAt > tombstone.deletedAt {
+                syncBridge.pushConversation(localConversation)
+                continue
+            }
+
+            await deleteConversation(id: tombstone.id, deletedAt: tombstone.deletedAt, sync: false)
         }
     }
 
@@ -1949,8 +1969,12 @@ final class ChatStore: ObservableObject {
         switch event {
         case .upsert(let conversation):
             await mergeRemoteConversation(conversation)
-        case .delete(let conversationID):
-            await deleteConversation(id: conversationID, sync: false)
+        case .delete(let conversationID, let deletedAt):
+            await mergeRemoteDeletedConversationTombstones([
+                CompanionDeletedConversationTombstone(id: conversationID, deletedAt: deletedAt)
+            ])
+        case .deletedConversationTombstones(let tombstones):
+            await mergeRemoteDeletedConversationTombstones(tombstones)
         case .snapshot(let conversations):
             await mergeRemoteConversationSnapshot(conversations)
         case .globalPinnedMemories(let items):
@@ -1989,6 +2013,34 @@ final class ChatStore: ObservableObject {
         }
 
         return conversation.updatedAt > deletedAt
+    }
+
+    private func mergedDeletedConversationTombstones(
+        _ incomingTombstones: [CompanionDeletedConversationTombstone]
+    ) -> [CompanionDeletedConversationTombstone] {
+        var latestTombstoneByID: [UUID: Date] = [:]
+
+        for tombstone in incomingTombstones {
+            let latestDeletedAt = max(
+                max(
+                    deletedConversationTombstones[tombstone.id] ?? .distantPast,
+                    latestTombstoneByID[tombstone.id] ?? .distantPast
+                ),
+                tombstone.deletedAt
+            )
+            latestTombstoneByID[tombstone.id] = latestDeletedAt
+        }
+
+        return latestTombstoneByID.map {
+            CompanionDeletedConversationTombstone(id: $0.key, deletedAt: $0.value)
+        }
+        .sorted { lhs, rhs in
+            if lhs.deletedAt == rhs.deletedAt {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+
+            return lhs.deletedAt > rhs.deletedAt
+        }
     }
 
     private func reconcileLoadedConversations(
