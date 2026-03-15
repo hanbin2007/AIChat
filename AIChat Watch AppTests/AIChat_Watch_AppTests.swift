@@ -88,8 +88,31 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertEqual(contents.count, 1)
         XCTAssertEqual(contents[0].parts.first?.text, "Listen to the attached audio, infer the user's request, and answer it directly.")
-        XCTAssertEqual(contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
+        XCTAssertEqual(contents[0].parts.last?.inlineData?.mimeType, "audio/aac")
         XCTAssertEqual(contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
+    }
+
+    func testRecordedAudioDefaultsToAacMimeTypeAndExtension() throws {
+        let attachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x10, 0x20, 0x30]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.2
+        )
+
+        XCTAssertEqual(attachment.mimeType, "audio/aac")
+        XCTAssertTrue(attachment.filename.hasSuffix(".aac"))
+    }
+
+    func testRecordedAudioCanPreserveWavFallbackMimeTypeAndExtension() throws {
+        let attachment = try ChatAttachment.makeRecordedAudio(
+            from: Data([0x10, 0x20, 0x30]),
+            suggestedFilename: "voice.wav",
+            durationSeconds: 3.2,
+            mimeType: "audio/wav"
+        )
+
+        XCTAssertEqual(attachment.mimeType, "audio/wav")
+        XCTAssertTrue(attachment.filename.hasSuffix(".wav"))
     }
 
     func testContextWindowReusesStoredAssistantModelParts() {
@@ -768,7 +791,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertTrue(request.prompt.contains("Product names may include Tokyo Skytree and Ginza Six."))
         XCTAssertTrue(request.prompt.contains("Assistant: Do you want the Tokyo or Osaka plan?"))
         XCTAssertTrue(request.prompt.contains("User: Use the Tokyo one and keep it short."))
-        XCTAssertEqual(request.audio.mimeType, "audio/wav")
+        XCTAssertEqual(request.audio.mimeType, "audio/aac")
         XCTAssertEqual(request.audio.base64Data, audioData.base64EncodedString())
     }
 
@@ -856,7 +879,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(request.generationConfig.temperature, 1)
         XCTAssertEqual(request.generationConfig.maxOutputTokens, 5_120)
         XCTAssertNil(request.generationConfig.thinkingConfig)
-        XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
+        XCTAssertEqual(request.contents[0].parts.last?.inlineData?.mimeType, "audio/aac")
         XCTAssertEqual(request.contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Expect the product name AIChat Pro.") == true)
         XCTAssertTrue(request.contents[0].parts.first?.text?.contains("Assistant: Do you want the Tokyo or Osaka plan?") == true)

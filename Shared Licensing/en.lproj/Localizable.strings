@@ -75,6 +75,8 @@
 "error.voice.microphone_denied" = "Allow microphone access before recording.";
 "error.voice.cannot_start" = "Couldn't start recording. Try again.";
 "error.voice.missing_recording" = "No recording file was created. Record again.";
+"notice.voice.fallback_title" = "Voice Format Fallback";
+"notice.voice.wav_fallback" = "AAC recording wasn't available, so this voice note was saved as WAV instead. Audio quality is preserved, but the file will be larger.";
 "app.version.unknown" = "Unknown";
 "model.subtitle.configured_default" = "Configured default";
 "model.short.custom" = "Custom";

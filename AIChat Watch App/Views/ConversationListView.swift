@@ -195,23 +195,13 @@ struct ConversationRowView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
-            HStack(spacing: 6) {
-                Label("\(conversation.messageCount)", systemImage: "bubble.left.and.bubble.right")
-                    .labelStyle(.titleAndIcon)
-                if conversation.containsAudioAttachments {
-                    Label("Voice", systemImage: "waveform")
-                        .labelStyle(.titleAndIcon)
-                }
-                if conversation.containsImageAttachments {
-                    Label("Photo", systemImage: "photo")
-                        .labelStyle(.titleAndIcon)
-                }
-                Text(AIModelCatalog.shortLabel(for: aiConfiguration.model))
-                Text("•")
-                Text(aiConfiguration.thinkingIntensity.shortLabel)
+            ViewThatFits(in: .horizontal) {
+                metaLine(includeAttachments: true, includeThinking: true)
+                metaLine(includeAttachments: false, includeThinking: true)
+                metaLine(includeAttachments: false, includeThinking: false)
             }
-            .font(.caption2)
-            .foregroundStyle(.cyan)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundStyle(.cyan.opacity(0.9))
         }
         .padding(12)
         .background(
@@ -222,5 +212,59 @@ struct ConversationRowView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+    }
+
+    @ViewBuilder
+    private func metaLine(
+        includeAttachments: Bool,
+        includeThinking: Bool
+    ) -> some View {
+        HStack(spacing: 5) {
+            WatchConversationMetaItem(
+                iconName: "bubble.left.and.bubble.right",
+                title: "\(conversation.messageCount)"
+            )
+
+            if includeAttachments, conversation.containsAudioAttachments {
+                WatchConversationMetaItem(iconName: "waveform")
+            }
+
+            if includeAttachments, conversation.containsImageAttachments {
+                WatchConversationMetaItem(iconName: "photo")
+            }
+
+            WatchConversationMetaItem(
+                iconName: "cpu",
+                title: AIModelCatalog.shortLabel(for: aiConfiguration.model)
+            )
+
+            if includeThinking {
+                WatchConversationMetaItem(
+                    iconName: "brain.head.profile",
+                    title: aiConfiguration.thinkingIntensity.shortLabel
+                )
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.9)
+    }
+}
+
+private struct WatchConversationMetaItem: View {
+    let iconName: String
+    var title: String? = nil
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: iconName)
+                .imageScale(.small)
+
+            if let title {
+                Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+                    .monospacedDigit()
+            }
+        }
     }
 }

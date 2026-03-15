@@ -75,6 +75,7 @@ struct ConversationDetailView: View {
     @State private var renderedMessageCount = ConversationRendering.prewarmedMessageBatch
     @State private var lastObservedMessageCount = 0
     @State private var isPreparingHistory = true
+    @State private var voiceRecorderNoticeMessage: String?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
 
@@ -181,6 +182,9 @@ struct ConversationDetailView: View {
 
             chatStore.presentError(errorMessage, for: conversationID)
             voiceRecorder.clearError()
+        }
+        .onChange(of: voiceRecorder.noticeMessage) { _, noticeMessage in
+            voiceRecorderNoticeMessage = noticeMessage
         }
         .onDisappear {
             initialHistoryLoadTask?.cancel()
@@ -510,6 +514,14 @@ struct ConversationDetailView: View {
                 )
             }
 
+            if let voiceRecorderNoticeMessage {
+                ConfigurationBannerView(
+                    iconName: "waveform.badge.exclamationmark",
+                    title: L10n.tr("notice.voice.fallback_title"),
+                    message: voiceRecorderNoticeMessage
+                )
+            }
+
             HStack(spacing: hasAttachments ? ComposerLayout.compactInputRowSpacing : ComposerLayout.regularInputRowSpacing) {
                 TextField("Ask Gemini", text: draftTextBinding())
                 .frame(maxWidth: .infinity, minHeight: inputRowHeight, alignment: .leading)
@@ -796,6 +808,7 @@ struct ConversationDetailView: View {
         }
 
         voiceCaptureMode = startMode
+        voiceRecorderNoticeMessage = nil
         chatStore.clearError(for: conversationID)
 
         Task {

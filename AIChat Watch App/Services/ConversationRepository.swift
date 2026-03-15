@@ -234,7 +234,16 @@ actor ConversationRepository {
         case .image:
             return "jpg"
         case .audio:
-            return "wav"
+            switch attachment.mimeType.lowercased() {
+            case "audio/aac":
+                return "aac"
+            case "audio/flac":
+                return "flac"
+            case "audio/mp4", "audio/m4a", "audio/x-m4a":
+                return "m4a"
+            default:
+                return "wav"
+            }
         }
     }
 

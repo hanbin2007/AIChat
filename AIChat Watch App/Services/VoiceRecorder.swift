@@ -28,6 +28,12 @@ enum VoiceRecorderError: LocalizedError {
 
 @MainActor
 final class VoiceRecorder: NSObject, ObservableObject {
+    private struct RecordingFormat {
+        let fileExtension: String
+        let mimeType: String
+        let settings: [String: Any]
+    }
+
     enum State: Equatable {
         case idle
         case preparing
@@ -39,11 +45,13 @@ final class VoiceRecorder: NSObject, ObservableObject {
     @Published private(set) var elapsedTime: TimeInterval = 0
     @Published private(set) var completedAttachment: ChatAttachment?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var noticeMessage: String?
 
     private let audioSession = AVAudioSession.sharedInstance()
     private let maxDuration: TimeInterval = 60
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
+    private var recordingFormat: RecordingFormat?
     private var timer: Timer?
     private var capturedDuration: TimeInterval = 0
 
@@ -72,6 +80,7 @@ final class VoiceRecorder: NSObject, ObservableObject {
         }
 
         clearError()
+        clearNotice()
         completedAttachment = nil
         state = .preparing
 
@@ -85,19 +94,17 @@ final class VoiceRecorder: NSObject, ObservableObject {
             try audioSession.setCategory(.record, mode: .default)
             try audioSession.setActive(true)
 
-            let recordingURL = makeRecordingURL()
-            let recorder = try AVAudioRecorder(url: recordingURL, settings: Self.recordingSettings)
-            recorder.delegate = self
-            recorder.isMeteringEnabled = false
-
-            guard recorder.prepareToRecord() else {
-                throw VoiceRecorderError.cannotStart
-            }
+            let preparedRecording = try makeRecorder()
+            let recorder = preparedRecording.recorder
 
             self.recorder = recorder
-            self.recordingURL = recordingURL
+            self.recordingURL = preparedRecording.url
+            self.recordingFormat = preparedRecording.format
             self.capturedDuration = 0
             self.elapsedTime = 0
+            if preparedRecording.format.fileExtension != Self.preferredRecordingFormats.first?.fileExtension {
+                noticeMessage = L10n.tr("notice.voice.wav_fallback")
+            }
             startTimer()
             state = .recording
 
@@ -124,6 +131,10 @@ final class VoiceRecorder: NSObject, ObservableObject {
 
     func clearError() {
         errorMessage = nil
+    }
+
+    func clearNotice() {
+        noticeMessage = nil
     }
 
     func consumeCompletedAttachment() {
@@ -158,12 +169,6 @@ final class VoiceRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func makeRecordingURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("wav")
-    }
-
     private func cleanup(shouldRemoveRecording: Bool) {
         stopTimer()
         recorder = nil
@@ -174,6 +179,7 @@ final class VoiceRecorder: NSObject, ObservableObject {
         }
 
         recordingURL = nil
+        recordingFormat = nil
         capturedDuration = 0
         elapsedTime = 0
     }
@@ -182,43 +188,120 @@ final class VoiceRecorder: NSObject, ObservableObject {
         elapsedTime = min(recorder?.currentTime ?? elapsedTime, maxDuration)
     }
 
-    private static var recordingSettings: [String: Any] {
-        [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16_000,
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsFloatKey: false
-        ]
+    private func makeRecorder() throws -> (recorder: AVAudioRecorder, url: URL, format: RecordingFormat) {
+        var lastError: Error = VoiceRecorderError.cannotStart
+
+        for format in Self.preferredRecordingFormats {
+            let url = makeRecordingURL(withExtension: format.fileExtension)
+
+            do {
+                let recorder = try AVAudioRecorder(url: url, settings: format.settings)
+                recorder.delegate = self
+                recorder.isMeteringEnabled = false
+
+                guard recorder.prepareToRecord() else {
+                    throw VoiceRecorderError.cannotStart
+                }
+
+                return (recorder, url, format)
+            } catch {
+                lastError = error
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
+        throw lastError
+    }
+
+    private func makeRecordingURL(withExtension fileExtension: String) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(fileExtension)
+    }
+
+    private static let preferredRecordingFormats: [RecordingFormat] = [
+        RecordingFormat(
+            fileExtension: "aac",
+            mimeType: "audio/aac",
+            settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 24_000,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 48_000,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+        ),
+        RecordingFormat(
+            fileExtension: "wav",
+            mimeType: "audio/wav",
+            settings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 16_000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsFloatKey: false
+            ]
+        )
+    ]
+
+    private static func fallbackRecordingFormat(forFileExtension fileExtension: String) -> RecordingFormat {
+        preferredRecordingFormats.first(where: { $0.fileExtension == fileExtension.lowercased() }) ??
+            preferredRecordingFormats.last!
     }
 
     private func handleRecordingFinished(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        defer {
-            state = .idle
-            cleanup(shouldRemoveRecording: true)
-        }
-
         guard flag else {
             errorMessage = VoiceRecorderError.cannotStart.localizedDescription
+            state = .idle
+            cleanup(shouldRemoveRecording: true)
             return
         }
 
         guard let recordingURL else {
             errorMessage = VoiceRecorderError.missingRecording.localizedDescription
+            state = .idle
+            cleanup(shouldRemoveRecording: true)
             return
         }
 
-        do {
-            let rawData = try Data(contentsOf: recordingURL)
-            completedAttachment = try ChatAttachment.makeRecordedAudio(
-                from: rawData,
-                suggestedFilename: recordingURL.lastPathComponent,
-                durationSeconds: max(capturedDuration, recorder.currentTime, elapsedTime)
-            )
-        } catch {
-            errorMessage = error.localizedDescription
+        let format = recordingFormat ?? Self.fallbackRecordingFormat(forFileExtension: recordingURL.pathExtension)
+        let durationSeconds = max(capturedDuration, recorder.currentTime, elapsedTime)
+
+        Task {
+            defer {
+                state = .idle
+                cleanup(shouldRemoveRecording: true)
+            }
+
+            do {
+                completedAttachment = try await Self.makeCompletedAttachment(
+                    from: recordingURL,
+                    suggestedFilename: recordingURL.lastPathComponent,
+                    durationSeconds: durationSeconds,
+                    mimeType: format.mimeType
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
+    }
+
+    private static func makeCompletedAttachment(
+        from recordingURL: URL,
+        suggestedFilename: String,
+        durationSeconds: Double,
+        mimeType: String
+    ) async throws -> ChatAttachment {
+        try await Task.detached(priority: .userInitiated) {
+            let rawData = try Data(contentsOf: recordingURL)
+            return try ChatAttachment.makeRecordedAudio(
+                from: rawData,
+                suggestedFilename: suggestedFilename,
+                durationSeconds: durationSeconds,
+                mimeType: mimeType
+            )
+        }.value
     }
 }
 

@@ -523,7 +523,7 @@ nonisolated enum AttachmentProcessingError: LocalizedError {
     }
 }
 
-nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
+nonisolated struct ChatAttachment: Identifiable, Codable, Hashable, Sendable {
     static let maximumImagePayloadBytes = 1_500_000
     static let maximumAudioPayloadBytes = 4_000_000
 
@@ -700,7 +700,8 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
     static func makeRecordedAudio(
         from rawData: Data,
         suggestedFilename: String?,
-        durationSeconds: Double
+        durationSeconds: Double,
+        mimeType: String = "audio/aac"
     ) throws -> ChatAttachment {
         guard rawData.isEmpty == false else {
             throw AttachmentProcessingError.unsupportedAudio
@@ -710,15 +711,17 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
             throw AttachmentProcessingError.audioTooLarge(maximumBytes: maximumAudioPayloadBytes)
         }
 
-        let filenameStem = URL(fileURLWithPath: suggestedFilename ?? "voice.wav")
+        let normalizedMimeType = mimeType.nonEmptyTrimmed ?? "audio/aac"
+        let fileExtension = preferredAudioFileExtension(for: normalizedMimeType)
+        let filenameStem = URL(fileURLWithPath: suggestedFilename ?? "voice.\(fileExtension)")
             .deletingPathExtension()
             .lastPathComponent
             .nonEmptyTrimmed ?? "voice"
 
         return ChatAttachment(
             kind: .audio,
-            filename: "\(filenameStem)-\(UUID().uuidString.prefix(6)).wav",
-            mimeType: "audio/wav",
+            filename: "\(filenameStem)-\(UUID().uuidString.prefix(6)).\(fileExtension)",
+            mimeType: normalizedMimeType,
             data: rawData,
             durationSeconds: max(durationSeconds, 0)
         )
@@ -752,6 +755,21 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
             return "webp"
         default:
             return "img"
+        }
+    }
+
+    private static func preferredAudioFileExtension(for mimeType: String) -> String {
+        switch mimeType.lowercased() {
+        case "audio/aac":
+            return "aac"
+        case "audio/wav", "audio/x-wav":
+            return "wav"
+        case "audio/flac":
+            return "flac"
+        case "audio/mp4", "audio/m4a", "audio/x-m4a":
+            return "m4a"
+        default:
+            return "audio"
         }
     }
 }

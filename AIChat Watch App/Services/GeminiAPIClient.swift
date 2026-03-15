@@ -387,7 +387,7 @@ func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
     return collected
 }
 
-struct GeminiGenerateContentRequest: Encodable {
+nonisolated struct GeminiGenerateContentRequest: Encodable, Sendable {
     var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
     var tools: [GeminiTool]?
@@ -406,16 +406,16 @@ struct GeminiGenerateContentRequest: Encodable {
     }
 }
 
-struct GeminiTool: Codable, Equatable {
+nonisolated struct GeminiTool: Codable, Equatable, Sendable {
     var googleSearch: GeminiGoogleSearchTool?
     var codeExecution: GeminiCodeExecutionTool?
 }
 
-struct GeminiGoogleSearchTool: Codable, Equatable {}
+nonisolated struct GeminiGoogleSearchTool: Codable, Equatable, Sendable {}
 
-struct GeminiCodeExecutionTool: Codable, Equatable {}
+nonisolated struct GeminiCodeExecutionTool: Codable, Equatable, Sendable {}
 
-struct GeminiGenerationConfig: Codable, Equatable {
+nonisolated struct GeminiGenerationConfig: Codable, Equatable, Sendable {
     var temperature: Double
     var topP: Double
     var maxOutputTokens: Int
@@ -423,13 +423,13 @@ struct GeminiGenerationConfig: Codable, Equatable {
     var responseMimeType: String?
 }
 
-struct GeminiThinkingConfig: Codable, Equatable {
+nonisolated struct GeminiThinkingConfig: Codable, Equatable, Sendable {
     var thinkingBudget: Int?
     var thinkingLevel: String?
     var includeThoughts: Bool?
 }
 
-struct GeminiContent: Codable, Equatable {
+nonisolated struct GeminiContent: Codable, Equatable, Sendable {
     var role: String?
     var parts: [GeminiPartPayload]
 
@@ -438,7 +438,7 @@ struct GeminiContent: Codable, Equatable {
     }
 }
 
-struct GeminiGenerateContentResponse: Decodable {
+nonisolated struct GeminiGenerateContentResponse: Decodable, Sendable {
     var candidates: [GeminiCandidate]
 
     private enum CodingKeys: String, CodingKey {
@@ -451,23 +451,23 @@ struct GeminiGenerateContentResponse: Decodable {
     }
 }
 
-struct GeminiCandidate: Decodable {
+nonisolated struct GeminiCandidate: Decodable, Sendable {
     var content: GeminiContent?
     var finishReason: String?
 }
 
-struct GeminiStreamChunk: Equatable {
+nonisolated struct GeminiStreamChunk: Equatable, Sendable {
     var answerText: String?
     var thoughtSummary: String?
     var modelResponseParts: [GeminiPartPayload]?
     var finishReason: String?
 }
 
-struct GeminiAPIErrorEnvelope: Decodable {
+nonisolated struct GeminiAPIErrorEnvelope: Decodable, Sendable {
     var error: GeminiAPIErrorMessage
 }
 
-struct GeminiAPIErrorMessage: Decodable {
+nonisolated struct GeminiAPIErrorMessage: Decodable, Sendable {
     var message: String
 }
 

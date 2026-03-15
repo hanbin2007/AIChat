@@ -138,14 +138,18 @@ struct GeminiTranscriptionService: AITranscriptionService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(
-            makeRequestBody(
-                for: audioAttachment,
-                in: conversation,
-                using: transcriptionConfiguration
-            )
+        let prompt = VoiceTranscriptionPromptBuilder.prompt(
+            for: conversation,
+            customPrompt: transcriptionConfiguration.customPrompt,
+            includesContext: transcriptionConfiguration.includesContext,
+            existingDraftText: transcriptionConfiguration.existingDraftText,
+            maxContextMessages: maxContextMessages,
+            maxContextCharacters: maxContextCharacters
+        )
+        request.httpBody = try await makeRequestBodyData(
+            prompt: prompt,
+            audioAttachment: audioAttachment,
+            model: transcriptionConfiguration.model
         )
 
         let (data, response) = try await session.data(for: request)
@@ -204,6 +208,27 @@ struct GeminiTranscriptionService: AITranscriptionService {
         in conversation: ConversationThread,
         using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) -> GeminiGenerateContentRequest {
+        let prompt = VoiceTranscriptionPromptBuilder.prompt(
+            for: conversation,
+            customPrompt: transcriptionConfiguration.customPrompt,
+            includesContext: transcriptionConfiguration.includesContext,
+            existingDraftText: transcriptionConfiguration.existingDraftText,
+            maxContextMessages: maxContextMessages,
+            maxContextCharacters: maxContextCharacters
+        )
+
+        return Self.makeRequestBody(
+            for: audioAttachment,
+            prompt: prompt,
+            model: transcriptionConfiguration.model
+        )
+    }
+
+    nonisolated static func makeRequestBody(
+        for audioAttachment: ChatAttachment,
+        prompt: String,
+        model: String
+    ) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: GeminiContent.systemPrompt(VoiceTranscriptionPromptBuilder.systemPrompt),
             contents: [
@@ -211,14 +236,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
                     role: "user",
                     parts: [
                         GeminiPart(
-                            text: VoiceTranscriptionPromptBuilder.prompt(
-                                for: conversation,
-                                customPrompt: transcriptionConfiguration.customPrompt,
-                                includesContext: transcriptionConfiguration.includesContext,
-                                existingDraftText: transcriptionConfiguration.existingDraftText,
-                                maxContextMessages: maxContextMessages,
-                                maxContextCharacters: maxContextCharacters
-                            ),
+                            text: prompt,
                             inlineData: nil
                         ),
                         GeminiPart(
@@ -232,7 +250,7 @@ struct GeminiTranscriptionService: AITranscriptionService {
                 )
             ],
             generationConfig: GeminiGenerationConfig(
-                temperature: requestTemperature(for: transcriptionConfiguration.model, fallback: 0.1),
+                temperature: Self.requestTemperature(for: model, fallback: 0.1),
                 topP: 0.95,
                 maxOutputTokens: VoiceTranscriptionLimits.maxOutputTokens,
                 thinkingConfig: nil
@@ -240,7 +258,27 @@ struct GeminiTranscriptionService: AITranscriptionService {
         )
     }
 
-    private func requestTemperature(for model: String, fallback: Double) -> Double {
+    func makeRequestBodyData(
+        prompt: String,
+        audioAttachment: ChatAttachment,
+        model: String
+    ) async throws -> Data {
+        let attachment = audioAttachment
+
+        return try await Task.detached(priority: .userInitiated) {
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            return try encoder.encode(
+                Self.makeRequestBody(
+                    for: attachment,
+                    prompt: prompt,
+                    model: model
+                )
+            )
+        }.value
+    }
+
+    private nonisolated static func requestTemperature(for model: String, fallback: Double) -> Double {
         model.hasPrefix("gemini-3") ? 1 : fallback
     }
 

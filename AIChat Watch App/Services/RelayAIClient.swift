@@ -166,14 +166,18 @@ struct RelayTranscriptionService: AITranscriptionService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
 
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(
-            makeRelayRequest(
-                for: audioAttachment,
-                in: conversation,
-                using: transcriptionConfiguration
-            )
+        let prompt = VoiceTranscriptionPromptBuilder.prompt(
+            for: conversation,
+            customPrompt: transcriptionConfiguration.customPrompt,
+            includesContext: transcriptionConfiguration.includesContext,
+            existingDraftText: transcriptionConfiguration.existingDraftText,
+            maxContextMessages: maxContextMessages,
+            maxContextCharacters: maxContextCharacters
+        )
+        request.httpBody = try await makeRelayRequestData(
+            prompt: prompt,
+            audioAttachment: audioAttachment,
+            model: transcriptionConfiguration.model
         )
 
         let relaySession = makeRelayURLSession(
@@ -230,17 +234,31 @@ struct RelayTranscriptionService: AITranscriptionService {
         in conversation: ConversationThread,
         using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) -> RelayTranscriptionRequest {
+        let prompt = VoiceTranscriptionPromptBuilder.prompt(
+            for: conversation,
+            customPrompt: transcriptionConfiguration.customPrompt,
+            includesContext: transcriptionConfiguration.includesContext,
+            existingDraftText: transcriptionConfiguration.existingDraftText,
+            maxContextMessages: maxContextMessages,
+            maxContextCharacters: maxContextCharacters
+        )
+
+        return Self.makeRelayRequest(
+            for: audioAttachment,
+            prompt: prompt,
+            model: transcriptionConfiguration.model
+        )
+    }
+
+    nonisolated static func makeRelayRequest(
+        for audioAttachment: ChatAttachment,
+        prompt: String,
+        model: String
+    ) -> RelayTranscriptionRequest {
         RelayTranscriptionRequest(
-            model: transcriptionConfiguration.model,
+            model: model,
             systemPrompt: VoiceTranscriptionPromptBuilder.systemPrompt,
-            prompt: VoiceTranscriptionPromptBuilder.prompt(
-                for: conversation,
-                customPrompt: transcriptionConfiguration.customPrompt,
-                includesContext: transcriptionConfiguration.includesContext,
-                existingDraftText: transcriptionConfiguration.existingDraftText,
-                maxContextMessages: maxContextMessages,
-                maxContextCharacters: maxContextCharacters
-            ),
+            prompt: prompt,
             audio: RelayAttachment(
                 mimeType: audioAttachment.mimeType,
                 base64Data: audioAttachment.data.base64EncodedString(),
@@ -248,9 +266,29 @@ struct RelayTranscriptionService: AITranscriptionService {
             )
         )
     }
+
+    func makeRelayRequestData(
+        prompt: String,
+        audioAttachment: ChatAttachment,
+        model: String
+    ) async throws -> Data {
+        let attachment = audioAttachment
+
+        return try await Task.detached(priority: .userInitiated) {
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            return try encoder.encode(
+                Self.makeRelayRequest(
+                    for: attachment,
+                    prompt: prompt,
+                    model: model
+                )
+            )
+        }.value
+    }
 }
 
-struct RelayChatRequest: Codable, Equatable {
+nonisolated struct RelayChatRequest: Codable, Equatable, Sendable {
     var model: String
     var systemPrompt: String?
     var thinkingIntensity: AIThinkingIntensity
@@ -261,14 +299,14 @@ struct RelayChatRequest: Codable, Equatable {
     var messages: [RelayMessage]
 }
 
-struct RelayMessage: Codable, Equatable {
+nonisolated struct RelayMessage: Codable, Equatable, Sendable {
     var role: String
     var text: String?
     var modelResponseParts: [GeminiPartPayload]?
     var attachments: [RelayAttachment]
 }
 
-struct RelayAttachment: Codable, Equatable {
+nonisolated struct RelayAttachment: Codable, Equatable, Sendable {
     var mimeType: String
     var base64Data: String
     var filename: String
@@ -287,14 +325,14 @@ nonisolated struct RelayErrorEnvelope: Codable {
     var message: String
 }
 
-struct RelayTranscriptionRequest: Codable, Equatable {
+nonisolated struct RelayTranscriptionRequest: Codable, Equatable, Sendable {
     var model: String
     var systemPrompt: String
     var prompt: String
     var audio: RelayAttachment
 }
 
-struct RelayTranscriptionResponse: Decodable, Equatable {
+nonisolated struct RelayTranscriptionResponse: Decodable, Equatable, Sendable {
     var text: String
     var model: String?
 

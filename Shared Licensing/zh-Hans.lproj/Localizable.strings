@@ -75,6 +75,8 @@
 "error.voice.microphone_denied" = "请允许麦克风权限后再录音。";
 "error.voice.cannot_start" = "录音启动失败，请重试。";
 "error.voice.missing_recording" = "录音文件未生成，请重新录制。";
+"notice.voice.fallback_title" = "语音格式已回退";
+"notice.voice.wav_fallback" = "当前环境无法使用 AAC 录音，这条语音已改用 WAV 保存。音质不受影响，但文件会更大。";
 "app.version.unknown" = "未知";
 "model.subtitle.configured_default" = "当前默认值";
 "model.short.custom" = "自定义";
