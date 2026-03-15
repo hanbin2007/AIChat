@@ -290,10 +290,13 @@ private struct CompanionMetaChip: View {
 
     var body: some View {
         Label(title, systemImage: iconName)
-            .font(.caption.weight(.semibold))
+            .font(.system(.caption2, design: .rounded, weight: .semibold))
+            .imageScale(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(.cyan.opacity(0.92))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
                     .fill(Color.white.opacity(0.06))
