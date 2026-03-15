@@ -148,6 +148,54 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertTrue(attachment.filename.hasSuffix(".wav"))
     }
 
+    func testAssistantMessageNormalizerExtractsMarkdownDataImageAndDropsRawModelParts() {
+        let dataURI = "data:image/png;base64,\(onePixelPNGBase64)"
+        let original = ChatMessage(
+            role: .assistant,
+            text: "Before\n\n![generated](\(dataURI))\n\nAfter",
+            modelResponseParts: [
+                GeminiPart(
+                    text: "Before\n\n![generated](\(dataURI))\n\nAfter",
+                    inlineData: nil
+                )
+            ]
+        )
+
+        let normalized = AssistantMessageContentNormalizer.normalized(message: original)
+
+        XCTAssertEqual(normalized.text, "Before\n\nAfter")
+        XCTAssertEqual(normalized.attachments.count, 1)
+        XCTAssertEqual(normalized.attachments.first?.mimeType, "image/png")
+        XCTAssertNil(normalized.modelResponseParts)
+        XCTAssertFalse(normalized.text.contains("data:image/"))
+    }
+
+    func testAssistantMessageNormalizerExtractsHTMLDataImage() {
+        let html = #"<img alt="generated" src="data:image/png;base64,"# + onePixelPNGBase64 + #"" />"#
+        let normalized = AssistantMessageContentNormalizer.normalized(
+            message: ChatMessage(role: .assistant, text: html)
+        )
+
+        XCTAssertEqual(normalized.text, "")
+        XCTAssertEqual(normalized.attachments.count, 1)
+        XCTAssertEqual(normalized.attachments.first?.mimeType, "image/png")
+    }
+
+    func testAssistantMessageNormalizerHidesStreamingPartialDataImageTail() {
+        let partialBase64 = String(onePixelPNGBase64.prefix(24))
+        let normalized = AssistantMessageContentNormalizer.normalized(
+            message: ChatMessage(
+                role: .assistant,
+                text: "Here it is\n\n![generated](data:image/png;base64,\(partialBase64)",
+                status: .streaming
+            )
+        )
+
+        XCTAssertEqual(normalized.text.trimmingCharacters(in: .whitespacesAndNewlines), "Here it is")
+        XCTAssertTrue(normalized.attachments.isEmpty)
+        XCTAssertFalse(normalized.text.contains("data:image/"))
+    }
+
     func testContextWindowReusesStoredAssistantModelParts() {
         let storedParts = [
             GeminiPart(

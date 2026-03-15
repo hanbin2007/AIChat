@@ -1140,65 +1140,93 @@ nonisolated struct EmbeddedModelGeneratedImageExtraction: Equatable {
 }
 
 nonisolated enum AssistantMessageContentNormalizer {
-    private static let dataImageMarkdownPattern =
-        #"!\[[^\]]*\]\((data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]+)(?:\s+"[^"]*")?\)"#
+    private static let dataImageMarkdownRegex = try! NSRegularExpression(
+        pattern: #"!\[[^\]]*\]\(\s*(data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]+)(?:\s+"[^"]*")?\s*\)"#,
+        options: [.caseInsensitive]
+    )
+    private static let dataImageHTMLRegex = try! NSRegularExpression(
+        pattern: #"<img\b[^>]*\bsrc\s*=\s*(['"])(data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]+)\1[^>]*>"#,
+        options: [.caseInsensitive]
+    )
+    private static let trailingDataImageRegex = try! NSRegularExpression(
+        pattern: #"data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]+$"#,
+        options: [.caseInsensitive]
+    )
+    private static let trailingMarkdownDataImageRegex = try! NSRegularExpression(
+        pattern: #"!\[[^\]]*\]\(\s*data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]*$"#,
+        options: [.caseInsensitive]
+    )
+    private static let trailingHTMLDataImageRegex = try! NSRegularExpression(
+        pattern: #"<img\b[^>]*\bsrc\s*=\s*(['"])data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]*$"#,
+        options: [.caseInsensitive]
+    )
+    private static let trailingRawDataImageRegex = try! NSRegularExpression(
+        pattern: #"data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]*$"#,
+        options: [.caseInsensitive]
+    )
 
     static func extractEmbeddedImages(
         from text: String,
-        existingAttachments: [ChatAttachment] = []
+        existingAttachments: [ChatAttachment] = [],
+        hidesIncompleteTail: Bool = false
     ) -> EmbeddedModelGeneratedImageExtraction {
+        guard text.localizedCaseInsensitiveContains("data:image/") else {
+            return EmbeddedModelGeneratedImageExtraction(
+                text: text,
+                attachments: existingAttachments,
+                didChange: false
+            )
+        }
+
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let regex = try? NSRegularExpression(pattern: dataImageMarkdownPattern) else {
-            return EmbeddedModelGeneratedImageExtraction(
-                text: text,
-                attachments: existingAttachments,
-                didChange: false
-            )
-        }
-
-        let matches = regex.matches(in: text, range: nsRange)
-        guard matches.isEmpty == false else {
-            return EmbeddedModelGeneratedImageExtraction(
-                text: text,
-                attachments: existingAttachments,
-                didChange: false
-            )
-        }
-
         var mergedAttachments = existingAttachments
         var attachmentKeys = Set(existingAttachments.map(AttachmentDeduplicationKey.init))
-        var successfulMarkdownRanges: [NSRange] = []
+        var successfulRanges: [NSRange] = []
         var attachmentsChanged = false
+        let completeMatches: [(regex: NSRegularExpression, dataRangeIndex: Int)] = [
+            (dataImageMarkdownRegex, 1),
+            (dataImageHTMLRegex, 2),
+            (trailingDataImageRegex, 0)
+        ]
 
-        for match in matches {
-            guard match.numberOfRanges >= 2,
-                  let dataURIRange = Range(match.range(at: 1), in: text),
-                  let attachment = makeAttachment(fromDataURI: String(text[dataURIRange]))
-            else {
-                continue
+        for (regex, dataRangeIndex) in completeMatches {
+            for match in regex.matches(in: text, range: nsRange) {
+                let removalRange = match.range(at: 0)
+                guard removalRange.location != NSNotFound,
+                      successfulRanges.contains(where: { NSIntersectionRange($0, removalRange).length > 0 }) == false,
+                      let dataURIRange = Range(match.range(at: dataRangeIndex), in: text),
+                      let attachment = makeAttachment(fromDataURI: String(text[dataURIRange]))
+                else {
+                    continue
+                }
+
+                successfulRanges.append(removalRange)
+
+                let deduplicationKey = AttachmentDeduplicationKey(attachment)
+                if attachmentKeys.insert(deduplicationKey).inserted {
+                    mergedAttachments.append(attachment)
+                    attachmentsChanged = true
+                }
             }
-
-            successfulMarkdownRanges.append(match.range(at: 0))
-
-            let deduplicationKey = AttachmentDeduplicationKey(attachment)
-            if attachmentKeys.insert(deduplicationKey).inserted {
-                mergedAttachments.append(attachment)
-                attachmentsChanged = true
-            }
-        }
-
-        guard successfulMarkdownRanges.isEmpty == false else {
-            return EmbeddedModelGeneratedImageExtraction(
-                text: text,
-                attachments: existingAttachments,
-                didChange: false
-            )
         }
 
         var sanitizedText = text
-        for range in successfulMarkdownRanges.reversed() {
+        for range in successfulRanges.sorted(by: { $0.location > $1.location }) {
             guard let stringRange = Range(range, in: sanitizedText) else {
                 continue
+            }
+
+            sanitizedText.removeSubrange(stringRange)
+        }
+
+        if hidesIncompleteTail,
+           let trailingFragmentRange = trailingImageFragmentRange(in: sanitizedText) {
+            guard let stringRange = Range(trailingFragmentRange, in: sanitizedText) else {
+                return EmbeddedModelGeneratedImageExtraction(
+                    text: cleanupMarkdownText(afterRemovingImagesFrom: sanitizedText),
+                    attachments: mergedAttachments,
+                    didChange: attachmentsChanged || sanitizedText != text
+                )
             }
 
             sanitizedText.removeSubrange(stringRange)
@@ -1220,7 +1248,8 @@ nonisolated enum AssistantMessageContentNormalizer {
 
         let extraction = extractEmbeddedImages(
             from: message.text,
-            existingAttachments: message.attachments
+            existingAttachments: message.attachments,
+            hidesIncompleteTail: message.status == .streaming
         )
         guard extraction.didChange else {
             return message
@@ -1229,6 +1258,8 @@ nonisolated enum AssistantMessageContentNormalizer {
         var normalizedMessage = message
         normalizedMessage.text = extraction.text
         normalizedMessage.attachments = extraction.attachments
+        // Avoid reusing the original model parts when they contained raw data URIs.
+        normalizedMessage.modelResponseParts = nil
         return normalizedMessage
     }
 
@@ -1259,6 +1290,22 @@ nonisolated enum AssistantMessageContentNormalizer {
             with: "\n\n",
             options: .regularExpression
         )
+    }
+
+    private static func trailingImageFragmentRange(in text: String) -> NSRange? {
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let trailingMatchers = [
+            trailingMarkdownDataImageRegex,
+            trailingHTMLDataImageRegex,
+            trailingRawDataImageRegex
+        ]
+
+        return trailingMatchers
+            .compactMap { regex in
+                regex.firstMatch(in: text, range: nsRange)?.range(at: 0)
+            }
+            .filter { $0.location != NSNotFound }
+            .min(by: { $0.location < $1.location })
     }
 
     private static func makeAttachment(fromDataURI dataURI: String) -> ChatAttachment? {
