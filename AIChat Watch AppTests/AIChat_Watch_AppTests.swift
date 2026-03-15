@@ -194,6 +194,22 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[1].parts.first?.thoughtSignature, "sig-1")
     }
 
+    func testMergeGeminiStreamModelResponsePartsKeepsVisibleTextWhenFinalChunkOnlyCarriesThoughtSignature() {
+        let merged = mergeGeminiStreamModelResponseParts(
+            previousParts: [
+                GeminiPartPayload(text: "你可以用 Python 帮我画图。")
+            ],
+            incomingParts: [
+                GeminiPartPayload(text: "", thoughtSignature: "sig-final")
+            ]
+        )
+
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.first?.text, "你可以用 Python 帮我画图。")
+        XCTAssertEqual(merged.last?.text, "")
+        XCTAssertEqual(merged.last?.thoughtSignature, "sig-final")
+    }
+
     func testGemini3RequestUsesThinkingLevel() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Explain this image")],

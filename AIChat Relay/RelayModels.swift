@@ -432,6 +432,28 @@ struct GeminiPartPayload: Codable, Equatable, Hashable, Sendable {
         return GeminiInlineData(mimeType: mimeType, data: data)
     }
 
+    var thoughtSignature: String? {
+        value(forKeys: "thoughtSignature", "thought_signature")?.stringValue
+    }
+
+    var hasNonSignaturePayload: Bool {
+        for (key, value) in rawObject {
+            switch key {
+            case "thought", "thoughtSignature", "thought_signature":
+                continue
+            case "text":
+                if let text = value.stringValue, text.isEmpty {
+                    continue
+                }
+                return true
+            default:
+                return true
+            }
+        }
+
+        return false
+    }
+
     private func value(forKeys keys: String...) -> JSONValue? {
         for key in keys {
             if let value = rawObject[key] {

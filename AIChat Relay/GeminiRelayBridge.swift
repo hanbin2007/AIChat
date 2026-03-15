@@ -107,7 +107,10 @@ struct GeminiRelayBridge {
             }
             if let modelResponseParts = parts.modelResponseParts,
                modelResponseParts.isEmpty == false {
-                latestModelResponseParts = modelResponseParts
+                latestModelResponseParts = mergeGeminiStreamModelResponseParts(
+                    previousParts: latestModelResponseParts,
+                    incomingParts: modelResponseParts
+                )
             }
 
             for attachment in parts.attachments {
@@ -575,6 +578,26 @@ struct GeminiRelayBridge {
         }
 
         throw RelayHTTPError.invalidUpstreamResponse
+    }
+
+    private func mergeGeminiStreamModelResponseParts(
+        previousParts: [GeminiPartPayload]?,
+        incomingParts: [GeminiPartPayload]
+    ) -> [GeminiPartPayload] {
+        guard incomingParts.isEmpty == false else {
+            return previousParts ?? []
+        }
+
+        if incomingParts.contains(where: \.hasNonSignaturePayload) {
+            return incomingParts
+        }
+
+        var mergedParts = previousParts ?? []
+        for part in incomingParts where mergedParts.contains(part) == false {
+            mergedParts.append(part)
+        }
+
+        return mergedParts
     }
 
     private func transcriptionCompletionError(
