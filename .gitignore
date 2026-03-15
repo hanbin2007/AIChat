@@ -2,6 +2,9 @@ DerivedData/
 .build/
 /build/
 .package-cache/
+Packages/*/build/
+Packages/*/.build/
+Packages/*/.swiftpm/
 AIChat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 *.xcuserstate
 *.xcuserdata/

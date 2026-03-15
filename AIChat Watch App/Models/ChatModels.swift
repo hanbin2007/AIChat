@@ -122,12 +122,211 @@ nonisolated enum AIThinkingIntensity: String, Codable, CaseIterable, Hashable, I
     }
 }
 
+nonisolated enum JSONValue: Codable, Equatable, Hashable, Sendable {
+    case string(String)
+    case integer(Int64)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let int = try? container.decode(Int64.self) {
+            self = .integer(int)
+        } else if let double = try? container.decode(Double.self) {
+            self = .number(double)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value."
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .integer(let value):
+            try container.encode(value)
+        case .number(let value):
+            try container.encode(value)
+        case .bool(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .string(let value):
+            hasher.combine(0)
+            hasher.combine(value)
+        case .integer(let value):
+            hasher.combine(1)
+            hasher.combine(value)
+        case .number(let value):
+            hasher.combine(2)
+            hasher.combine(value)
+        case .bool(let value):
+            hasher.combine(3)
+            hasher.combine(value)
+        case .object(let value):
+            hasher.combine(4)
+            for key in value.keys.sorted() {
+                hasher.combine(key)
+                hasher.combine(value[key])
+            }
+        case .array(let value):
+            hasher.combine(5)
+            for item in value {
+                hasher.combine(item)
+            }
+        case .null:
+            hasher.combine(6)
+        }
+    }
+
+    var stringValue: String? {
+        guard case .string(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
+
+    var objectValue: [String: JSONValue]? {
+        guard case .object(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
+}
+
+nonisolated struct GeminiPartPayload: Codable, Equatable, Hashable, Sendable {
+    private var rawObject: [String: JSONValue]
+
+    init(
+        text: String? = nil,
+        inlineData: GeminiPartInlineData? = nil,
+        thought: Bool? = nil,
+        thoughtSignature: String? = nil
+    ) {
+        var rawObject: [String: JSONValue] = [:]
+        if let text {
+            rawObject["text"] = .string(text)
+        }
+        if let inlineData {
+            rawObject["inlineData"] = .object([
+                "mimeType": .string(inlineData.mimeType),
+                "data": .string(inlineData.data)
+            ])
+        }
+        if let thought {
+            rawObject["thought"] = .bool(thought)
+        }
+        if let thoughtSignature {
+            rawObject["thoughtSignature"] = .string(thoughtSignature)
+        }
+
+        self.rawObject = rawObject
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.rawObject = try container.decode([String: JSONValue].self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawObject)
+    }
+
+    var text: String? {
+        value(forKeys: "text")?.stringValue
+    }
+
+    var inlineData: GeminiPartInlineData? {
+        guard let object = value(forKeys: "inlineData", "inline_data")?.objectValue,
+              let mimeType = object["mimeType"]?.stringValue ?? object["mime_type"]?.stringValue,
+              let data = object["data"]?.stringValue
+        else {
+            return nil
+        }
+
+        return GeminiPartInlineData(mimeType: mimeType, data: data)
+    }
+
+    var thought: Bool? {
+        value(forKeys: "thought")?.boolValue
+    }
+
+    var thoughtSignature: String? {
+        value(forKeys: "thoughtSignature", "thought_signature")?.stringValue
+    }
+
+    var hasRecoverableContent: Bool {
+        text?.isEmpty == false ||
+        inlineData != nil ||
+        rawObject.isEmpty == false
+    }
+
+    private func value(forKeys keys: String...) -> JSONValue? {
+        for key in keys {
+            if let value = rawObject[key] {
+                return value
+            }
+        }
+
+        return nil
+    }
+}
+
+nonisolated struct GeminiPartInlineData: Codable, Equatable, Hashable, Sendable {
+    var mimeType: String
+    var data: String
+}
+
+typealias GeminiPart = GeminiPartPayload
+typealias GeminiInlineData = GeminiPartInlineData
+
 nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
     var model: String
     var thinkingIntensity: AIThinkingIntensity
     var systemPromptMode: AISystemPromptMode
     var customSystemPrompt: String?
     var usesGlobalPinnedMemory: Bool
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
 
     private enum CodingKeys: String, CodingKey {
         case model
@@ -135,6 +334,8 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         case systemPromptMode
         case customSystemPrompt
         case usesGlobalPinnedMemory
+        case usesGoogleSearch
+        case usesCodeExecution
     }
 
     init(
@@ -142,13 +343,17 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         thinkingIntensity: AIThinkingIntensity = .balanced,
         systemPromptMode: AISystemPromptMode = .concise,
         customSystemPrompt: String? = nil,
-        usesGlobalPinnedMemory: Bool = false
+        usesGlobalPinnedMemory: Bool = false,
+        usesGoogleSearch: Bool = false,
+        usesCodeExecution: Bool = false
     ) {
         self.model = model
         self.thinkingIntensity = thinkingIntensity
         self.systemPromptMode = systemPromptMode
         self.customSystemPrompt = customSystemPrompt?.nonEmptyTrimmed
         self.usesGlobalPinnedMemory = usesGlobalPinnedMemory
+        self.usesGoogleSearch = usesGoogleSearch
+        self.usesCodeExecution = usesCodeExecution
     }
 
     init(from decoder: Decoder) throws {
@@ -158,6 +363,8 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         self.systemPromptMode = try container.decodeIfPresent(AISystemPromptMode.self, forKey: .systemPromptMode) ?? .concise
         self.customSystemPrompt = try container.decodeIfPresent(String.self, forKey: .customSystemPrompt)?.nonEmptyTrimmed
         self.usesGlobalPinnedMemory = try container.decodeIfPresent(Bool.self, forKey: .usesGlobalPinnedMemory) ?? false
+        self.usesGoogleSearch = try container.decodeIfPresent(Bool.self, forKey: .usesGoogleSearch) ?? false
+        self.usesCodeExecution = try container.decodeIfPresent(Bool.self, forKey: .usesCodeExecution) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -167,6 +374,8 @@ nonisolated struct ConversationAIConfiguration: Codable, Equatable, Hashable {
         try container.encode(systemPromptMode, forKey: .systemPromptMode)
         try container.encode(customSystemPrompt?.nonEmptyTrimmed, forKey: .customSystemPrompt)
         try container.encode(usesGlobalPinnedMemory, forKey: .usesGlobalPinnedMemory)
+        try container.encode(usesGoogleSearch, forKey: .usesGoogleSearch)
+        try container.encode(usesCodeExecution, forKey: .usesCodeExecution)
     }
 }
 
@@ -462,6 +671,32 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
         )
     }
 
+    static func makeModelGeneratedImage(
+        from rawData: Data,
+        mimeType: String,
+        suggestedFilename: String? = nil
+    ) throws -> ChatAttachment {
+        guard let image = UIImage(data: rawData) else {
+            throw AttachmentProcessingError.unsupportedImage
+        }
+
+        let normalizedMimeType = mimeType.nonEmptyTrimmed ?? "image/png"
+        let fileExtension = preferredImageFileExtension(for: normalizedMimeType)
+        let filenameStem = URL(fileURLWithPath: suggestedFilename ?? "generated-image.\(fileExtension)")
+            .deletingPathExtension()
+            .lastPathComponent
+            .nonEmptyTrimmed ?? "generated-image"
+
+        return ChatAttachment(
+            kind: .image,
+            filename: "\(filenameStem)-\(UUID().uuidString.prefix(6)).\(fileExtension)",
+            mimeType: normalizedMimeType,
+            data: rawData,
+            pixelWidth: Int(image.size.width),
+            pixelHeight: Int(image.size.height)
+        )
+    }
+
     static func makeRecordedAudio(
         from rawData: Data,
         suggestedFilename: String?,
@@ -504,6 +739,21 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable {
 
         return .image
     }
+
+    private static func preferredImageFileExtension(for mimeType: String) -> String {
+        switch mimeType.lowercased() {
+        case "image/png":
+            return "png"
+        case "image/jpeg", "image/jpg":
+            return "jpg"
+        case "image/gif":
+            return "gif"
+        case "image/webp":
+            return "webp"
+        default:
+            return "img"
+        }
+    }
 }
 
 typealias ChatImageAttachment = ChatAttachment
@@ -513,6 +763,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     var role: ChatRole
     var text: String
     var thoughtSummary: String?
+    var modelResponseParts: [GeminiPartPayload]?
     var createdAt: Date
     var attachments: [ChatAttachment]
     var status: ChatMessageStatus
@@ -522,6 +773,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         role: ChatRole,
         text: String,
         thoughtSummary: String? = nil,
+        modelResponseParts: [GeminiPartPayload]? = nil,
         createdAt: Date = .now,
         attachments: [ChatAttachment] = [],
         status: ChatMessageStatus = .sent
@@ -530,6 +782,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         self.role = role
         self.text = text
         self.thoughtSummary = thoughtSummary
+        self.modelResponseParts = modelResponseParts?.isEmpty == true ? nil : modelResponseParts
         self.createdAt = createdAt
         self.attachments = attachments
         self.status = status
@@ -543,11 +796,186 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         thoughtSummary?.nonEmptyTrimmed
     }
 
+    var cleanedModelResponseParts: [GeminiPartPayload]? {
+        guard let modelResponseParts, modelResponseParts.contains(where: \.hasRecoverableContent) else {
+            return nil
+        }
+
+        return modelResponseParts
+    }
+
     var hasVisibleContent: Bool {
         cleanedText.isEmpty == false ||
         cleanedThoughtSummary != nil ||
+        cleanedModelResponseParts != nil ||
         attachments.isEmpty == false ||
         status == .streaming
+    }
+}
+
+nonisolated struct EmbeddedModelGeneratedImageExtraction: Equatable {
+    var text: String
+    var attachments: [ChatAttachment]
+    var didChange: Bool
+}
+
+nonisolated enum AssistantMessageContentNormalizer {
+    private static let dataImageMarkdownPattern =
+        #"!\[[^\]]*\]\((data:image\/[-+.A-Za-z0-9]+;base64,[A-Za-z0-9+\/=\s]+)(?:\s+"[^"]*")?\)"#
+
+    static func extractEmbeddedImages(
+        from text: String,
+        existingAttachments: [ChatAttachment] = []
+    ) -> EmbeddedModelGeneratedImageExtraction {
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let regex = try? NSRegularExpression(pattern: dataImageMarkdownPattern) else {
+            return EmbeddedModelGeneratedImageExtraction(
+                text: text,
+                attachments: existingAttachments,
+                didChange: false
+            )
+        }
+
+        let matches = regex.matches(in: text, range: nsRange)
+        guard matches.isEmpty == false else {
+            return EmbeddedModelGeneratedImageExtraction(
+                text: text,
+                attachments: existingAttachments,
+                didChange: false
+            )
+        }
+
+        var mergedAttachments = existingAttachments
+        var attachmentKeys = Set(existingAttachments.map(AttachmentDeduplicationKey.init))
+        var successfulMarkdownRanges: [NSRange] = []
+        var attachmentsChanged = false
+
+        for match in matches {
+            guard match.numberOfRanges >= 2,
+                  let dataURIRange = Range(match.range(at: 1), in: text),
+                  let attachment = makeAttachment(fromDataURI: String(text[dataURIRange]))
+            else {
+                continue
+            }
+
+            successfulMarkdownRanges.append(match.range(at: 0))
+
+            let deduplicationKey = AttachmentDeduplicationKey(attachment)
+            if attachmentKeys.insert(deduplicationKey).inserted {
+                mergedAttachments.append(attachment)
+                attachmentsChanged = true
+            }
+        }
+
+        guard successfulMarkdownRanges.isEmpty == false else {
+            return EmbeddedModelGeneratedImageExtraction(
+                text: text,
+                attachments: existingAttachments,
+                didChange: false
+            )
+        }
+
+        var sanitizedText = text
+        for range in successfulMarkdownRanges.reversed() {
+            guard let stringRange = Range(range, in: sanitizedText) else {
+                continue
+            }
+
+            sanitizedText.removeSubrange(stringRange)
+        }
+
+        sanitizedText = cleanupMarkdownText(afterRemovingImagesFrom: sanitizedText)
+
+        return EmbeddedModelGeneratedImageExtraction(
+            text: sanitizedText,
+            attachments: mergedAttachments,
+            didChange: attachmentsChanged || sanitizedText != text
+        )
+    }
+
+    static func normalized(message: ChatMessage) -> ChatMessage {
+        guard message.role == .assistant, message.text.isEmpty == false else {
+            return message
+        }
+
+        let extraction = extractEmbeddedImages(
+            from: message.text,
+            existingAttachments: message.attachments
+        )
+        guard extraction.didChange else {
+            return message
+        }
+
+        var normalizedMessage = message
+        normalizedMessage.text = extraction.text
+        normalizedMessage.attachments = extraction.attachments
+        return normalizedMessage
+    }
+
+    static func normalized(conversation: ConversationThread) -> (conversation: ConversationThread, didChange: Bool) {
+        var normalizedConversation = conversation
+        var didChange = false
+
+        for index in normalizedConversation.messages.indices {
+            let normalizedMessage = normalized(message: normalizedConversation.messages[index])
+            if normalizedMessage != normalizedConversation.messages[index] {
+                normalizedConversation.messages[index] = normalizedMessage
+                didChange = true
+            }
+        }
+
+        return (normalizedConversation, didChange)
+    }
+
+    private static func cleanupMarkdownText(afterRemovingImagesFrom text: String) -> String {
+        let withoutTrailingLineSpaces = text.replacingOccurrences(
+            of: #"[ \t]+\n"#,
+            with: "\n",
+            options: .regularExpression
+        )
+
+        return withoutTrailingLineSpaces.replacingOccurrences(
+            of: #"\n{3,}"#,
+            with: "\n\n",
+            options: .regularExpression
+        )
+    }
+
+    private static func makeAttachment(fromDataURI dataURI: String) -> ChatAttachment? {
+        guard dataURI.hasPrefix("data:") else {
+            return nil
+        }
+
+        let payload = String(dataURI.dropFirst(5))
+        guard let commaIndex = payload.firstIndex(of: ",") else {
+            return nil
+        }
+
+        let metadata = String(payload[..<commaIndex])
+        let encodedPayload = String(payload[payload.index(after: commaIndex)...])
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        let metadataComponents = metadata.split(separator: ";", omittingEmptySubsequences: false)
+        let mimeType = metadataComponents.first.map(String.init)?.nonEmptyTrimmed
+        guard let mimeType,
+              mimeType.lowercased().hasPrefix("image/"),
+              metadataComponents.contains(where: { $0.caseInsensitiveCompare("base64") == .orderedSame }),
+              let rawData = Data(base64Encoded: encodedPayload, options: [.ignoreUnknownCharacters]),
+              let attachment = try? ChatAttachment.makeModelGeneratedImage(from: rawData, mimeType: mimeType)
+        else {
+            return nil
+        }
+
+        return attachment
+    }
+
+    private struct AttachmentDeduplicationKey: Hashable {
+        let mimeType: String
+        let data: Data
+
+        init(_ attachment: ChatAttachment) {
+            self.mimeType = attachment.mimeType
+            self.data = attachment.data
+        }
     }
 }
 

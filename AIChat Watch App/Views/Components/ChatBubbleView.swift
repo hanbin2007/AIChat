@@ -668,6 +668,8 @@ private extension View {
 private struct AttachmentGridView: View {
     let attachments: [ChatAttachment]
 
+    @State private var selectedImageAttachment: ChatAttachment?
+
     private let columns = [
         GridItem(.flexible(), spacing: 6),
         GridItem(.flexible(), spacing: 6)
@@ -676,7 +678,31 @@ private struct AttachmentGridView: View {
     var body: some View {
         LazyVGrid(columns: attachments.count == 1 ? [GridItem(.flexible())] : columns, spacing: 6) {
             ForEach(attachments) { attachment in
-                AttachmentThumbnailView(attachment: attachment)
+                if attachment.previewImage != nil {
+                    Button {
+                        selectedImageAttachment = attachment
+                    } label: {
+                        AttachmentThumbnailView(
+                            attachment: attachment,
+                            isZoomable: true
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Tap to enlarge")
+                } else {
+                    AttachmentThumbnailView(
+                        attachment: attachment,
+                        isZoomable: false
+                    )
+                }
+            }
+        }
+        .sheet(item: $selectedImageAttachment) { attachment in
+            if let image = attachment.previewImage {
+                AttachmentImageViewer(
+                    image: image,
+                    title: attachment.filename
+                )
             }
         }
     }
@@ -684,6 +710,7 @@ private struct AttachmentGridView: View {
 
 private struct AttachmentThumbnailView: View {
     let attachment: ChatAttachment
+    let isZoomable: Bool
 
     var body: some View {
         ZStack {
@@ -691,6 +718,16 @@ private struct AttachmentThumbnailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .overlay(alignment: .topTrailing) {
+                        if isZoomable {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(6)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .padding(6)
+                        }
+                    }
             } else {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
@@ -736,5 +773,118 @@ private struct AttachmentThumbnailView: View {
         formatter.allowedUnits = [.minute, .second]
         formatter.zeroFormattingBehavior = [.pad]
         return formatter.string(from: durationSeconds)
+    }
+}
+
+private struct AttachmentImageViewer: View {
+    let image: UIImage
+    let title: String
+
+    #if os(watchOS)
+    @State private var crownZoomScale = 1.0
+    #endif
+    @State private var gestureZoomScale: CGFloat = 1
+    @State private var accumulatedGestureZoomScale: CGFloat = 1
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geometry in
+                ScrollView([.horizontal, .vertical]) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(
+                            width: fittedImageSize(in: geometry.size).width * currentZoomScale,
+                            height: fittedImageSize(in: geometry.size).height * currentZoomScale
+                        )
+                        .padding(12)
+                        .frame(
+                            minWidth: geometry.size.width,
+                            minHeight: geometry.size.height,
+                            alignment: .center
+                        )
+                }
+                .background(Color.black.ignoresSafeArea())
+                #if !os(watchOS)
+                .gesture(magnificationGesture)
+                #endif
+                #if os(watchOS)
+                .focusable(true)
+                .digitalCrownRotation(
+                    $crownZoomScale,
+                    from: 1,
+                    through: 6,
+                    by: 0.05,
+                    sensitivity: .medium,
+                    isContinuous: false,
+                    isHapticFeedbackEnabled: true
+                )
+                #endif
+            }
+            .navigationTitle(viewerTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Reset") {
+                        resetZoom()
+                    }
+                }
+            }
+        }
+    }
+
+    private var currentZoomScale: CGFloat {
+        let platformScale: CGFloat
+        #if os(watchOS)
+        platformScale = CGFloat(crownZoomScale)
+        #else
+        platformScale = 1
+        #endif
+
+        return max(1, min(platformScale * gestureZoomScale, 6))
+    }
+
+    private var viewerTitle: String {
+        let trimmedTitle = title.trimmed
+        return trimmedTitle.isEmpty ? "Image" : trimmedTitle
+    }
+
+    #if !os(watchOS)
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                gestureZoomScale = max(1, min(accumulatedGestureZoomScale * value, 6))
+            }
+            .onEnded { _ in
+                accumulatedGestureZoomScale = gestureZoomScale
+            }
+    }
+    #endif
+
+    private func fittedImageSize(in availableSize: CGSize) -> CGSize {
+        let maxWidth = max(availableSize.width - 24, 1)
+        let maxHeight = max(availableSize.height - 24, 1)
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else {
+            return CGSize(width: maxWidth, height: maxHeight)
+        }
+
+        let widthScale = maxWidth / sourceSize.width
+        let heightScale = maxHeight / sourceSize.height
+        let scale = min(widthScale, heightScale)
+
+        return CGSize(
+            width: sourceSize.width * scale,
+            height: sourceSize.height * scale
+        )
+    }
+
+    private func resetZoom() {
+        #if os(watchOS)
+        crownZoomScale = 1
+        #endif
+        gestureZoomScale = 1
+        accumulatedGestureZoomScale = 1
     }
 }

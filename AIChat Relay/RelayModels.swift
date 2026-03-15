@@ -59,16 +59,19 @@ struct RelayChatRequest: Decodable, Sendable {
     var thinkingIntensity: String?
     var maxOutputTokens: Int?
     var includeThoughts: Bool?
+    var usesGoogleSearch: Bool?
+    var usesCodeExecution: Bool?
     var messages: [RelayMessage]
 }
 
 struct RelayMessage: Decodable, Sendable {
     var role: String
     var text: String?
+    var modelResponseParts: [GeminiPartPayload]?
     var attachments: [RelayAttachment]
 }
 
-struct RelayAttachment: Decodable, Sendable {
+struct RelayAttachment: Codable, Sendable {
     var mimeType: String
     var base64Data: String
     var filename: String
@@ -169,6 +172,8 @@ struct RelayErrorEnvelope: Encodable, Sendable {
 enum RelayOutboundEvent: Sendable {
     case answerDelta(String)
     case thoughtDelta(String)
+    case modelResponseParts([GeminiPartPayload])
+    case attachment(RelayAttachment)
     case done(String)
     case error(String)
 
@@ -178,6 +183,10 @@ enum RelayOutboundEvent: Sendable {
             return "answer_delta"
         case .thoughtDelta:
             return "thought_delta"
+        case .modelResponseParts:
+            return "model_content"
+        case .attachment:
+            return "attachment"
         case .done:
             return "done"
         case .error:
@@ -191,13 +200,17 @@ enum RelayOutboundEvent: Sendable {
 
         switch self {
         case .answerDelta(let text):
-            payload = RelaySSEPayload(type: "answer_delta", text: text, message: nil, finishReason: nil)
+            payload = RelaySSEPayload(type: "answer_delta", text: text, parts: nil, message: nil, finishReason: nil, attachment: nil)
         case .thoughtDelta(let text):
-            payload = RelaySSEPayload(type: "thought_delta", text: text, message: nil, finishReason: nil)
+            payload = RelaySSEPayload(type: "thought_delta", text: text, parts: nil, message: nil, finishReason: nil, attachment: nil)
+        case .modelResponseParts(let parts):
+            payload = RelaySSEPayload(type: "model_content", text: nil, parts: parts, message: nil, finishReason: nil, attachment: nil)
+        case .attachment(let attachment):
+            payload = RelaySSEPayload(type: "attachment", text: nil, parts: nil, message: nil, finishReason: nil, attachment: attachment)
         case .done(let finishReason):
-            payload = RelaySSEPayload(type: "done", text: nil, message: nil, finishReason: finishReason)
+            payload = RelaySSEPayload(type: "done", text: nil, parts: nil, message: nil, finishReason: finishReason, attachment: nil)
         case .error(let message):
-            payload = RelaySSEPayload(type: "error", text: nil, message: message, finishReason: nil)
+            payload = RelaySSEPayload(type: "error", text: nil, parts: nil, message: message, finishReason: nil, attachment: nil)
         }
 
         let payloadData = try encoder.encode(payload)
@@ -212,27 +225,225 @@ enum RelayOutboundEvent: Sendable {
 private struct RelaySSEPayload: Encodable, Sendable {
     var type: String
     var text: String?
+    var parts: [GeminiPartPayload]?
     var message: String?
     var finishReason: String?
+    var attachment: RelayAttachment?
+}
+
+enum JSONValue: Codable, Equatable, Hashable, Sendable {
+    case string(String)
+    case integer(Int64)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let int = try? container.decode(Int64.self) {
+            self = .integer(int)
+        } else if let double = try? container.decode(Double.self) {
+            self = .number(double)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value."
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .integer(let value):
+            try container.encode(value)
+        case .number(let value):
+            try container.encode(value)
+        case .bool(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .string(let value):
+            hasher.combine(0)
+            hasher.combine(value)
+        case .integer(let value):
+            hasher.combine(1)
+            hasher.combine(value)
+        case .number(let value):
+            hasher.combine(2)
+            hasher.combine(value)
+        case .bool(let value):
+            hasher.combine(3)
+            hasher.combine(value)
+        case .object(let value):
+            hasher.combine(4)
+            for key in value.keys.sorted() {
+                hasher.combine(key)
+                hasher.combine(value[key])
+            }
+        case .array(let value):
+            hasher.combine(5)
+            for item in value {
+                hasher.combine(item)
+            }
+        case .null:
+            hasher.combine(6)
+        }
+    }
+
+    var stringValue: String? {
+        guard case .string(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
+
+    var objectValue: [String: JSONValue]? {
+        guard case .object(let value) = self else {
+            return nil
+        }
+
+        return value
+    }
 }
 
 struct GeminiGenerateContentRequest: Encodable, Sendable {
     var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
+    var tools: [GeminiTool]?
     var generationConfig: GeminiGenerationConfig
+
+    init(
+        systemInstruction: GeminiContent?,
+        contents: [GeminiContent],
+        tools: [GeminiTool]? = nil,
+        generationConfig: GeminiGenerationConfig
+    ) {
+        self.systemInstruction = systemInstruction
+        self.contents = contents
+        self.tools = tools
+        self.generationConfig = generationConfig
+    }
 }
 
 struct GeminiContent: Encodable, Sendable {
     var role: String?
-    var parts: [GeminiPart]
+    var parts: [GeminiPartPayload]
 }
 
-struct GeminiPart: Encodable, Sendable {
-    var text: String?
-    var inlineData: GeminiInlineData?
+struct GeminiTool: Encodable, Sendable {
+    var googleSearch: GeminiGoogleSearchTool?
+    var codeExecution: GeminiCodeExecutionTool?
 }
 
-struct GeminiInlineData: Encodable, Sendable {
+struct GeminiGoogleSearchTool: Encodable, Sendable {}
+
+struct GeminiCodeExecutionTool: Encodable, Sendable {}
+
+struct GeminiPartPayload: Codable, Equatable, Hashable, Sendable {
+    private var rawObject: [String: JSONValue]
+
+    init(
+        text: String? = nil,
+        inlineData: GeminiInlineData? = nil,
+        thought: Bool? = nil,
+        thoughtSignature: String? = nil
+    ) {
+        var rawObject: [String: JSONValue] = [:]
+        if let text {
+            rawObject["text"] = .string(text)
+        }
+        if let inlineData {
+            rawObject["inlineData"] = .object([
+                "mimeType": .string(inlineData.mimeType),
+                "data": .string(inlineData.data)
+            ])
+        }
+        if let thought {
+            rawObject["thought"] = .bool(thought)
+        }
+        if let thoughtSignature {
+            rawObject["thoughtSignature"] = .string(thoughtSignature)
+        }
+
+        self.rawObject = rawObject
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.rawObject = try container.decode([String: JSONValue].self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawObject)
+    }
+
+    var text: String? {
+        value(forKeys: "text")?.stringValue
+    }
+
+    var thought: Bool? {
+        value(forKeys: "thought")?.boolValue
+    }
+
+    var inlineData: GeminiInlineData? {
+        guard let object = value(forKeys: "inlineData", "inline_data")?.objectValue,
+              let mimeType = object["mimeType"]?.stringValue ?? object["mime_type"]?.stringValue,
+              let data = object["data"]?.stringValue
+        else {
+            return nil
+        }
+
+        return GeminiInlineData(mimeType: mimeType, data: data)
+    }
+
+    private func value(forKeys keys: String...) -> JSONValue? {
+        for key in keys {
+            if let value = rawObject[key] {
+                return value
+            }
+        }
+
+        return nil
+    }
+}
+
+struct GeminiInlineData: Codable, Sendable {
     var mimeType: String
     var data: String
 }
@@ -261,12 +472,7 @@ struct GeminiCandidate: Decodable, Sendable {
 }
 
 struct GeminiChunkContent: Decodable, Sendable {
-    var parts: [GeminiChunkPart]?
-}
-
-struct GeminiChunkPart: Decodable, Sendable {
-    var text: String?
-    var thought: Bool?
+    var parts: [GeminiPartPayload]?
 }
 
 struct GeminiAPIErrorEnvelope: Decodable, Sendable {

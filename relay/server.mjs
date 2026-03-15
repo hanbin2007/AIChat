@@ -70,6 +70,20 @@ function temperatureForModel(model, fallbackTemperature) {
   return String(model || "").startsWith("gemini-3") ? 1 : fallbackTemperature;
 }
 
+function toolsFor(body) {
+  const tools = [];
+
+  if (body.usesGoogleSearch === true) {
+    tools.push({ google_search: {} });
+  }
+
+  if (body.usesCodeExecution === true) {
+    tools.push({ code_execution: {} });
+  }
+
+  return tools.length > 0 ? tools : undefined;
+}
+
 function toGeminiRequest(body, model) {
   return {
     systemInstruction: body.systemPrompt
@@ -106,7 +120,8 @@ function toGeminiRequest(body, model) {
           ? Math.floor(body.maxOutputTokens)
           : maxOutputTokensForModel(model),
       thinkingConfig: thinkingConfigFor(model, body.thinkingIntensity, body.includeThoughts !== false)
-    }
+    },
+    tools: toolsFor(body)
   };
 }
 
@@ -242,10 +257,18 @@ function extractChunkParts(chunk) {
     .map((part) => part.text || "")
     .join("\n")
     .trim();
+  const attachments = parts
+    .filter((part) => String(part?.inlineData?.mimeType || "").toLowerCase().startsWith("image/"))
+    .map((part) => ({
+      mimeType: part.inlineData.mimeType,
+      base64Data: part.inlineData.data,
+      filename: "generated-image"
+    }));
 
   return {
     answerText,
     thoughtText,
+    attachments,
     finishReason: typeof candidate?.finishReason === "string" ? candidate.finishReason.trim() : ""
   };
 }
@@ -419,6 +442,7 @@ async function streamGeminiResponse({ model, requestBody, res }) {
   let buffered = "";
   let emittedAnswerText = "";
   let emittedThoughtText = "";
+  const emittedAttachmentKeys = new Set();
   let finishReason = "";
 
   for await (const chunk of geminiResponse.body) {
@@ -444,9 +468,20 @@ async function streamGeminiResponse({ model, requestBody, res }) {
         continue;
       }
 
-      const { answerText, thoughtText, finishReason: chunkFinishReason } = extractChunkParts(parsed);
+      const { answerText, thoughtText, attachments, finishReason: chunkFinishReason } = extractChunkParts(parsed);
       if (chunkFinishReason) {
         finishReason = chunkFinishReason;
+      }
+
+      for (const attachment of attachments) {
+        const attachmentKey = `${String(attachment.mimeType || "").toLowerCase()}|${attachment.base64Data || ""}`;
+        if (emittedAttachmentKeys.has(attachmentKey)) {
+          continue;
+        }
+
+        emittedAttachmentKeys.add(attachmentKey);
+        res.write(`event: attachment\n`);
+        res.write(`data: ${JSON.stringify({ type: "attachment", attachment })}\n\n`);
       }
 
       if (thoughtText) {
@@ -479,9 +514,20 @@ async function streamGeminiResponse({ model, requestBody, res }) {
       if (payload && payload !== "[DONE]") {
         try {
           const parsed = JSON.parse(payload);
-          const { answerText, thoughtText, finishReason: chunkFinishReason } = extractChunkParts(parsed);
+          const { answerText, thoughtText, attachments, finishReason: chunkFinishReason } = extractChunkParts(parsed);
           if (chunkFinishReason) {
             finishReason = chunkFinishReason;
+          }
+
+          for (const attachment of attachments) {
+            const attachmentKey = `${String(attachment.mimeType || "").toLowerCase()}|${attachment.base64Data || ""}`;
+            if (emittedAttachmentKeys.has(attachmentKey)) {
+              continue;
+            }
+
+            emittedAttachmentKeys.add(attachmentKey);
+            res.write(`event: attachment\n`);
+            res.write(`data: ${JSON.stringify({ type: "attachment", attachment })}\n\n`);
           }
 
           if (thoughtText) {

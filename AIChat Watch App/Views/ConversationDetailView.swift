@@ -61,6 +61,7 @@ struct ConversationDetailView: View {
     @StateObject private var voiceRecorder = VoiceRecorder()
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var isShowingSettings = false
+    @State private var isShowingToolSettings = false
     @State private var isShowingModelPicker = false
     @State private var isShowingThinkingPicker = false
     @State private var isComposerExpanded = true
@@ -136,6 +137,9 @@ struct ConversationDetailView: View {
         }
         .sheet(isPresented: $isShowingSettings) {
             ConversationSettingsView(conversationID: conversationID)
+        }
+        .sheet(isPresented: $isShowingToolSettings) {
+            conversationToolSheet
         }
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
@@ -563,21 +567,19 @@ struct ConversationDetailView: View {
                 )
                 .accessibilityHint("Long press to send the recorded audio directly.")
 
-                PhotosPicker(
-                    selection: $selectedPhotoItems,
-                    maxSelectionCount: 3,
-                    matching: .images
-                ) {
-                    ComposerFlatActionButtonLabel(
-                        systemName: "photo.on.rectangle",
-                        title: "Photo",
-                        tintColor: .white
+                Button {
+                    isShowingToolSettings = true
+                } label: {
+                    ComposerToolButtonLabel(
+                        symbolNames: toolButtonSymbols(for: aiConfiguration),
+                        tintColor: toolButtonTint(for: aiConfiguration)
                     )
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .disabled(voiceRecorder.isRecording || isTranscribing)
-                .accessibilityLabel("Add photo")
+                .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+                .accessibilityIdentifier("conversation.tool-entry")
             }
         }
         .padding(.top, hasAttachments ? 6 : 8)
@@ -703,6 +705,43 @@ struct ConversationDetailView: View {
         }
     }
 
+    private var conversationToolSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("联网搜索", isOn: googleSearchEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-search")
+                    Toggle("运行代码", isOn: codeExecutionEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-code")
+                } footer: {
+                    Text("是否可用取决于当前 Gemini 模型是否支持对应工具。")
+                }
+
+                Section("图片") {
+                    PhotosPicker(
+                        selection: $selectedPhotoItems,
+                        maxSelectionCount: 3,
+                        matching: .images
+                    ) {
+                        Label("添加图片", systemImage: "photo.on.rectangle")
+                    }
+                    .disabled(voiceRecorder.isRecording || chatStore.isTranscribing(conversationID: conversationID))
+                    .accessibilityIdentifier("conversation.tool-photo-picker")
+                }
+
+                Section {
+                    Button("完成") {
+                        isShowingToolSettings = false
+                    }
+                    .accessibilityIdentifier("conversation.tool-done")
+                }
+            }
+            .accessibilityIdentifier("conversation.tool-sheet")
+            .navigationTitle("工具与图片")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
     @MainActor
     private func importPickedItems(_ items: [PhotosPickerItem]) async {
         guard items.isEmpty == false else {
@@ -726,6 +765,7 @@ struct ConversationDetailView: View {
         }
 
         selectedPhotoItems = []
+        isShowingToolSettings = false
     }
 
     private func handleVoiceButtonTap() {
@@ -1093,6 +1133,67 @@ struct ConversationDetailView: View {
             }
         )
     }
+
+    private func googleSearchEnabledBinding() -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
+            },
+            set: { newValue in
+                Task {
+                    await chatStore.updateGoogleSearchEnabled(newValue, for: conversationID)
+                }
+            }
+        )
+    }
+
+    private func codeExecutionEnabledBinding() -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.aiConfiguration(for: conversationID).usesCodeExecution
+            },
+            set: { newValue in
+                Task {
+                    await chatStore.updateCodeExecutionEnabled(newValue, for: conversationID)
+                }
+            }
+        )
+    }
+
+    private func toolButtonSymbols(for configuration: ConversationAIConfiguration) -> [String] {
+        var symbols: [String] = []
+
+        if configuration.usesGoogleSearch {
+            symbols.append("globe")
+        }
+
+        if configuration.usesCodeExecution {
+            symbols.append("chevron.left.forwardslash.chevron.right")
+        }
+
+        if symbols.isEmpty {
+            symbols.append("photo.on.rectangle")
+        }
+
+        return symbols
+    }
+
+    private func toolButtonTint(for configuration: ConversationAIConfiguration) -> Color {
+        (configuration.usesGoogleSearch || configuration.usesCodeExecution) ? .cyan : .white
+    }
+
+    private func toolButtonAccessibilityLabel(for configuration: ConversationAIConfiguration) -> String {
+        let enabledFeatures = [
+            configuration.usesGoogleSearch ? "联网搜索" : nil,
+            configuration.usesCodeExecution ? "运行代码" : nil
+        ].compactMap { $0 }
+
+        guard enabledFeatures.isEmpty == false else {
+            return "工具与图片"
+        }
+
+        return "工具与图片，已启用\(enabledFeatures.joined(separator: "、"))"
+    }
 }
 
 private struct ConversationViewportHeightPreferenceKey: PreferenceKey {
@@ -1218,6 +1319,33 @@ private struct ComposerFlatActionButtonLabel: View {
                         gap: 12,
                         speed: 22
                     )
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+    }
+}
+
+private struct ComposerToolButtonLabel: View {
+    @Environment(\.isEnabled) private var isEnabled
+
+    let symbolNames: [String]
+    let tintColor: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 15, style: .continuous)
+            .fill(Color.white.opacity(isEnabled ? 0.08 : 0.04))
+            .overlay(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(Color.white.opacity(isEnabled ? 0.08 : 0.05), lineWidth: 1)
+            )
+            .frame(height: ComposerLayout.flatActionButtonHeight)
+            .overlay {
+                HStack(spacing: 5) {
+                    ForEach(symbolNames, id: \.self) { symbolName in
+                        Image(systemName: symbolName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(tintColor.opacity(isEnabled ? 1 : 0.42))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }

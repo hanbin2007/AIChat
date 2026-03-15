@@ -78,6 +78,8 @@ struct GeminiRelayBridge {
 
         var emittedAnswerText = ""
         var emittedThoughtText = ""
+        var emittedAttachmentKeys: Set<String> = []
+        var latestModelResponseParts: [GeminiPartPayload]?
         var finishReason: String?
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -102,6 +104,20 @@ struct GeminiRelayBridge {
             let parts = extractChunkParts(from: chunk)
             if let chunkFinishReason = parts.finishReason?.trimmedNonEmpty {
                 finishReason = chunkFinishReason
+            }
+            if let modelResponseParts = parts.modelResponseParts,
+               modelResponseParts.isEmpty == false {
+                latestModelResponseParts = modelResponseParts
+            }
+
+            for attachment in parts.attachments {
+                let key = "\(attachment.mimeType.lowercased())|\(attachment.base64Data)"
+                guard emittedAttachmentKeys.contains(key) == false else {
+                    continue
+                }
+
+                emittedAttachmentKeys.insert(key)
+                try await onEvent(.attachment(attachment))
             }
 
             if let delta = normalizedDelta(chunkText: parts.thoughtText, currentText: &emittedThoughtText) {
@@ -129,6 +145,10 @@ struct GeminiRelayBridge {
                     ]
                 )
             )
+        }
+
+        if let latestModelResponseParts, latestModelResponseParts.isEmpty == false {
+            try await onEvent(.modelResponseParts(latestModelResponseParts))
         }
 
         try await onEvent(.done(finishReason))
@@ -301,18 +321,24 @@ struct GeminiRelayBridge {
     private func makeGeminiRequest(from request: RelayChatRequest, model: String) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
-                GeminiContent(role: nil, parts: [GeminiPart(text: $0, inlineData: nil)])
+                GeminiContent(role: nil, parts: [GeminiPartPayload(text: $0, inlineData: nil)])
             },
             contents: request.messages.map { message in
-                var parts: [GeminiPart] = []
+                if message.role.lowercased() == "assistant",
+                   let modelResponseParts = message.modelResponseParts,
+                   modelResponseParts.isEmpty == false {
+                    return GeminiContent(role: "model", parts: modelResponseParts)
+                }
+
+                var parts: [GeminiPartPayload] = []
 
                 if let text = message.text?.trimmedNonEmpty {
-                    parts.append(GeminiPart(text: text, inlineData: nil))
+                    parts.append(GeminiPartPayload(text: text, inlineData: nil))
                 }
 
                 for attachment in message.attachments {
                     parts.append(
-                        GeminiPart(
+                        GeminiPartPayload(
                             text: nil,
                             inlineData: GeminiInlineData(
                                 mimeType: attachment.mimeType,
@@ -327,6 +353,7 @@ struct GeminiRelayBridge {
                     parts: parts
                 )
             },
+            tools: requestTools(for: request),
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature(for: model, fallback: 0.65),
                 topP: 0.9,
@@ -340,20 +367,34 @@ struct GeminiRelayBridge {
         )
     }
 
+    private func requestTools(for request: RelayChatRequest) -> [GeminiTool]? {
+        var tools: [GeminiTool] = []
+
+        if request.usesGoogleSearch == true {
+            tools.append(GeminiTool(googleSearch: GeminiGoogleSearchTool(), codeExecution: nil))
+        }
+
+        if request.usesCodeExecution == true {
+            tools.append(GeminiTool(googleSearch: nil, codeExecution: GeminiCodeExecutionTool()))
+        }
+
+        return tools.isEmpty ? nil : tools
+    }
+
     private func makeGeminiTranscriptionRequest(
         from request: RelayTranscriptionRequest,
         model: String
     ) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
             systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
-                GeminiContent(role: nil, parts: [GeminiPart(text: $0, inlineData: nil)])
+                GeminiContent(role: nil, parts: [GeminiPartPayload(text: $0, inlineData: nil)])
             },
             contents: [
                 GeminiContent(
                     role: "user",
                     parts: [
-                        GeminiPart(text: request.prompt, inlineData: nil),
-                        GeminiPart(
+                        GeminiPartPayload(text: request.prompt, inlineData: nil),
+                        GeminiPartPayload(
                             text: nil,
                             inlineData: GeminiInlineData(
                                 mimeType: request.audio.mimeType,
@@ -381,7 +422,7 @@ struct GeminiRelayBridge {
             systemInstruction: GeminiContent(
                 role: nil,
                 parts: [
-                    GeminiPart(
+                    GeminiPartPayload(
                         text: memoryExtractionSystemPrompt,
                         inlineData: nil
                     )
@@ -391,7 +432,7 @@ struct GeminiRelayBridge {
                 GeminiContent(
                     role: "user",
                     parts: [
-                        GeminiPart(
+                        GeminiPartPayload(
                             text: memoryExtractionPrompt(for: request),
                             inlineData: nil
                         )
@@ -464,7 +505,13 @@ struct GeminiRelayBridge {
         return 8_192
     }
 
-    private func extractChunkParts(from chunk: GeminiStreamChunk) -> (answerText: String, thoughtText: String, finishReason: String?) {
+    private func extractChunkParts(from chunk: GeminiStreamChunk) -> (
+        answerText: String,
+        thoughtText: String,
+        modelResponseParts: [GeminiPartPayload]?,
+        attachments: [RelayAttachment],
+        finishReason: String?
+    ) {
         let candidate = chunk.candidates?.first
         let parts = candidate?.content?.parts ?? []
 
@@ -480,7 +527,27 @@ struct GeminiRelayBridge {
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return (answerText, thoughtText, candidate?.finishReason)
+        let attachments: [RelayAttachment] = parts.compactMap { part in
+            guard let inlineData = part.inlineData,
+                  inlineData.mimeType.lowercased().hasPrefix("image/")
+            else {
+                return nil
+            }
+
+            return RelayAttachment(
+                mimeType: inlineData.mimeType,
+                base64Data: inlineData.data,
+                filename: "generated-image"
+            )
+        }
+
+        return (
+            answerText,
+            thoughtText,
+            parts.isEmpty ? nil : parts,
+            attachments,
+            candidate?.finishReason
+        )
     }
 
     private func extractTranscript(from response: GeminiStreamChunk) -> String {

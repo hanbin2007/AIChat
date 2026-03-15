@@ -71,15 +71,38 @@ private struct UITestBootstrap {
 
     static func makeIfNeeded() -> UITestBootstrap? {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["AIChat_UI_TEST_SCENARIO"] == "formula_zoom" else {
+        guard let scenario = environment["AIChat_UI_TEST_SCENARIO"] else {
             return nil
         }
 
-        return UITestBootstrap(
-            store: ChatStore.previewStore(conversations: []),
-            initialConversationID: nil,
-            launchDestination: .formulaHarness
-        )
+        switch scenario {
+        case "formula_zoom":
+            return UITestBootstrap(
+                store: ChatStore.previewStore(conversations: []),
+                initialConversationID: nil,
+                launchDestination: .formulaHarness
+            )
+        case "tool_entry":
+            let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000101") ?? UUID()
+            let conversation = ConversationThread(
+                id: conversationID,
+                title: "Tool Entry Test",
+                messages: [
+                    ChatMessage(
+                        role: .assistant,
+                        text: "Use the tool entry to enable search or code execution."
+                    )
+                ]
+            )
+
+            return UITestBootstrap(
+                store: ChatStore.previewStore(conversations: [conversation]),
+                initialConversationID: nil,
+                launchDestination: .conversationDetail(conversationID)
+            )
+        default:
+            return nil
+        }
     }
 }
 #endif

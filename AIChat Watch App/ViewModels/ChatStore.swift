@@ -296,9 +296,10 @@ final class ChatStore: ObservableObject {
 
         do {
             let loadedConversations = try await repository.loadConversations()
+            let normalizedLoadedConversations = try await normalizeLoadedConversationsIfNeeded(loadedConversations)
             let loadedDeletedConversationTombstones = try await repository.loadDeletedConversationTombstones()
             let reconciledState = reconcileLoadedConversations(
-                loadedConversations,
+                normalizedLoadedConversations,
                 with: loadedDeletedConversationTombstones
             )
             conversations = reconciledState.conversations
@@ -497,6 +498,34 @@ final class ChatStore: ObservableObject {
 
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.usesGlobalPinnedMemory = usesGlobalPinnedMemory
+        }
+    }
+
+    func updateGoogleSearchEnabled(
+        _ usesGoogleSearch: Bool,
+        for conversationID: UUID
+    ) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.usesGoogleSearch = usesGoogleSearch
+        }
+    }
+
+    func updateCodeExecutionEnabled(
+        _ usesCodeExecution: Bool,
+        for conversationID: UUID
+    ) async {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
+        await updateAIConfiguration(for: conversationID) { configuration in
+            configuration.usesCodeExecution = usesCodeExecution
         }
     }
 
@@ -1118,6 +1147,28 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    private func normalizeLoadedConversationsIfNeeded(
+        _ conversations: [ConversationThread]
+    ) async throws -> [ConversationThread] {
+        var normalizedConversations: [ConversationThread] = []
+        normalizedConversations.reserveCapacity(conversations.count)
+
+        for conversation in conversations {
+            let normalizedConversation = normalizedConversationForStorage(conversation)
+            normalizedConversations.append(normalizedConversation)
+
+            if normalizedConversation != conversation {
+                try await repository.save(normalizedConversation)
+            }
+        }
+
+        return normalizedConversations
+    }
+
+    private func normalizedConversationForStorage(_ conversation: ConversationThread) -> ConversationThread {
+        AssistantMessageContentNormalizer.normalized(conversation: conversation).conversation
+    }
+
     private func upsertConversation(_ conversation: ConversationThread) {
         conversations.removeAll { $0.id == conversation.id }
         conversations.append(conversation)
@@ -1129,8 +1180,9 @@ final class ChatStore: ObservableObject {
             return
         }
 
-        upsertConversation(conversation)
-        await persist(conversation, sync: false)
+        let normalizedConversation = normalizedConversationForStorage(conversation)
+        upsertConversation(normalizedConversation)
+        await persist(normalizedConversation, sync: false)
     }
 
     func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
@@ -1145,8 +1197,9 @@ final class ChatStore: ObservableObject {
                 continue
             }
 
-            upsertConversation(remoteConversation)
-            await persist(remoteConversation, sync: false)
+            let normalizedConversation = normalizedConversationForStorage(remoteConversation)
+            upsertConversation(normalizedConversation)
+            await persist(normalizedConversation, sync: false)
         }
     }
 
@@ -1164,18 +1217,35 @@ final class ChatStore: ObservableObject {
         in conversationID: UUID,
         text: String,
         thoughtSummary: String,
+        modelResponseParts: [GeminiPartPayload]?,
+        attachments: [ChatAttachment],
         status: ChatMessageStatus,
         fallbackCreatedAt: Date
     ) {
+        let normalizedMessage = AssistantMessageContentNormalizer.normalized(
+            message: ChatMessage(
+                id: id,
+                role: .assistant,
+                text: text,
+                thoughtSummary: thoughtSummary.nonEmptyTrimmed,
+                modelResponseParts: modelResponseParts,
+                createdAt: fallbackCreatedAt,
+                attachments: attachments,
+                status: status
+            )
+        )
+
         mutateConversation(id: conversationID) { conversation in
             conversation.upsertMessage(
                 ChatMessage(
-                    id: id,
-                    role: .assistant,
-                    text: text,
-                    thoughtSummary: thoughtSummary.nonEmptyTrimmed,
+                    id: normalizedMessage.id,
+                    role: normalizedMessage.role,
+                    text: normalizedMessage.text,
+                    thoughtSummary: normalizedMessage.thoughtSummary,
+                    modelResponseParts: normalizedMessage.modelResponseParts,
                     createdAt: conversation.messages.first(where: { $0.id == id })?.createdAt ?? fallbackCreatedAt,
-                    status: status
+                    attachments: normalizedMessage.attachments,
+                    status: normalizedMessage.status
                 )
             )
         }
@@ -1602,6 +1672,8 @@ final class ChatStore: ObservableObject {
             in: conversationID,
             text: "",
             thoughtSummary: "",
+            modelResponseParts: nil,
+            attachments: [],
             status: .streaming,
             fallbackCreatedAt: assistantMessageCreatedAt
         )
@@ -1610,6 +1682,8 @@ final class ChatStore: ObservableObject {
         var finalError: Error?
         var finalStreamedText = ""
         var finalStreamedThoughtSummary = ""
+        var finalStreamedModelResponseParts: [GeminiPartPayload]?
+        var finalStreamedAttachments: [ChatAttachment] = []
         var attemptCount = 0
 
         for attempt in 0...maximumRetryCount {
@@ -1622,6 +1696,8 @@ final class ChatStore: ObservableObject {
                         in: conversationID,
                         text: "",
                         thoughtSummary: "",
+                        modelResponseParts: nil,
+                        attachments: [],
                         status: .streaming,
                         fallbackCreatedAt: assistantMessageCreatedAt
                     )
@@ -1634,9 +1710,11 @@ final class ChatStore: ObservableObject {
 
                 try Task.checkCancellation()
 
-                let streamTask = Task { @MainActor () throws -> (String, String) in
+                let streamTask = Task { @MainActor () throws -> (String, String, [GeminiPartPayload]?, [ChatAttachment]) in
                     var streamedText = ""
                     var streamedThoughtSummary = ""
+                    var streamedModelResponseParts: [GeminiPartPayload]?
+                    var streamedAttachments: [ChatAttachment] = []
                     let flushInterval: TimeInterval = 0.05
                     var lastFlushAt = Date.distantPast
                     var hasFlushedVisibleContent = false
@@ -1653,6 +1731,8 @@ final class ChatStore: ObservableObject {
                             in: conversationID,
                             text: streamedText,
                             thoughtSummary: streamedThoughtSummary,
+                            modelResponseParts: streamedModelResponseParts,
+                            attachments: streamedAttachments,
                             status: .streaming,
                             fallbackCreatedAt: assistantMessageCreatedAt
                         )
@@ -1669,6 +1749,16 @@ final class ChatStore: ObservableObject {
                             streamedText.append(delta)
                         case .thoughtDelta(let delta):
                             streamedThoughtSummary.append(delta)
+                        case .modelResponseParts(let modelResponseParts):
+                            streamedModelResponseParts = modelResponseParts
+                        case .attachment(let attachment):
+                            guard streamedAttachments.contains(where: {
+                                $0.mimeType == attachment.mimeType && $0.data == attachment.data
+                            }) == false else {
+                                continue
+                            }
+
+                            streamedAttachments.append(attachment)
                         }
 
                         flushIfNeeded(force: hasFlushedVisibleContent == false)
@@ -1676,10 +1766,10 @@ final class ChatStore: ObservableObject {
 
                     flushIfNeeded(force: true)
 
-                    return (streamedText, streamedThoughtSummary)
+                    return (streamedText, streamedThoughtSummary, streamedModelResponseParts, streamedAttachments)
                 }
 
-                let (streamedText, streamedThoughtSummary) = try await withTaskCancellationHandler {
+                let (streamedText, streamedThoughtSummary, streamedModelResponseParts, streamedAttachments) = try await withTaskCancellationHandler {
                     try await streamTask.value
                 } onCancel: {
                     streamTask.cancel()
@@ -1692,6 +1782,8 @@ final class ChatStore: ObservableObject {
                     in: conversationID,
                     text: streamedText,
                     thoughtSummary: streamedThoughtSummary,
+                    modelResponseParts: streamedModelResponseParts,
+                    attachments: streamedAttachments,
                     status: .sent,
                     fallbackCreatedAt: assistantMessageCreatedAt
                 )
@@ -1711,6 +1803,14 @@ final class ChatStore: ObservableObject {
                     .messages
                     .first(where: { $0.id == assistantMessageID })?
                     .thoughtSummary ?? ""
+                finalStreamedModelResponseParts = conversation(id: conversationID)?
+                    .messages
+                    .first(where: { $0.id == assistantMessageID })?
+                    .modelResponseParts
+                finalStreamedAttachments = conversation(id: conversationID)?
+                    .messages
+                    .first(where: { $0.id == assistantMessageID })?
+                    .attachments ?? []
 
                 let hasRemainingRetries = attempt < maximumRetryCount
                 guard hasRemainingRetries, shouldRetrySend(after: error) else {
@@ -1731,7 +1831,10 @@ final class ChatStore: ObservableObject {
         }
 
         mutateConversation(id: conversationID) { conversation in
-            if finalStreamedText.isEmpty, finalStreamedThoughtSummary.isEmpty {
+            if finalStreamedText.isEmpty,
+               finalStreamedThoughtSummary.isEmpty,
+               finalStreamedModelResponseParts?.isEmpty != false,
+               finalStreamedAttachments.isEmpty {
                 conversation.removeMessage(id: assistantMessageID)
             } else {
                 conversation.upsertMessage(
@@ -1740,7 +1843,9 @@ final class ChatStore: ObservableObject {
                         role: .assistant,
                         text: finalStreamedText,
                         thoughtSummary: finalStreamedThoughtSummary.nonEmptyTrimmed,
+                        modelResponseParts: finalStreamedModelResponseParts,
                         createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? assistantMessageCreatedAt,
+                        attachments: finalStreamedAttachments,
                         status: .failed
                     )
                 )

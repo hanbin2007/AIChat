@@ -10,6 +10,8 @@ import Foundation
 enum AIStreamEvent: Equatable {
     case answerDelta(String)
     case thoughtDelta(String)
+    case attachment(ChatAttachment)
+    case modelResponseParts([GeminiPartPayload])
 }
 
 struct VoiceTranscriptionResult: Equatable {

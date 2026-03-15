@@ -79,6 +79,8 @@ struct GeminiAPIClient: AIStreamingService {
 
                     var accumulatedText = ""
                     var accumulatedThoughtSummary = ""
+                    var emittedAttachmentKeys: Set<String> = []
+                    var latestModelResponseParts: [GeminiPartPayload]?
                     var finishReason: String?
 
                     for try await line in bytes.lines {
@@ -100,6 +102,14 @@ struct GeminiAPIClient: AIStreamingService {
                         let streamChunk = extractChunk(from: responseEnvelope)
                         if let chunkFinishReason = streamChunk.finishReason {
                             finishReason = chunkFinishReason
+                        }
+                        if let modelResponseParts = streamChunk.modelResponseParts,
+                           modelResponseParts.isEmpty == false {
+                            latestModelResponseParts = modelResponseParts
+                        }
+
+                        for attachment in extractImageAttachments(from: responseEnvelope, emittedKeys: &emittedAttachmentKeys) {
+                            continuation.yield(.attachment(attachment))
                         }
 
                         if let thoughtDelta = normalizedDelta(
@@ -123,8 +133,15 @@ struct GeminiAPIClient: AIStreamingService {
                         throw completionError
                     }
 
-                    guard accumulatedText.nonEmptyTrimmed != nil else {
+                    guard accumulatedText.nonEmptyTrimmed != nil ||
+                            emittedAttachmentKeys.isEmpty == false ||
+                            latestModelResponseParts?.isEmpty == false
+                    else {
                         throw GeminiAPIError.emptyResponse
+                    }
+
+                    if let latestModelResponseParts, latestModelResponseParts.isEmpty == false {
+                        continuation.yield(.modelResponseParts(latestModelResponseParts))
                     }
 
                     continuation.finish()
@@ -152,6 +169,7 @@ struct GeminiAPIClient: AIStreamingService {
                 from: assembledContext.recentMessages,
                 prefaceText: assembledContext.prefaceText
             ),
+            tools: requestTools(for: runtimeConfiguration),
             generationConfig: GeminiGenerationConfig(
                 temperature: requestTemperature(for: runtimeConfiguration.model, fallback: 0.65),
                 topP: 0.9,
@@ -181,10 +199,15 @@ struct GeminiAPIClient: AIStreamingService {
                 return nil
             }
 
+            if role == "model",
+               let modelResponseParts = message.cleanedModelResponseParts {
+                return GeminiContent(role: role, parts: modelResponseParts)
+            }
+
             var parts = message.attachments.map { attachment in
-                GeminiPart(
+                GeminiPartPayload(
                     text: nil,
-                    inlineData: GeminiInlineData(
+                    inlineData: GeminiPartInlineData(
                         mimeType: attachment.mimeType,
                         data: attachment.data.base64EncodedString()
                     )
@@ -192,7 +215,7 @@ struct GeminiAPIClient: AIStreamingService {
             }
 
             if let text = requestText(for: message) {
-                parts.insert(GeminiPart(text: text, inlineData: nil), at: 0)
+                parts.insert(GeminiPartPayload(text: text, inlineData: nil), at: 0)
             }
 
             return GeminiContent(role: role, parts: parts)
@@ -221,6 +244,7 @@ struct GeminiAPIClient: AIStreamingService {
         return GeminiStreamChunk(
             answerText: answerText,
             thoughtSummary: thoughtSummary,
+            modelResponseParts: parts.isEmpty ? nil : parts,
             finishReason: finishReason
         )
     }
@@ -257,6 +281,20 @@ struct GeminiAPIClient: AIStreamingService {
         )
     }
 
+    private func requestTools(for runtimeConfiguration: ConversationAIConfiguration) -> [GeminiTool]? {
+        var tools: [GeminiTool] = []
+
+        if runtimeConfiguration.usesGoogleSearch {
+            tools.append(GeminiTool(googleSearch: GeminiGoogleSearchTool(), codeExecution: nil))
+        }
+
+        if runtimeConfiguration.usesCodeExecution {
+            tools.append(GeminiTool(googleSearch: nil, codeExecution: GeminiCodeExecutionTool()))
+        }
+
+        return tools.isEmpty ? nil : tools
+    }
+
     private func geminiError(from data: Data) -> Error {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -289,7 +327,7 @@ func normalizedDelta(chunkText: String, currentText: inout String) -> String? {
 }
 
 func mergedGeminiText(
-    from parts: [GeminiPart],
+    from parts: [GeminiPartPayload],
     includeThoughts: Bool
 ) -> String? {
     let merged = parts.reduce(into: "") { partialResult, part in
@@ -303,6 +341,44 @@ func mergedGeminiText(
     return merged.isEmpty ? nil : merged
 }
 
+func extractImageAttachments(
+    from responseEnvelope: GeminiGenerateContentResponse,
+    emittedKeys: inout Set<String>
+) -> [ChatAttachment] {
+    let parts = responseEnvelope.candidates
+        .compactMap { $0.content?.parts }
+        .first ?? []
+
+    return parts.compactMap { part in
+        guard let inlineData = part.inlineData,
+              inlineData.mimeType.lowercased().hasPrefix("image/"),
+              let rawData = Data(base64Encoded: inlineData.data)
+        else {
+            return nil
+        }
+
+        let key = geminiAttachmentKey(mimeType: inlineData.mimeType, rawData: rawData)
+        guard emittedKeys.contains(key) == false else {
+            return nil
+        }
+
+        guard let attachment = try? ChatAttachment.makeModelGeneratedImage(
+            from: rawData,
+            mimeType: inlineData.mimeType,
+            suggestedFilename: "generated-image"
+        ) else {
+            return nil
+        }
+
+        emittedKeys.insert(key)
+        return attachment
+    }
+}
+
+func geminiAttachmentKey(mimeType: String, rawData: Data) -> String {
+    "\(mimeType.lowercased())|\(rawData.base64EncodedString())"
+}
+
 func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
     var collected = Data()
     for try await byte in bytes {
@@ -314,8 +390,30 @@ func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
 struct GeminiGenerateContentRequest: Encodable {
     var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
+    var tools: [GeminiTool]?
     var generationConfig: GeminiGenerationConfig
+
+    init(
+        systemInstruction: GeminiContent?,
+        contents: [GeminiContent],
+        tools: [GeminiTool]? = nil,
+        generationConfig: GeminiGenerationConfig
+    ) {
+        self.systemInstruction = systemInstruction
+        self.contents = contents
+        self.tools = tools
+        self.generationConfig = generationConfig
+    }
 }
+
+struct GeminiTool: Codable, Equatable {
+    var googleSearch: GeminiGoogleSearchTool?
+    var codeExecution: GeminiCodeExecutionTool?
+}
+
+struct GeminiGoogleSearchTool: Codable, Equatable {}
+
+struct GeminiCodeExecutionTool: Codable, Equatable {}
 
 struct GeminiGenerationConfig: Codable, Equatable {
     var temperature: Double
@@ -333,32 +431,11 @@ struct GeminiThinkingConfig: Codable, Equatable {
 
 struct GeminiContent: Codable, Equatable {
     var role: String?
-    var parts: [GeminiPart]
+    var parts: [GeminiPartPayload]
 
     nonisolated static func systemPrompt(_ text: String) -> GeminiContent {
-        GeminiContent(role: nil, parts: [GeminiPart(text: text, inlineData: nil)])
+        GeminiContent(role: nil, parts: [GeminiPartPayload(text: text, inlineData: nil)])
     }
-}
-
-struct GeminiPart: Codable, Equatable {
-    var text: String?
-    var inlineData: GeminiInlineData?
-    var thought: Bool?
-
-    nonisolated init(
-        text: String?,
-        inlineData: GeminiInlineData?,
-        thought: Bool? = nil
-    ) {
-        self.text = text
-        self.inlineData = inlineData
-        self.thought = thought
-    }
-}
-
-struct GeminiInlineData: Codable, Equatable {
-    var mimeType: String
-    var data: String
 }
 
 struct GeminiGenerateContentResponse: Decodable {
@@ -382,6 +459,7 @@ struct GeminiCandidate: Decodable {
 struct GeminiStreamChunk: Equatable {
     var answerText: String?
     var thoughtSummary: String?
+    var modelResponseParts: [GeminiPartPayload]?
     var finishReason: String?
 }
 

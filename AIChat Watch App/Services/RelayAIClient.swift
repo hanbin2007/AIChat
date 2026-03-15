@@ -93,22 +93,25 @@ struct RelayAIClient: AIStreamingService {
                 RelayMessage(
                     role: ChatRole.user.rawValue,
                     text: prefaceText,
+                    modelResponseParts: nil,
                     attachments: []
                 )
             )
         }
 
         relayMessages.append(contentsOf: assembledContext.recentMessages.map { message in
-            RelayMessage(
+            let modelResponseParts = message.cleanedModelResponseParts
+            return RelayMessage(
                 role: message.role.rawValue,
-                text: requestText(for: message),
-                attachments: message.attachments.map { attachment in
+                text: modelResponseParts == nil ? requestText(for: message) : nil,
+                modelResponseParts: modelResponseParts,
+                attachments: modelResponseParts == nil ? message.attachments.map { attachment in
                     RelayAttachment(
                         mimeType: attachment.mimeType,
                         base64Data: attachment.data.base64EncodedString(),
                         filename: attachment.filename
                     )
-                }
+                } : []
             )
         })
 
@@ -118,6 +121,8 @@ struct RelayAIClient: AIStreamingService {
             thinkingIntensity: runtimeConfiguration.thinkingIntensity,
             maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
             includeThoughts: true,
+            usesGoogleSearch: runtimeConfiguration.usesGoogleSearch,
+            usesCodeExecution: runtimeConfiguration.usesCodeExecution,
             messages: relayMessages
         )
     }
@@ -251,12 +256,15 @@ struct RelayChatRequest: Codable, Equatable {
     var thinkingIntensity: AIThinkingIntensity
     var maxOutputTokens: Int
     var includeThoughts: Bool
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
     var messages: [RelayMessage]
 }
 
 struct RelayMessage: Codable, Equatable {
     var role: String
     var text: String?
+    var modelResponseParts: [GeminiPartPayload]?
     var attachments: [RelayAttachment]
 }
 
@@ -269,8 +277,10 @@ struct RelayAttachment: Codable, Equatable {
 nonisolated struct RelayStreamEvent: Codable {
     var type: String?
     var text: String?
+    var parts: [GeminiPartPayload]?
     var message: String?
     var finishReason: String?
+    var attachment: RelayAttachment?
 }
 
 nonisolated struct RelayErrorEnvelope: Codable {
@@ -416,6 +426,8 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
     private var currentEvent = "message"
     private var accumulatedText = ""
     private var accumulatedThoughtSummary = ""
+    private var latestModelResponseParts: [GeminiPartPayload]?
+    private var accumulatedAttachments: [ChatAttachment] = []
     private var didReceiveDoneEvent = false
     private var finishReason: String?
     private weak var task: URLSessionDataTask?
@@ -515,9 +527,19 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
             return
         }
 
-        guard accumulatedText.nonEmptyTrimmed != nil else {
+        guard accumulatedText.nonEmptyTrimmed != nil || accumulatedAttachments.isEmpty == false else {
+            if let latestModelResponseParts, latestModelResponseParts.isEmpty == false {
+                continuation.yield(.modelResponseParts(latestModelResponseParts))
+                finish()
+                return
+            }
+
             finish(throwing: RelayAPIError.emptyResponse)
             return
+        }
+
+        if let latestModelResponseParts, latestModelResponseParts.isEmpty == false {
+            continuation.yield(.modelResponseParts(latestModelResponseParts))
         }
 
         finish()
@@ -617,6 +639,22 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
             if let delta, delta.isEmpty == false {
                 continuation.yield(.thoughtDelta(delta))
             }
+        case "model_content":
+            guard let parts = payload.parts, parts.isEmpty == false else {
+                break
+            }
+
+            latestModelResponseParts = parts
+        case "attachment":
+            guard let payloadAttachment = payload.attachment,
+                  let attachment = modelImageAttachment(from: payloadAttachment),
+                  accumulatedAttachments.contains(where: { $0.mimeType == attachment.mimeType && $0.data == attachment.data }) == false
+            else {
+                break
+            }
+
+            accumulatedAttachments.append(attachment)
+            continuation.yield(.attachment(attachment))
         case "error":
             finish(throwing: RelayAPIError.remote(message: payload.message ?? "Relay stream failed."))
         case "done":
@@ -628,4 +666,16 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
             break
         }
     }
+}
+
+private func modelImageAttachment(from relayAttachment: RelayAttachment) -> ChatAttachment? {
+    guard let rawData = Data(base64Encoded: relayAttachment.base64Data) else {
+        return nil
+    }
+
+    return try? ChatAttachment.makeModelGeneratedImage(
+        from: rawData,
+        mimeType: relayAttachment.mimeType,
+        suggestedFilename: relayAttachment.filename
+    )
 }

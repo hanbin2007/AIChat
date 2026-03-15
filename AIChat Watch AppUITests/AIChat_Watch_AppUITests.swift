@@ -145,6 +145,63 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationToolEntryOpensSheetAndReflectsEnabledTools() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "tool_entry"
+        app.launch()
+
+        let toolEntry = app.buttons["conversation.tool-entry"]
+        if !toolEntry.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing tool entry hierarchy")
+            XCTFail("Missing tool entry button in the watch composer.")
+            return
+        }
+
+        XCTAssertEqual(toolEntry.label, "工具与图片")
+        XCTAssertTrue(waitForHittable(toolEntry, timeout: 5))
+        toolEntry.tap()
+
+        let toolSheet = app.descendants(matching: .any)["conversation.tool-sheet"]
+        if !toolSheet.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing tool sheet hierarchy")
+            XCTFail("Missing tool sheet after tapping the tool entry.")
+            return
+        }
+
+        let searchSwitch = app.switches["conversation.tool-search"].firstMatch
+        if !searchSwitch.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing search toggle hierarchy")
+            XCTFail("Missing Google Search toggle in the tool sheet.")
+            return
+        }
+
+        let codeSwitch = app.switches["conversation.tool-code"].firstMatch
+        if !codeSwitch.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing code toggle hierarchy")
+            XCTFail("Missing Code Execution toggle in the tool sheet.")
+            return
+        }
+
+        let photoEntry = app.descendants(matching: .any)["conversation.tool-photo-picker"]
+        XCTAssertTrue(photoEntry.waitForExistence(timeout: 5))
+
+        searchSwitch.tap()
+        codeSwitch.tap()
+
+        let doneButton = app.buttons["conversation.tool-done"]
+        if !doneButton.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing tool done button hierarchy")
+            XCTFail("Missing done button in the tool sheet.")
+            return
+        }
+        doneButton.tap()
+
+        XCTAssertTrue(toolEntry.waitForExistence(timeout: 5))
+        XCTAssertTrue(toolEntry.label.contains("联网搜索"))
+        XCTAssertTrue(toolEntry.label.contains("运行代码"))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

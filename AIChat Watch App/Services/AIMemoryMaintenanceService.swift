@@ -318,7 +318,11 @@ private func contextEligibleMessages(in conversation: ConversationThread) -> [Ch
     conversation.messages.filter { message in
         message.status != .failed &&
         message.role != .system &&
-        message.hasVisibleContent
+        (
+            message.cleanedText.isEmpty == false ||
+            message.cleanedThoughtSummary != nil ||
+            message.attachments.isEmpty == false
+        )
     }
 }
 

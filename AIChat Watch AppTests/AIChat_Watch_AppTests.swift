@@ -9,6 +9,9 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class AIChat_Watch_AppTests: XCTestCase {
+    private let onePixelPNGBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
+
     func testSuggestedTitleUsesCollapsedWhitespaceAndTruncates() {
         let input = "  Build   a production ready Apple Watch assistant with photo upload   "
         let title = ConversationThread.suggestedTitle(from: input)
@@ -87,6 +90,52 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[0].parts.first?.text, "Listen to the attached audio, infer the user's request, and answer it directly.")
         XCTAssertEqual(contents[0].parts.last?.inlineData?.mimeType, "audio/wav")
         XCTAssertEqual(contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
+    }
+
+    func testContextWindowReusesStoredAssistantModelParts() {
+        let storedParts = [
+            GeminiPart(
+                text: "Hidden reasoning summary",
+                inlineData: nil,
+                thought: true,
+                thoughtSignature: "sig-1"
+            ),
+            GeminiPart(
+                text: "Visible answer",
+                inlineData: nil,
+                thought: false,
+                thoughtSignature: "sig-2"
+            )
+        ]
+        let messages = [
+            ChatMessage(role: .user, text: "Question"),
+            ChatMessage(
+                role: .assistant,
+                text: "Visible answer",
+                thoughtSummary: "Hidden reasoning summary",
+                modelResponseParts: storedParts
+            )
+        ]
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let contents = client.contextWindow(from: messages)
+
+        XCTAssertEqual(contents.count, 2)
+        XCTAssertEqual(contents[1].role, "model")
+        XCTAssertEqual(contents[1].parts, storedParts)
+        XCTAssertEqual(contents[1].parts.first?.thoughtSignature, "sig-1")
     }
 
     func testGemini3RequestUsesThinkingLevel() {
@@ -300,6 +349,114 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
     }
 
+    func testGeminiRequestIncludesEnabledTools() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Compare the latest SwiftData changes and verify with a script.")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-2.5-flash",
+                usesGoogleSearch: true,
+                usesCodeExecution: true
+            )
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-2.5-flash",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertEqual(requestBody.tools?.count, 2)
+        XCTAssertNotNil(requestBody.tools?.first?.googleSearch)
+        XCTAssertNotNil(requestBody.tools?.last?.codeExecution)
+    }
+
+    func testExtractImageAttachmentsReturnsGeneratedImages() throws {
+        let responseData = try XCTUnwrap(
+            """
+            {
+              "candidates": [
+                {
+                  "content": {
+                    "parts": [
+                      {
+                        "inlineData": {
+                          "mimeType": "image/png",
+                          "data": "\(onePixelPNGBase64)"
+                        }
+                      }
+                    ]
+                  },
+                  "finishReason": "STOP"
+                }
+              ]
+            }
+            """.data(using: .utf8)
+        )
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: responseData)
+        var emittedKeys: Set<String> = []
+
+        let attachments = extractImageAttachments(
+            from: responseEnvelope,
+            emittedKeys: &emittedKeys
+        )
+
+        XCTAssertEqual(attachments.count, 1)
+        XCTAssertEqual(attachments.first?.mimeType, "image/png")
+        XCTAssertEqual(attachments.first?.kind, .image)
+        XCTAssertEqual(attachments.first?.data.base64EncodedString(), onePixelPNGBase64)
+    }
+
+    func testAssistantMessageContentNormalizerExtractsMarkdownDataImagesIntoAttachments() {
+        let markdown = """
+        这是一幅图像。
+
+        ![](data:image/png;base64,\(onePixelPNGBase64))
+
+        附加说明。
+        """
+
+        let extraction = AssistantMessageContentNormalizer.extractEmbeddedImages(from: markdown)
+
+        XCTAssertTrue(extraction.didChange)
+        XCTAssertFalse(extraction.text.contains("data:image"))
+        XCTAssertTrue(extraction.text.contains("这是一幅图像。"))
+        XCTAssertTrue(extraction.text.contains("附加说明。"))
+        XCTAssertEqual(extraction.attachments.count, 1)
+        XCTAssertEqual(extraction.attachments.first?.mimeType, "image/png")
+        XCTAssertNotNil(extraction.attachments.first?.previewImage)
+    }
+
+    func testAssistantMessageContentNormalizerNormalizesConversationHistory() {
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "![](data:image/png;base64,\(onePixelPNGBase64))"
+                )
+            ]
+        )
+
+        let normalization = AssistantMessageContentNormalizer.normalized(conversation: conversation)
+
+        XCTAssertTrue(normalization.didChange)
+        XCTAssertEqual(normalization.conversation.messages.count, 1)
+        XCTAssertEqual(normalization.conversation.messages[0].text, "")
+        XCTAssertEqual(normalization.conversation.messages[0].attachments.count, 1)
+        XCTAssertEqual(normalization.conversation.messages[0].attachments.first?.mimeType, "image/png")
+    }
+
     func testGemini31ProExtremeUsesDynamicMaximumThinking() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Think as deeply as possible")],
@@ -399,6 +556,121 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertEqual(request.maxOutputTokens, 65_536)
         XCTAssertEqual(request.systemPrompt, AIContextAssembler.conciseSystemPrompt)
+    }
+
+    func testRelayRequestCarriesGeminiToolFlags() {
+        let conversation = ConversationThread(
+            messages: [ChatMessage(role: .user, text: "Search the web and run a quick calculation.")],
+            aiConfiguration: ConversationAIConfiguration(
+                model: "gemini-3-flash-preview",
+                usesGoogleSearch: true,
+                usesCodeExecution: true
+            )
+        )
+
+        let client = RelayAIClient(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = client.makeRelayRequest(for: conversation)
+
+        XCTAssertTrue(request.usesGoogleSearch)
+        XCTAssertTrue(request.usesCodeExecution)
+    }
+
+    func testRelayRequestCarriesStoredAssistantModelParts() {
+        let storedParts = [
+            GeminiPart(
+                text: "Intermediate reasoning",
+                inlineData: nil,
+                thought: true,
+                thoughtSignature: "sig-thought"
+            ),
+            GeminiPart(
+                text: "Final answer",
+                inlineData: nil,
+                thought: false,
+                thoughtSignature: "sig-answer"
+            )
+        ]
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .user, text: "Question"),
+                ChatMessage(
+                    role: .assistant,
+                    text: "Final answer",
+                    thoughtSummary: "Intermediate reasoning",
+                    modelResponseParts: storedParts
+                ),
+                ChatMessage(role: .user, text: "Follow up")
+            ],
+            aiConfiguration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
+        )
+
+        let client = RelayAIClient(
+            configuration: AppConfiguration(
+                backendMode: .relay,
+                geminiAPIKey: nil,
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+                relayBearerToken: "token",
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let request = client.makeRelayRequest(for: conversation)
+
+        XCTAssertEqual(request.messages.count, 3)
+        XCTAssertEqual(request.messages[1].role, "assistant")
+        XCTAssertEqual(request.messages[1].modelResponseParts, storedParts)
+    }
+
+    func testMemoryExtractionIgnoresHiddenAssistantModelPartsWithoutVisibleText() async {
+        let extractor = CapturingMemoryExtractionClient(
+            response: ConversationMemoryExtractionResponse()
+        )
+        let service = ModelBackedMemoryMaintenanceService(
+            extractor: extractor,
+            defaultModel: "gemini-3-flash-preview"
+        )
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .user, text: "Original question"),
+                ChatMessage(
+                    role: .assistant,
+                    text: "",
+                    modelResponseParts: [
+                        GeminiPart(
+                            text: nil,
+                            inlineData: nil,
+                            thought: true,
+                            thoughtSignature: "sig-hidden"
+                        )
+                    ]
+                ),
+                ChatMessage(role: .user, text: "Follow-up request")
+            ],
+            aiConfiguration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
+        )
+
+        _ = await service.refreshArtifacts(for: conversation)
+        let request = await extractor.capturedRequest
+
+        XCTAssertEqual(
+            request?.recentMessages.map(\.text),
+            ["Original question", "Follow-up request"]
+        )
     }
 
     func testRelayModeProvidesRelayTranscriptionService() {
@@ -1851,5 +2123,21 @@ private struct CancellableStreamingAIStreamingService: AIStreamingService {
                 streamTask.cancel()
             }
         }
+    }
+}
+
+private actor CapturingMemoryExtractionClient: AIMemoryExtractionClient {
+    private let response: ConversationMemoryExtractionResponse
+    private(set) var capturedRequest: ConversationMemoryExtractionRequest?
+
+    init(response: ConversationMemoryExtractionResponse) {
+        self.response = response
+    }
+
+    func extractMemory(
+        request: ConversationMemoryExtractionRequest
+    ) async throws -> ConversationMemoryExtractionResponse {
+        capturedRequest = request
+        return response
     }
 }
