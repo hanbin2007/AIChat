@@ -10,7 +10,6 @@ import RegexBuilder
 import SwiftUIMath
 
 @preconcurrency
-@MainActor
 struct InlineMathOrText {
     var text: String
 
@@ -18,56 +17,107 @@ struct InlineMathOrText {
         case math(Range<String.Index>)
         case issue(MathParser.FormatIssue)
     }
+
+    enum Segment: Sendable, Hashable {
+        case text(String)
+        case math(String)
+        case issue(rawLatex: String, message: String)
+    }
+
+    final class ParsedSegmentStore: @unchecked Sendable {
+        static let shared = ParsedSegmentStore()
+
+        private let lock = NSLock()
+        private var caches: [String : [Segment]] = [:]
+
+        func segments(for text: String) -> [Segment] {
+            lock.lock()
+            defer { lock.unlock() }
+
+            if let cached = caches[text] {
+                return cached
+            }
+
+            let parsedSegments = Self.makeSegments(for: text)
+            caches[text] = parsedSegments
+            return parsedSegments
+        }
+
+        private static func makeSegments(for text: String) -> [Segment] {
+            let mathParser = MathParser(text: text)
+            var segments: [Segment] = []
+            var processingIndex = text.startIndex
+
+            let parsedItems =
+                mathParser.mathRepresentations
+                .map { ParsedItem.math($0.range) } +
+                mathParser.formatIssues
+                .filter(\.kind.inline)
+                .map(ParsedItem.issue)
+
+            for item in parsedItems.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+                let range = item.range
+
+                if processingIndex < range.lowerBound {
+                    let normalText = String(text[processingIndex..<range.lowerBound])
+                    segments.append(.text(normalText))
+                }
+
+                switch item {
+                case .math:
+                    segments.append(.math(String(text[range])))
+                case .issue(let issue):
+                    segments.append(
+                        .issue(
+                            rawLatex: String(text[issue.range]),
+                            message: issue.message
+                        )
+                    )
+                }
+
+                processingIndex = range.upperBound
+            }
+
+            if processingIndex < text.endIndex {
+                let remainingText = String(text[processingIndex..<text.endIndex])
+                segments.append(.text(remainingText))
+            }
+
+            return segments
+        }
+    }
+
+    nonisolated static func prewarm(text: some StringProtocol) {
+        _ = ParsedSegmentStore.shared.segments(for: String(text))
+    }
     
     @preconcurrency
     @MainActor
     func makeBody(configuration: MarkdownRendererConfiguration) -> MarkdownNodeView {
-        let mathParser = MathParser(text: text)
+        let parsedSegments = ParsedSegmentStore.shared.segments(for: text)
         var nodeViews: [MarkdownNodeView] = []
-        var processingIndex = text.startIndex
 
-        let parsedItems =
-            mathParser.mathRepresentations
-            .map { ParsedItem.math($0.range) } +
-            mathParser.formatIssues
-            .filter(\.kind.inline)
-            .map(ParsedItem.issue)
-
-        for item in parsedItems.sorted(by: { $0.lowerBound < $1.lowerBound }) {
-            let range = item.range
-
-            if processingIndex < range.lowerBound {
-                let normalText = String(text[processingIndex..<range.lowerBound])
+        for segment in parsedSegments {
+            switch segment {
+            case .text(let normalText):
                 nodeViews.append(MarkdownNodeView(normalText))
-            }
-
-            switch item {
-            case .math:
-                let latexText = String(text[range])
+            case .math(let latexText):
                 nodeViews.append(
                     MarkdownNodeView {
                         InlineMath(latexText: latexText)
                     }
                 )
-            case .issue(let issue):
-                let rawLatex = String(text[issue.range])
+            case .issue(let rawLatex, let message):
                 nodeViews.append(
                     MarkdownNodeView {
                         InvalidMathView(
                             rawLatex: rawLatex,
-                            error: .init(category: .format, message: issue.message),
+                            error: .init(category: .format, message: message),
                             style: .inline
                         )
                     }
                 )
             }
-
-            processingIndex = range.upperBound
-        }
-
-        if processingIndex < text.endIndex {
-            let remainingText = String(text[processingIndex..<text.endIndex])
-            nodeViews.append(MarkdownNodeView(remainingText))
         }
         
         return MarkdownNodeView(nodeViews)

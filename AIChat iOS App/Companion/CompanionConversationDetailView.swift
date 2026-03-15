@@ -41,6 +41,7 @@ struct CompanionConversationDetailView: View {
     @State private var isShowingActivationCenter = false
     @State private var interruptedAutoScrollMessageID: UUID?
     @State private var suspendedStreamingRenderMessageID: UUID?
+    @State private var pendingHistoryAnchorMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
     @State private var messagesViewportHeight: CGFloat = 0
     @State private var voiceCaptureMode: CompanionVoiceCaptureMode = .transcribe
@@ -218,6 +219,7 @@ struct CompanionConversationDetailView: View {
             .onAppear {
                 interruptedAutoScrollMessageID = nil
                 suspendedStreamingRenderMessageID = nil
+                pendingHistoryAnchorMessageID = nil
                 streamingRenderResumeTask?.cancel()
                 streamingRenderResumeTask = nil
                 prepareInitialHistoryIfNeeded(messages: conversation.messages)
@@ -238,6 +240,16 @@ struct CompanionConversationDetailView: View {
             }
             .onChange(of: renderedMessageBudget) { newBudget in
                 guard newBudget > 0 else {
+                    return
+                }
+
+                if let pendingHistoryAnchorMessageID {
+                    scrollToMessage(
+                        pendingHistoryAnchorMessageID,
+                        with: proxy,
+                        anchor: .top
+                    )
+                    self.pendingHistoryAnchorMessageID = nil
                     return
                 }
 
@@ -768,6 +780,19 @@ struct CompanionConversationDetailView: View {
         }
     }
 
+    private func scrollToMessage(
+        _ messageID: UUID,
+        with proxy: ScrollViewProxy,
+        anchor: UnitPoint
+    ) {
+        var transaction = Transaction()
+        transaction.animation = nil
+
+        withTransaction(transaction) {
+            proxy.scrollTo(messageID, anchor: anchor)
+        }
+    }
+
     private func currentStreamingMessageID(in conversation: ConversationThread) -> UUID? {
         conversation.messages.last(where: { $0.role == .assistant && $0.status == .streaming })?.id
     }
@@ -1003,10 +1028,18 @@ struct CompanionConversationDetailView: View {
             return
         }
 
-        renderedMessageBudget = min(
-            totalHistoryCost,
-            max(renderedMessageBudget, CompanionConversationRendering.initialRenderBudget) +
-                CompanionConversationRendering.olderRenderBudget
+        pendingHistoryAnchorMessageID = ConversationHistoryRenderBudget.lastHiddenMessageID(
+            in: messages,
+            budget: renderedMessageBudget
+        )
+
+        renderedMessageBudget = ConversationHistoryRenderBudget.budgetForLoadingOlderMessages(
+            in: messages,
+            currentBudget: max(
+                renderedMessageBudget,
+                CompanionConversationRendering.initialRenderBudget
+            ),
+            preferredIncrement: CompanionConversationRendering.olderRenderBudget
         )
     }
 

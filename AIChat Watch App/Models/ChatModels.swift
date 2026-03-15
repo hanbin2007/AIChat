@@ -899,6 +899,48 @@ nonisolated enum ConversationHistoryRenderBudget {
         return max(visibleCount, 1)
     }
 
+    static func lastHiddenMessageID(
+        in messages: [ChatMessage],
+        budget: Int
+    ) -> UUID? {
+        let visibleCount = visibleMessageCount(in: messages, budget: budget)
+        guard visibleCount < messages.count else {
+            return nil
+        }
+
+        return messages[messages.count - visibleCount - 1].id
+    }
+
+    static func budgetForLoadingOlderMessages(
+        in messages: [ChatMessage],
+        currentBudget: Int,
+        preferredIncrement: Int
+    ) -> Int {
+        let totalHistoryCost = totalCost(in: messages)
+        guard totalHistoryCost > 0 else {
+            return 0
+        }
+
+        let currentVisibleCount = visibleMessageCount(in: messages, budget: currentBudget)
+        guard currentVisibleCount < messages.count else {
+            return totalHistoryCost
+        }
+
+        let nextVisibleCount = min(messages.count, currentVisibleCount + 1)
+        let minimumBudgetToRevealNextMessage = requiredBudgetForLatestMessages(
+            in: messages,
+            count: nextVisibleCount
+        )
+
+        return min(
+            totalHistoryCost,
+            max(
+                max(currentBudget, 1) + max(preferredIncrement, 1),
+                minimumBudgetToRevealNextMessage
+            )
+        )
+    }
+
     private static func cost(of message: ChatMessage) -> Int {
         var cost = 1
         let text = message.cleanedText
@@ -958,6 +1000,19 @@ nonisolated enum ConversationHistoryRenderBudget {
             if character == "\n" {
                 count += 1
             }
+        }
+    }
+
+    private static func requiredBudgetForLatestMessages(
+        in messages: [ChatMessage],
+        count: Int
+    ) -> Int {
+        guard count > 0 else {
+            return 0
+        }
+
+        return messages.suffix(count).reduce(into: 0) { total, message in
+            total += cost(of: message)
         }
     }
 }

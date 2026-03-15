@@ -549,8 +549,35 @@ final class AIChat_Watch_AppTests: XCTestCase {
             XCTAssertNotNil(snapshot)
             XCTAssertLessThan(
                 elapsed,
-                1.0,
+                0.25,
                 "Heavy conversation initial render regressed to \(elapsed)s"
+            )
+        }
+    }
+
+    @MainActor
+    func testConversationDetailInitialRenderPerformanceForHeavyLatexHistory() async throws {
+        let conversation = ConversationThread(
+            title: "Heavy LaTeX",
+            messages: makeHeavyLatexMessages(count: 6)
+        )
+        let store = try await makeLoadedStore(conversations: [conversation])
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+
+        measure(metrics: [XCTClockMetric()], options: options) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let snapshot = renderConversationDetailSnapshot(
+                store: store,
+                conversationID: conversation.id
+            )
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+            XCTAssertNotNil(snapshot)
+            XCTAssertLessThan(
+                elapsed,
+                0.25,
+                "Heavy LaTeX conversation initial render regressed to \(elapsed)s"
             )
         }
     }
@@ -2167,6 +2194,60 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
     }
 
+    func testConversationHistoryRenderBudgetKeepsLoadMoreAnchorAtLastHiddenMessage() {
+        let messages = makeMessages(
+            count: 5,
+            text: "Short reply"
+        )
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.lastHiddenMessageID(
+                in: messages,
+                budget: 2
+            ),
+            messages[2].id
+        )
+    }
+
+    func testConversationHistoryRenderBudgetLoadMoreAlwaysRevealsAnotherMessage() {
+        let messages = [
+            ChatMessage(role: .user, text: "Newest question"),
+            ChatMessage(
+                role: .assistant,
+                text: Array(
+                    repeating: """
+                    ## 公式
+                    $$\\int_0^1 x^4 dx = \\frac{1}{5}$$
+                    """,
+                    count: 120
+                ).joined(separator: "\n")
+            ),
+            ChatMessage(role: .user, text: "Latest follow-up")
+        ]
+
+        let currentBudget = 1
+        let nextBudget = ConversationHistoryRenderBudget.budgetForLoadingOlderMessages(
+            in: messages,
+            currentBudget: currentBudget,
+            preferredIncrement: 1
+        )
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: currentBudget
+            ),
+            1
+        )
+        XCTAssertGreaterThanOrEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: nextBudget
+            ),
+            2
+        )
+    }
+
     private func makeMessages(count: Int, text: String) -> [ChatMessage] {
         (0..<count).map { index in
             ChatMessage(
@@ -2249,6 +2330,33 @@ final class AIChat_Watch_AppTests: XCTestCase {
             ChatMessage(
                 role: index.isMultiple(of: 2) ? .user : .assistant,
                 text: index.isMultiple(of: 2) ? "继续第 \(index + 1) 步" : heavyMarkdown
+            )
+        }
+    }
+
+    private func makeHeavyLatexMessages(count: Int) -> [ChatMessage] {
+        let heavyLatex = Array(
+            repeating: """
+            ## 推导
+            令 $a_n = \\frac{1}{n^2 + 1}$，并比较下式：
+
+            $$
+            f(x) = \\sum_{k=1}^{18} \\frac{x^k}{k!}
+            $$
+
+            \\[
+            \\int_0^1 \\frac{1}{1 + x^2} dx = \\frac{\\pi}{4}
+            \\]
+
+            再验证 $\\alpha^2 + \\beta^2 = \\gamma^2$ 的近似边界。
+            """,
+            count: 8
+        ).joined(separator: "\n\n")
+
+        return (0..<count).map { index in
+            ChatMessage(
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                text: index.isMultiple(of: 2) ? "继续公式第 \(index + 1) 步" : heavyLatex
             )
         }
     }

@@ -2,8 +2,45 @@ import MarkdownView
 import SwiftUI
 import SwiftUIMath
 
+private enum AssistantMessageMarkdownPreparationDecider {
+    static let asynchronousCharacterThreshold = 720
+    static let asynchronousLineThreshold = 10
+
+    static func shouldPrepareOffMainThread(_ text: String) -> Bool {
+        guard text.isEmpty == false else {
+            return false
+        }
+
+        if containsLaTeX(text) {
+            return true
+        }
+
+        return text.count > asynchronousCharacterThreshold ||
+            lineCount(in: text) > asynchronousLineThreshold
+    }
+
+    static func containsLaTeX(_ text: String) -> Bool {
+        text.contains("$$") ||
+        text.contains("\\(") ||
+        text.contains("\\[") ||
+        text.contains("\\begin{equation}") ||
+        text.contains("\\begin{equation*}")
+    }
+
+    private static func lineCount(in text: String) -> Int {
+        text.reduce(into: 1) { count, character in
+            if character == "\n" {
+                count += 1
+            }
+        }
+    }
+}
+
 struct AssistantMessageMarkdownView: View {
     let text: String
+
+    @State private var preparedContent: MarkdownContent?
+    @State private var preparedText = ""
 
     private var mathFont: Math.Font {
         #if os(watchOS)
@@ -13,8 +50,46 @@ struct AssistantMessageMarkdownView: View {
         #endif
     }
 
+    private var shouldPrepareOffMainThread: Bool {
+        AssistantMessageMarkdownPreparationDecider.shouldPrepareOffMainThread(text)
+    }
+
     var body: some View {
-        MarkdownView(text)
+        Group {
+            if shouldPrepareOffMainThread {
+                if let preparedContent, preparedText == text {
+                    configuredMarkdownView(MarkdownView(preparedContent))
+                } else {
+                    loadingPlaceholder
+                        .task(id: text) {
+                            await prepareMarkdownContent()
+                        }
+                }
+            } else {
+                configuredMarkdownView(MarkdownView(text))
+            }
+        }
+    }
+
+    private var loadingPlaceholder: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.cyan)
+
+            Text(
+                AssistantMessageMarkdownPreparationDecider.containsLaTeX(text) ?
+                "正在渲染公式" :
+                "正在渲染内容"
+            )
+            .font(.footnote)
+            .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func configuredMarkdownView<Content: View>(_ view: Content) -> some View {
+        view
             .markdownMathRenderingEnabled()
             .codeBlockStyle(.default(lightTheme: "xcode", darkTheme: "dark"))
             .font(.body, for: .body)
@@ -34,5 +109,25 @@ struct AssistantMessageMarkdownView: View {
             .mathFont(mathFont)
             .environment(\.colorScheme, .dark)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @MainActor
+    private func prepareMarkdownContent() async {
+        let currentText = text
+        preparedContent = nil
+        preparedText = ""
+
+        let content = await Task.detached(priority: .userInitiated) {
+            let content = MarkdownContent(currentText)
+            content.prewarm(renderMath: true, parseBlockDirectives: true)
+            return content
+        }.value
+
+        guard Task.isCancelled == false, currentText == text else {
+            return
+        }
+
+        preparedContent = content
+        preparedText = currentText
     }
 }
