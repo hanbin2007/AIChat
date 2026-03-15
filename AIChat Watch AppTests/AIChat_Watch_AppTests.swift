@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 import XCTest
 @testable import AIChat_Watch_App
 
@@ -33,6 +34,22 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let url = URL(string: "aichat://conversation/new")!
 
         XCTAssertEqual(AIChatDeepLink(url), .newConversation)
+    }
+
+    func testCompletionFeedbackForegroundPresentationOptionsEnableSound() {
+        let options = CompletionFeedbackEvent.foregroundPresentationOptions(
+            forNotificationIdentifier: CompletionFeedbackEvent.transcriptionCompleted.notificationIdentifier
+        )
+
+        XCTAssertTrue(options.contains(.sound))
+    }
+
+    func testCompletionFeedbackForegroundPresentationOptionsIgnoreUnknownNotifications() {
+        let options = CompletionFeedbackEvent.foregroundPresentationOptions(
+            forNotificationIdentifier: "some-other-notification"
+        )
+
+        XCTAssertEqual(options, [])
     }
 
     func testContextWindowMapsRolesAndPreservesLatestMessages() {
