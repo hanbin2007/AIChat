@@ -1,56 +1,65 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="140" y1="104" x2="876" y2="922" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#071019"/>
-      <stop offset="0.48" stop-color="#103043"/>
-      <stop offset="1" stop-color="#0FC0B6"/>
+    <linearGradient id="bg" x1="136" y1="128" x2="892" y2="916" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06111E"/>
+      <stop offset="0.52" stop-color="#123D72"/>
+      <stop offset="1" stop-color="#16C6AE"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(684 316) rotate(129.964) scale(612 512)">
-      <stop stop-color="#6CF7FF" stop-opacity="0.95"/>
-      <stop offset="0.28" stop-color="#39D5E2" stop-opacity="0.36"/>
-      <stop offset="1" stop-color="#39D5E2" stop-opacity="0"/>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(662 282) rotate(124.216) scale(620 566)">
+      <stop stop-color="#96F8FF" stop-opacity="0.92"/>
+      <stop offset="0.34" stop-color="#55DDF0" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#55DDF0" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="bubbleFront" x1="318" y1="280" x2="724" y2="652" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F8FDFF"/>
-      <stop offset="1" stop-color="#C8F3FF"/>
+    <radialGradient id="spot" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(338 760) rotate(-20.556) scale(492 382)">
+      <stop stop-color="#2EF1D5" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2EF1D5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bubbleFill" x1="258" y1="244" x2="772" y2="756" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDFEFF"/>
+      <stop offset="1" stop-color="#D8F6FF"/>
     </linearGradient>
-    <linearGradient id="bubbleBack" x1="246" y1="248" x2="548" y2="520" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7AE8F8" stop-opacity="0.72"/>
-      <stop offset="1" stop-color="#3AB5D2" stop-opacity="0.14"/>
+    <linearGradient id="bubbleStroke" x1="320" y1="220" x2="712" y2="768" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+      <stop offset="1" stop-color="#BFEFFF" stop-opacity="0.34"/>
     </linearGradient>
-    <linearGradient id="spark" x1="704" y1="196" x2="826" y2="318" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFF8CC"/>
-      <stop offset="0.5" stop-color="#FFD66B"/>
-      <stop offset="1" stop-color="#FFB33D"/>
+    <linearGradient id="glyph" x1="376" y1="332" x2="708" y2="704" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#153C67"/>
+      <stop offset="1" stop-color="#0A1C31"/>
     </linearGradient>
-    <filter id="shadow" x="146" y="178" width="660" height="608" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+    <linearGradient id="cursor" x1="694" y1="370" x2="746" y2="642" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1BE3C7"/>
+      <stop offset="1" stop-color="#0CBEF1"/>
+    </linearGradient>
+    <filter id="shadow" x="135" y="180" width="778" height="706" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
       <feFlood flood-opacity="0" result="BackgroundImageFix"/>
       <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
-      <feOffset dy="24"/>
-      <feGaussianBlur stdDeviation="26"/>
+      <feOffset dy="30"/>
+      <feGaussianBlur stdDeviation="34"/>
       <feComposite in2="hardAlpha" operator="out"/>
-      <feColorMatrix type="matrix" values="0 0 0 0 0.004 0 0 0 0 0.082 0 0 0 0 0.122 0 0 0 0.34 0"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0039 0 0 0 0 0.0667 0 0 0 0 0.1137 0 0 0 0.34 0"/>
       <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
       <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
     </filter>
   </defs>
 
   <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
-  <rect width="1024" height="1024" rx="232" fill="url(#glow)"/>
-  <circle cx="512" cy="512" r="302" stroke="#D8FBFF" stroke-opacity="0.14" stroke-width="24"/>
-  <circle cx="512" cy="512" r="248" stroke="#8FEAF2" stroke-opacity="0.14" stroke-width="10"/>
+  <rect width="1024" height="1024" rx="232" fill="url(#halo)"/>
+  <rect width="1024" height="1024" rx="232" fill="url(#spot)"/>
 
-  <path d="M292 260H488C559.797 260 618 318.203 618 390V456C618 527.797 559.797 586 488 586H374L256 686L282 586H292C220.203 586 162 527.797 162 456V390C162 318.203 220.203 260 292 260Z" fill="url(#bubbleBack)"/>
+  <circle cx="512" cy="512" r="310" stroke="#DFFBFF" stroke-opacity="0.12" stroke-width="22"/>
+  <circle cx="512" cy="512" r="246" stroke="#94E7F8" stroke-opacity="0.18" stroke-width="8"/>
+  <path d="M170 304C298 212 474 176 660 222C756 246 838 302 896 380" stroke="#C5F7FF" stroke-opacity="0.16" stroke-width="18" stroke-linecap="round"/>
 
   <g filter="url(#shadow)">
-    <path d="M364 300H658C742.5 300 811 368.5 811 453V529C811 613.5 742.5 682 658 682H486L352 792L384 682H364C279.5 682 211 613.5 211 529V453C211 368.5 279.5 300 364 300Z" fill="url(#bubbleFront)"/>
-    <path d="M364 300H658C742.5 300 811 368.5 811 453V529C811 613.5 742.5 682 658 682H486L352 792L384 682H364C279.5 682 211 613.5 211 529V453C211 368.5 279.5 300 364 300Z" stroke="#E8FCFF" stroke-opacity="0.28" stroke-width="8"/>
+    <path d="M316 248H650C761.562 248 842 328.438 842 440V542C842 653.562 761.562 734 650 734H492L378 820C360.945 832.872 336.617 818.351 340 797.264L352 734H316C204.438 734 124 653.562 124 542V440C124 328.438 204.438 248 316 248Z" fill="url(#bubbleFill)"/>
+    <path d="M316 248H650C761.562 248 842 328.438 842 440V542C842 653.562 761.562 734 650 734H492L378 820C360.945 832.872 336.617 818.351 340 797.264L352 734H316C204.438 734 124 653.562 124 542V440C124 328.438 204.438 248 316 248Z" stroke="url(#bubbleStroke)" stroke-width="10"/>
+    <ellipse cx="646" cy="322" rx="128" ry="72" fill="#FFFFFF" fill-opacity="0.26"/>
   </g>
 
-  <circle cx="402" cy="489" r="38" fill="#0F6676"/>
-  <circle cx="512" cy="489" r="38" fill="#0F6676"/>
-  <circle cx="622" cy="489" r="38" fill="#0F6676"/>
-
-  <path d="M767 176L791.63 250.37L866 275L791.63 299.63L767 374L742.37 299.63L668 275L742.37 250.37L767 176Z" fill="url(#spark)"/>
-  <path d="M664 168L674.672 200.328L707 211L674.672 221.672L664 254L653.328 221.672L621 211L653.328 200.328L664 168Z" fill="#DBFAFF" fill-opacity="0.88"/>
+  <path d="M392 646L506 344" stroke="url(#glyph)" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M620 646L506 344" stroke="url(#glyph)" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M440 520H574" stroke="url(#glyph)" stroke-width="74" stroke-linecap="round"/>
+  <path d="M714 390V618" stroke="url(#cursor)" stroke-width="58" stroke-linecap="round"/>
+  <circle cx="728" cy="300" r="28" fill="#FFE27A"/>
+  <circle cx="728" cy="300" r="54" stroke="#FFE27A" stroke-opacity="0.28" stroke-width="10"/>
 </svg>

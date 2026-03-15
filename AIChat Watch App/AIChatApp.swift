@@ -15,30 +15,33 @@ struct AIChat_Watch_AppApp: App {
     private let uiTestLaunchDestination: UITestLaunchDestination?
 
     init() {
+        #if DEBUG
         if let bootstrap = UITestBootstrap.makeIfNeeded() {
             _chatStore = StateObject(wrappedValue: bootstrap.store)
             initialConversationID = bootstrap.initialConversationID
             uiTestLaunchDestination = bootstrap.launchDestination
-        } else {
-            let configuration = AppConfiguration.load()
-            let repository = ConversationRepository(configuration: configuration)
-            let service = AIServiceFactory.makeService(configuration: configuration)
-            let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
-            let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
-            let syncBridge = CompanionSyncBridge()
-            _chatStore = StateObject(
-                wrappedValue: ChatStore(
-                    repository: repository,
-                    aiService: service,
-                    transcriptionService: transcriptionService,
-                    memoryMaintenanceService: memoryMaintenanceService,
-                    configuration: configuration,
-                    syncBridge: syncBridge
-                )
-            )
-            initialConversationID = nil
-            uiTestLaunchDestination = nil
+            return
         }
+        #endif
+
+        let configuration = AppConfiguration.load()
+        let repository = ConversationRepository(configuration: configuration)
+        let service = AIServiceFactory.makeService(configuration: configuration)
+        let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
+        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
+        let syncBridge = CompanionSyncBridge()
+        _chatStore = StateObject(
+            wrappedValue: ChatStore(
+                repository: repository,
+                aiService: service,
+                transcriptionService: transcriptionService,
+                memoryMaintenanceService: memoryMaintenanceService,
+                configuration: configuration,
+                syncBridge: syncBridge
+            )
+        )
+        initialConversationID = nil
+        uiTestLaunchDestination = nil
     }
 
     var body: some Scene {
@@ -65,6 +68,7 @@ private enum UITestLaunchDestination: Equatable {
     case formulaHarness
 }
 
+#if DEBUG
 private struct UITestBootstrap {
     let store: ChatStore
     let initialConversationID: UUID?
@@ -124,4 +128,5 @@ private struct UITestBootstrap {
         }
     }
 }
+#endif
 #endif

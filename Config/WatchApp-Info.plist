@@ -38,6 +38,8 @@
 	<string>$(GEMINI_MODEL)</string>
 	<key>GEMINI_TRANSCRIPTION_MODEL</key>
 	<string>$(GEMINI_TRANSCRIPTION_MODEL)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>$(INFOPLIST_KEY_NSPhotoLibraryUsageDescription)</string>
 	<key>NSMicrophoneUsageDescription</key>
