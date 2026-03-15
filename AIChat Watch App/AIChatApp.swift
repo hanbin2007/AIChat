@@ -55,7 +55,24 @@ struct AIChat_Watch_AppApp: App {
                 }
             }
             .environmentObject(chatStore)
+            .background(WatchDisplayStateObserver())
         }
+    }
+}
+
+private struct WatchDisplayStateObserver: View {
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    var body: some View {
+        Color.clear
+            .onAppear {
+                WatchDisplayStateMonitor.shared.updateLuminanceReduced(isLuminanceReduced)
+            }
+            .onChange(of: isLuminanceReduced) { _, newValue in
+                WatchDisplayStateMonitor.shared.updateLuminanceReduced(newValue)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

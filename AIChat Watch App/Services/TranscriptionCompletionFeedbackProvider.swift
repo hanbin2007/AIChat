@@ -11,6 +11,21 @@ enum CompletionFeedbackEvent: Equatable {
     case transcriptionCompleted
     case assistantReplyCompleted
 
+    static let notificationIdentifiers: Set<String> = [
+        CompletionFeedbackEvent.transcriptionCompleted.notificationIdentifier,
+        CompletionFeedbackEvent.assistantReplyCompleted.notificationIdentifier
+    ]
+
+    static func foregroundPresentationOptions(
+        forNotificationIdentifier identifier: String
+    ) -> UNNotificationPresentationOptions {
+        guard notificationIdentifiers.contains(identifier) else {
+            return []
+        }
+
+        return [.sound]
+    }
+
     var notificationIdentifier: String {
         switch self {
         case .transcriptionCompleted:
@@ -48,6 +63,25 @@ enum CompletionFeedbackEvent: Equatable {
     }
 }
 
+private final class CompletionFeedbackNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = CompletionFeedbackNotificationDelegate()
+
+    private override init() {}
+
+    func install(on notificationCenter: UNUserNotificationCenter) {
+        notificationCenter.delegate = self
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        CompletionFeedbackEvent.foregroundPresentationOptions(
+            forNotificationIdentifier: notification.request.identifier
+        )
+    }
+}
+
 @MainActor
 protocol CompletionFeedbackProviding {
     func prepareForPossibleBackgroundFeedback() async
@@ -66,10 +100,11 @@ final class DeviceCompletionFeedbackProvider: CompletionFeedbackProviding {
 
     init(notificationCenter: UNUserNotificationCenter = .current()) {
         self.notificationCenter = notificationCenter
+        CompletionFeedbackNotificationDelegate.shared.install(on: notificationCenter)
     }
 
     func prepareForPossibleBackgroundFeedback() async {
-        guard isApplicationActive else {
+        guard canDeliverForegroundFeedback else {
             return
         }
 
@@ -80,7 +115,7 @@ final class DeviceCompletionFeedbackProvider: CompletionFeedbackProviding {
         notificationCenter.removePendingNotificationRequests(withIdentifiers: [event.notificationIdentifier])
         notificationCenter.removeDeliveredNotifications(withIdentifiers: [event.notificationIdentifier])
 
-        if isApplicationActive {
+        if canDeliverForegroundFeedback {
             guard event.triggersForegroundFeedback else {
                 return
             }
@@ -95,11 +130,12 @@ final class DeviceCompletionFeedbackProvider: CompletionFeedbackProviding {
         }
     }
 
-    private var isApplicationActive: Bool {
+    private var canDeliverForegroundFeedback: Bool {
         #if os(iOS)
         UIApplication.shared.applicationState == .active
         #elseif os(watchOS)
-        WKExtension.shared().applicationState == .active
+        WKExtension.shared().applicationState == .active &&
+        WatchDisplayStateMonitor.shared.isLuminanceReduced == false
         #else
         true
         #endif
