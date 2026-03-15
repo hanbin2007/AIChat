@@ -294,6 +294,24 @@ nonisolated struct GeminiPartPayload: Codable, Equatable, Hashable, Sendable {
         value(forKeys: "thoughtSignature", "thought_signature")?.stringValue
     }
 
+    var hasNonSignaturePayload: Bool {
+        for (key, value) in rawObject {
+            switch key {
+            case "thought", "thoughtSignature", "thought_signature":
+                continue
+            case "text":
+                if let text = value.stringValue, text.isEmpty {
+                    continue
+                }
+                return true
+            default:
+                return true
+            }
+        }
+
+        return false
+    }
+
     var hasRecoverableContent: Bool {
         text?.isEmpty == false ||
         inlineData != nil ||

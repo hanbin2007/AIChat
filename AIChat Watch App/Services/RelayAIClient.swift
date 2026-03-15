@@ -682,7 +682,10 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
                 break
             }
 
-            latestModelResponseParts = parts
+            latestModelResponseParts = mergeGeminiStreamModelResponseParts(
+                previousParts: latestModelResponseParts,
+                incomingParts: parts
+            )
         case "attachment":
             guard let payloadAttachment = payload.attachment,
                   let attachment = modelImageAttachment(from: payloadAttachment),

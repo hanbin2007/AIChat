@@ -105,7 +105,10 @@ struct GeminiAPIClient: AIStreamingService {
                         }
                         if let modelResponseParts = streamChunk.modelResponseParts,
                            modelResponseParts.isEmpty == false {
-                            latestModelResponseParts = modelResponseParts
+                            latestModelResponseParts = mergeGeminiStreamModelResponseParts(
+                                previousParts: latestModelResponseParts,
+                                incomingParts: modelResponseParts
+                            )
                         }
 
                         for attachment in extractImageAttachments(from: responseEnvelope, emittedKeys: &emittedAttachmentKeys) {
@@ -324,6 +327,26 @@ func normalizedDelta(chunkText: String, currentText: inout String) -> String? {
 
     currentText.append(chunkText)
     return chunkText
+}
+
+func mergeGeminiStreamModelResponseParts(
+    previousParts: [GeminiPartPayload]?,
+    incomingParts: [GeminiPartPayload]
+) -> [GeminiPartPayload] {
+    guard incomingParts.isEmpty == false else {
+        return previousParts ?? []
+    }
+
+    if incomingParts.contains(where: \.hasNonSignaturePayload) {
+        return incomingParts
+    }
+
+    var mergedParts = previousParts ?? []
+    for part in incomingParts where mergedParts.contains(part) == false {
+        mergedParts.append(part)
+    }
+
+    return mergedParts
 }
 
 func mergedGeminiText(
