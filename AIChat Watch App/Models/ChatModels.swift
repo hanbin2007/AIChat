@@ -848,6 +848,120 @@ nonisolated enum AssistantMessageTextRenderingMode: Equatable {
     case markdown
 }
 
+nonisolated enum ConversationHistoryRenderBudget {
+    private enum Threshold {
+        static let includedTextCharacters = 320
+        static let textCharactersPerUnit = 480
+        static let includedTextLines = 6
+        static let textLinesPerUnit = 12
+        static let includedThoughtCharacters = 120
+        static let thoughtCharactersPerUnit = 240
+        static let markdownPenalty = 2
+        static let attachmentPenalty = 4
+        static let streamingPenalty = 2
+    }
+
+    static func totalCost(in messages: [ChatMessage]) -> Int {
+        messages.lazy.reduce(into: 0) { total, message in
+            total += cost(of: message)
+        }
+    }
+
+    static func shouldDeferInitialRendering(
+        in messages: [ChatMessage],
+        threshold: Int
+    ) -> Bool {
+        totalCost(in: messages) > threshold
+    }
+
+    static func visibleMessageCount(
+        in messages: [ChatMessage],
+        budget: Int
+    ) -> Int {
+        guard messages.isEmpty == false else {
+            return 0
+        }
+
+        let clampedBudget = max(budget, 1)
+        var accumulatedCost = 0
+        var visibleCount = 0
+
+        for message in messages.reversed() {
+            let messageCost = cost(of: message)
+            if visibleCount > 0 && accumulatedCost + messageCost > clampedBudget {
+                break
+            }
+
+            accumulatedCost += messageCost
+            visibleCount += 1
+        }
+
+        return max(visibleCount, 1)
+    }
+
+    private static func cost(of message: ChatMessage) -> Int {
+        var cost = 1
+        let text = message.cleanedText
+
+        if text.isEmpty == false {
+            cost += overflowUnits(
+                for: text.count,
+                included: Threshold.includedTextCharacters,
+                perUnit: Threshold.textCharactersPerUnit
+            )
+            cost += overflowUnits(
+                for: lineCount(in: text),
+                included: Threshold.includedTextLines,
+                perUnit: Threshold.textLinesPerUnit
+            )
+
+            if message.role == .assistant,
+               text.preferredAssistantMessageTextRenderingMode == .markdown {
+                cost += Threshold.markdownPenalty
+            }
+        }
+
+        if let thoughtSummary = message.cleanedThoughtSummary {
+            cost += overflowUnits(
+                for: thoughtSummary.count,
+                included: Threshold.includedThoughtCharacters,
+                perUnit: Threshold.thoughtCharactersPerUnit
+            )
+        }
+
+        if message.attachments.isEmpty == false {
+            cost += message.attachments.count * Threshold.attachmentPenalty
+        }
+
+        if message.status == .streaming {
+            cost += Threshold.streamingPenalty
+        }
+
+        return max(cost, 1)
+    }
+
+    private static func overflowUnits(
+        for value: Int,
+        included: Int,
+        perUnit: Int
+    ) -> Int {
+        guard value > included else {
+            return 0
+        }
+
+        let overflow = value - included
+        return (overflow + perUnit - 1) / perUnit
+    }
+
+    private static func lineCount(in text: String) -> Int {
+        text.reduce(into: 1) { count, character in
+            if character == "\n" {
+                count += 1
+            }
+        }
+    }
+}
+
 nonisolated struct ChatAttachmentRenderSignature: Equatable {
     let id: UUID
     let kind: ChatAttachmentKind
@@ -897,7 +1011,7 @@ extension String {
             return .plain
         }
 
-        guard containsMarkdownFormattingHint else {
+        guard containsMarkdownFormattingHintForAssistantRendering else {
             return .plain
         }
 
@@ -915,7 +1029,7 @@ extension String {
         return .markdown
     }
 
-    private var containsMarkdownFormattingHint: Bool {
+    fileprivate var containsMarkdownFormattingHintForAssistantRendering: Bool {
         if contains("```") ||
             contains("`") ||
             contains("![") ||
@@ -949,6 +1063,18 @@ extension String {
                 options: .regularExpression
             ) != nil
         }
+    }
+}
+
+nonisolated enum AssistantMessageTextRenderingDecider {
+    static func expandedMode(for text: String) -> AssistantMessageTextRenderingMode {
+        guard text.isEmpty == false,
+              text.containsMarkdownFormattingHintForAssistantRendering
+        else {
+            return .plain
+        }
+
+        return .markdown
     }
 }
 

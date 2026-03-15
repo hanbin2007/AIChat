@@ -5,6 +5,7 @@
 //  Created by zhb on 2026/3/7.
 //
 
+import SwiftUI
 import XCTest
 @testable import AIChat_Watch_App
 
@@ -500,6 +501,58 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let text = Array(repeating: "- 长列表项内容", count: 80).joined(separator: "\n")
 
         XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .plain)
+    }
+
+    func testAssistantMessageExpandedRenderingModeKeepsMarkdownForLongStructuredReplies() {
+        let text = Array(
+            repeating: """
+            ## 推导
+            - 列出条件
+            - 公式：$$x^2 + y^2 = z^2$$
+            """,
+            count: 40
+        ).joined(separator: "\n")
+
+        XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .plain)
+        XCTAssertEqual(
+            AssistantMessageTextRenderingDecider.expandedMode(for: text),
+            .markdown
+        )
+    }
+
+    @MainActor
+    func testConversationDetailInitialRenderPerformanceForHeavyCollapsedHistory() async throws {
+        let conversation = ConversationThread(
+            title: "Heavy Markdown",
+            messages: makeHeavyMarkdownMessages(count: 8)
+        )
+        let store = try await makeLoadedStore(conversations: [conversation])
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: conversation.messages,
+                budget: 10
+            ),
+            1
+        )
+
+        measure(metrics: [XCTClockMetric()], options: options) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let snapshot = renderConversationDetailSnapshot(
+                store: store,
+                conversationID: conversation.id
+            )
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+            XCTAssertNotNil(snapshot)
+            XCTAssertLessThan(
+                elapsed,
+                1.0,
+                "Heavy conversation initial render regressed to \(elapsed)s"
+            )
+        }
     }
 
     func testGemini31ProExtremeUsesDynamicMaximumThinking() {
@@ -2055,6 +2108,149 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
 
         XCTAssertEqual(merged, "Summarize the meeting and call out the blockers.")
+    }
+
+    func testConversationHistoryRenderBudgetDefersSmallHeavyConversation() {
+        let messages = makeMessages(
+            count: 8,
+            text: String(repeating: "Large content block ", count: 280)
+        )
+
+        XCTAssertTrue(
+            ConversationHistoryRenderBudget.shouldDeferInitialRendering(
+                in: messages,
+                threshold: 48
+            )
+        )
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: 10
+            ),
+            1
+        )
+    }
+
+    func testConversationHistoryRenderBudgetKeepsSmallLightConversationEager() {
+        let messages = makeMessages(
+            count: 8,
+            text: "Short reply"
+        )
+
+        XCTAssertFalse(
+            ConversationHistoryRenderBudget.shouldDeferInitialRendering(
+                in: messages,
+                threshold: 48
+            )
+        )
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: 10
+            ),
+            messages.count
+        )
+    }
+
+    func testConversationHistoryRenderBudgetAlwaysKeepsNewestMessageVisible() {
+        let messages = makeMessages(
+            count: 1,
+            text: String(repeating: "Very long answer ", count: 400)
+        )
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: 1
+            ),
+            1
+        )
+    }
+
+    private func makeMessages(count: Int, text: String) -> [ChatMessage] {
+        (0..<count).map { index in
+            ChatMessage(
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                text: text
+            )
+        }
+    }
+
+    @MainActor
+    private func makeLoadedStore(
+        conversations: [ConversationThread]
+    ) async throws -> ChatStore {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatPerf-\(UUID().uuidString)", isDirectory: true)
+        )
+
+        for conversation in conversations {
+            try await repository.save(conversation)
+        }
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        await store.loadConversationsIfNeeded()
+        return store
+    }
+
+    @MainActor
+    private func renderConversationDetailSnapshot(
+        store: ChatStore,
+        conversationID: UUID
+    ) -> CGImage? {
+        let width: CGFloat = 184
+        let height: CGFloat = 224
+        let content = ConversationDetailView(conversationID: conversationID)
+            .environmentObject(store)
+            .frame(width: width, height: height)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(width: width, height: height)
+        return renderer.cgImage
+    }
+
+    private func makeHeavyMarkdownMessages(count: Int) -> [ChatMessage] {
+        let heavyMarkdown = Array(
+            repeating: """
+            ## 推导步骤
+            - 先整理条件 `value`
+            - 再计算公式 $$\\int_0^1 x^2 dx = \\frac{1}{3}$$
+
+            ```swift
+            let answer = 42
+            print(answer)
+            ```
+
+            这一段用于模拟真实的大段 markdown 与 LaTeX 回复内容。
+            """,
+            count: 36
+        ).joined(separator: "\n\n")
+
+        return (0..<count).map { index in
+            ChatMessage(
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                text: index.isMultiple(of: 2) ? "继续第 \(index + 1) 步" : heavyMarkdown
+            )
+        }
     }
 
     @MainActor

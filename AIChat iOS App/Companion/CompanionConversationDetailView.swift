@@ -22,10 +22,10 @@ private enum CompanionVoiceCaptureMode {
 }
 
 private enum CompanionConversationRendering {
-    static let prewarmedMessageBatch = 12
-    static let initialMessageBatch = 40
-    static let olderMessageBatch = 80
-    static let deferredLoadingThreshold = 60
+    static let prewarmedRenderBudget = 12
+    static let initialRenderBudget = 40
+    static let olderRenderBudget = 80
+    static let deferredRenderThreshold = 60
     static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
 }
 
@@ -46,8 +46,9 @@ struct CompanionConversationDetailView: View {
     @State private var voiceCaptureMode: CompanionVoiceCaptureMode = .transcribe
     @State private var suppressedVoiceTapUntil = Date.distantPast
     @FocusState private var isDraftFieldFocused: Bool
-    @State private var renderedMessageCount = CompanionConversationRendering.prewarmedMessageBatch
+    @State private var renderedMessageBudget = CompanionConversationRendering.prewarmedRenderBudget
     @State private var lastObservedMessageCount = 0
+    @State private var lastObservedHistoryCost = 0
     @State private var isPreparingHistory = true
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
@@ -135,10 +136,14 @@ struct CompanionConversationDetailView: View {
                         starterCard
                     } else {
                         if isPreparingHistory {
-                            historyLoadingCard(totalCount: conversation.messages.count)
+                            historyLoadingCard(
+                                visibleCount: visibleMessages.count,
+                                totalCount: conversation.messages.count
+                            )
                         } else if hiddenMessageCount > 0 {
                             loadEarlierMessagesCard(
                                 hiddenMessageCount: hiddenMessageCount,
+                                visibleCount: visibleMessages.count,
                                 totalCount: conversation.messages.count
                             )
                         }
@@ -215,7 +220,7 @@ struct CompanionConversationDetailView: View {
                 suspendedStreamingRenderMessageID = nil
                 streamingRenderResumeTask?.cancel()
                 streamingRenderResumeTask = nil
-                prepareInitialHistoryIfNeeded(totalCount: conversation.messages.count)
+                prepareInitialHistoryIfNeeded(messages: conversation.messages)
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
@@ -223,16 +228,16 @@ struct CompanionConversationDetailView: View {
                     force: true
                 )
             }
-            .onChange(of: conversation.messages.count) { newCount in
-                reconcileRenderedMessages(totalCount: newCount)
+            .onChange(of: conversation.messages.count) { _ in
+                reconcileRenderedHistory(with: conversation.messages)
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: true,
                     streamingMessageID: streamingMessageID
                 )
             }
-            .onChange(of: renderedMessageCount) { newCount in
-                guard newCount > 0 else {
+            .onChange(of: renderedMessageBudget) { newBudget in
+                guard newBudget > 0 else {
                     return
                 }
 
@@ -353,7 +358,7 @@ struct CompanionConversationDetailView: View {
         .tint(.white.opacity(0.9))
     }
 
-    private func historyLoadingCard(totalCount: Int) -> some View {
+    private func historyLoadingCard(visibleCount: Int, totalCount: Int) -> some View {
         HStack(spacing: 12) {
             ProgressView()
                 .tint(.cyan)
@@ -363,7 +368,7 @@ struct CompanionConversationDetailView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
 
-                Text("先显示最近 \(min(renderedMessageCount, totalCount)) / \(totalCount) 条，等导航稳定后再继续。")
+                Text("先显示最近 \(visibleCount) / \(totalCount) 条，等导航稳定后再继续。")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.72))
             }
@@ -381,9 +386,13 @@ struct CompanionConversationDetailView: View {
         )
     }
 
-    private func loadEarlierMessagesCard(hiddenMessageCount: Int, totalCount: Int) -> some View {
+    private func loadEarlierMessagesCard(
+        hiddenMessageCount: Int,
+        visibleCount: Int,
+        totalCount: Int
+    ) -> some View {
         Button {
-            loadOlderMessages(totalCount: totalCount)
+            loadOlderMessages(messages: chatStore.conversation(id: conversationID)?.messages ?? [])
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -391,7 +400,7 @@ struct CompanionConversationDetailView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
 
-                    Text("还有 \(hiddenMessageCount) 条未渲染，当前显示最近 \(min(renderedMessageCount, totalCount)) 条。")
+                    Text("还有 \(hiddenMessageCount) 条未渲染，当前显示最近 \(visibleCount) / \(totalCount) 条。")
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.72))
                 }
@@ -888,22 +897,36 @@ struct CompanionConversationDetailView: View {
     }
 
     private func visibleMessages(in conversation: ConversationThread) -> ArraySlice<ChatMessage> {
-        let totalCount = conversation.messages.count
-        guard totalCount > 0 else {
+        guard conversation.messages.isEmpty == false else {
             return conversation.messages.suffix(0)
         }
 
-        let clampedCount = min(max(renderedMessageCount, 0), totalCount)
-        return conversation.messages.suffix(clampedCount)
+        if lastObservedMessageCount == conversation.messages.count,
+           renderedMessageBudget >= lastObservedHistoryCost {
+            return conversation.messages.suffix(conversation.messages.count)
+        }
+
+        let visibleCount = ConversationHistoryRenderBudget.visibleMessageCount(
+            in: conversation.messages,
+            budget: renderedMessageBudget
+        )
+        return conversation.messages.suffix(visibleCount)
     }
 
-    private func prepareInitialHistoryIfNeeded(totalCount: Int) {
+    private func prepareInitialHistoryIfNeeded(messages: [ChatMessage]) {
         initialHistoryLoadTask?.cancel()
-        lastObservedMessageCount = totalCount
-        renderedMessageCount = min(totalCount, CompanionConversationRendering.prewarmedMessageBatch)
+        let totalCount = messages.count
+        let totalHistoryCost = ConversationHistoryRenderBudget.totalCost(in: messages)
 
-        guard totalCount > CompanionConversationRendering.deferredLoadingThreshold else {
-            renderedMessageCount = totalCount
+        lastObservedMessageCount = totalCount
+        lastObservedHistoryCost = totalHistoryCost
+        renderedMessageBudget = CompanionConversationRendering.prewarmedRenderBudget
+
+        guard ConversationHistoryRenderBudget.shouldDeferInitialRendering(
+            in: messages,
+            threshold: CompanionConversationRendering.deferredRenderThreshold
+        ) else {
+            renderedMessageBudget = totalHistoryCost
             isPreparingHistory = false
             return
         }
@@ -916,9 +939,9 @@ struct CompanionConversationDetailView: View {
             }
 
             await MainActor.run {
-                renderedMessageCount = min(
-                    lastObservedMessageCount,
-                    CompanionConversationRendering.initialMessageBatch
+                renderedMessageBudget = min(
+                    lastObservedHistoryCost,
+                    CompanionConversationRendering.initialRenderBudget
                 )
                 isPreparingHistory = false
                 initialHistoryLoadTask = nil
@@ -926,48 +949,64 @@ struct CompanionConversationDetailView: View {
         }
     }
 
-    private func reconcileRenderedMessages(totalCount: Int) {
+    private func reconcileRenderedHistory(with messages: [ChatMessage]) {
+        let totalCount = messages.count
+        let totalHistoryCost = ConversationHistoryRenderBudget.totalCost(in: messages)
         let previousCount = lastObservedMessageCount
-        lastObservedMessageCount = totalCount
+        let previousHistoryCost = lastObservedHistoryCost
 
-        guard previousCount != totalCount else {
+        lastObservedMessageCount = totalCount
+        lastObservedHistoryCost = totalHistoryCost
+
+        guard previousCount != totalCount || previousHistoryCost != totalHistoryCost else {
             return
         }
 
-        if totalCount <= CompanionConversationRendering.deferredLoadingThreshold {
-            renderedMessageCount = totalCount
+        if ConversationHistoryRenderBudget.shouldDeferInitialRendering(
+            in: messages,
+            threshold: CompanionConversationRendering.deferredRenderThreshold
+        ) == false {
+            renderedMessageBudget = totalHistoryCost
             isPreparingHistory = false
             return
         }
 
-        if totalCount < previousCount {
-            renderedMessageCount = min(renderedMessageCount, totalCount)
+        if totalCount < previousCount || totalHistoryCost < previousHistoryCost {
+            renderedMessageBudget = min(renderedMessageBudget, totalHistoryCost)
             return
         }
 
-        let delta = totalCount - previousCount
-        let wasShowingAll = renderedMessageCount >= previousCount
+        let deltaHistoryCost = totalHistoryCost - previousHistoryCost
+        let wasShowingAll = renderedMessageBudget >= previousHistoryCost
 
         if isPreparingHistory {
-            renderedMessageCount = min(
-                totalCount,
-                max(renderedMessageCount + delta, CompanionConversationRendering.prewarmedMessageBatch)
+            renderedMessageBudget = min(
+                totalHistoryCost,
+                max(
+                    renderedMessageBudget + deltaHistoryCost,
+                    CompanionConversationRendering.prewarmedRenderBudget
+                )
             )
             return
         }
 
         if wasShowingAll {
-            renderedMessageCount = totalCount
+            renderedMessageBudget = totalHistoryCost
         } else {
-            renderedMessageCount = min(totalCount, renderedMessageCount + delta)
+            renderedMessageBudget = min(totalHistoryCost, renderedMessageBudget + deltaHistoryCost)
         }
     }
 
-    private func loadOlderMessages(totalCount: Int) {
-        renderedMessageCount = min(
-            totalCount,
-            max(renderedMessageCount, CompanionConversationRendering.initialMessageBatch) +
-                CompanionConversationRendering.olderMessageBatch
+    private func loadOlderMessages(messages: [ChatMessage]) {
+        let totalHistoryCost = ConversationHistoryRenderBudget.totalCost(in: messages)
+        guard totalHistoryCost > 0 else {
+            return
+        }
+
+        renderedMessageBudget = min(
+            totalHistoryCost,
+            max(renderedMessageBudget, CompanionConversationRendering.initialRenderBudget) +
+                CompanionConversationRendering.olderRenderBudget
         )
     }
 

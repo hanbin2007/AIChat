@@ -252,11 +252,16 @@ struct ChatBubbleView: View, Equatable {
     private var messageTextContent: some View {
         if isUser == false, message.status != .streaming {
             #if os(watchOS)
-            switch displayedText.preferredAssistantMessageTextRenderingMode {
-            case .plain:
-                MessageBodyTextView(text: displayedText)
-            case .markdown:
+            let compactRenderingMode = displayedText.preferredAssistantMessageTextRenderingMode
+            let expandedRenderingMode = AssistantMessageTextRenderingDecider.expandedMode(for: displayedText)
+
+            switch (compactRenderingMode, expandedRenderingMode) {
+            case (.markdown, _):
                 AssistantMessageMarkdownView(text: displayedText)
+            case (.plain, .markdown):
+                CollapsibleAssistantMessageMarkdownView(text: displayedText)
+            case (.plain, .plain):
+                MessageBodyTextView(text: displayedText)
             }
             #else
             AssistantMessageMarkdownView(text: displayedText)
@@ -471,20 +476,26 @@ private enum MessageBodyLayout {
     static let collapseLineThreshold = 14
 }
 
+private extension String {
+    var shouldCollapseMessageBody: Bool {
+        let newlineCount = reduce(into: 0) { count, character in
+            if character == "\n" {
+                count += 1
+            }
+        }
+
+        return count > MessageBodyLayout.collapseCharacterThreshold ||
+            newlineCount >= MessageBodyLayout.collapseLineThreshold
+    }
+}
+
 private struct MessageBodyTextView: View {
     let text: String
 
     @State private var isExpanded = false
 
     private var shouldCollapse: Bool {
-        let newlineCount = text.reduce(into: 0) { count, character in
-            if character == "\n" {
-                count += 1
-            }
-        }
-
-        return text.count > MessageBodyLayout.collapseCharacterThreshold ||
-            newlineCount >= MessageBodyLayout.collapseLineThreshold
+        text.shouldCollapseMessageBody
     }
 
     var body: some View {
@@ -496,6 +507,45 @@ private struct MessageBodyTextView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(shouldCollapse && isExpanded == false ? MessageBodyLayout.collapsedLineLimit : nil)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if shouldCollapse {
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "收起全文" : "展开全文", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.cyan.opacity(0.92))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct CollapsibleAssistantMessageMarkdownView: View {
+    let text: String
+
+    @State private var isExpanded = false
+
+    private var shouldCollapse: Bool {
+        text.shouldCollapseMessageBody
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: shouldCollapse ? 8 : 0) {
+            if shouldCollapse, isExpanded == false {
+                Text(text)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(MessageBodyLayout.collapsedLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                AssistantMessageMarkdownView(text: text)
+            }
 
             if shouldCollapse {
                 Button {
