@@ -202,6 +202,32 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationRowOpensDetailView() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_navigation"
+        app.launch()
+
+        let row = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000201"]
+        if !row.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing conversation row hierarchy")
+            XCTFail("Missing conversation row in the watch list.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(row, timeout: 5))
+        row.tap()
+
+        let toolEntry = app.buttons["conversation.tool-entry"]
+        if !toolEntry.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Conversation detail did not open hierarchy")
+            XCTFail("Conversation detail did not open after tapping the row.")
+            return
+        }
+
+        XCTAssertTrue(toolEntry.isHittable)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

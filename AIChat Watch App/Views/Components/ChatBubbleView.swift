@@ -82,7 +82,7 @@ struct ChatBubbleView: View, Equatable {
 
     static func == (lhs: ChatBubbleView, rhs: ChatBubbleView) -> Bool {
         lhs.conversationID == rhs.conversationID &&
-        lhs.message == rhs.message &&
+        lhs.message.renderSignature == rhs.message.renderSignature &&
         lhs.suspendStreamingRender == rhs.suspendStreamingRender
     }
 
@@ -251,7 +251,16 @@ struct ChatBubbleView: View, Equatable {
     @ViewBuilder
     private var messageTextContent: some View {
         if isUser == false, message.status != .streaming {
+            #if os(watchOS)
+            switch displayedText.preferredAssistantMessageTextRenderingMode {
+            case .plain:
+                MessageBodyTextView(text: displayedText)
+            case .markdown:
+                AssistantMessageMarkdownView(text: displayedText)
+            }
+            #else
             AssistantMessageMarkdownView(text: displayedText)
+            #endif
         } else {
             MessageBodyTextView(text: displayedText)
         }
