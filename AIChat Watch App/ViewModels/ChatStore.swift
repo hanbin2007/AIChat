@@ -8,6 +8,12 @@
 import Combine
 import Foundation
 
+#if os(iOS)
+import UIKit
+#elseif os(watchOS)
+import WatchKit
+#endif
+
 struct ConversationDraft: Equatable {
     var text: String = ""
     var attachments: [ChatAttachment] = []
@@ -95,11 +101,173 @@ nonisolated enum DraftTextComposer {
     }
 }
 
+protocol ReplyPersistenceControlling: AnyObject {
+    func beginStreamingReplyPersistence() -> UUID
+    func endStreamingReplyPersistence(_ token: UUID)
+}
+
+final class NoopReplyPersistenceController: ReplyPersistenceControlling {
+    func beginStreamingReplyPersistence() -> UUID {
+        UUID()
+    }
+
+    func endStreamingReplyPersistence(_ token: UUID) {}
+}
+
+final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControlling {
+    private var activeTokens: Set<UUID> = []
+
+    #if os(iOS)
+    private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
+    #elseif os(watchOS)
+    private var extendedRuntimeSession: WKExtendedRuntimeSession?
+    #endif
+
+    func beginStreamingReplyPersistence() -> UUID {
+        let token = UUID()
+        let shouldActivate = activeTokens.isEmpty
+        activeTokens.insert(token)
+
+        if shouldActivate {
+            activateIfPossible()
+        }
+
+        return token
+    }
+
+    func endStreamingReplyPersistence(_ token: UUID) {
+        guard activeTokens.remove(token) != nil else {
+            return
+        }
+
+        if activeTokens.isEmpty {
+            deactivate()
+        }
+    }
+
+    private func activateIfPossible() {
+        guard Self.isRunningUnitTests == false else {
+            return
+        }
+
+        #if os(iOS)
+        guard backgroundTaskIdentifier == .invalid else {
+            return
+        }
+
+        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(
+            withName: "AIChatAssistantReply"
+        ) { [weak self] in
+            DispatchQueue.main.async {
+                self?.handleExpiration()
+            }
+        }
+        #elseif os(watchOS)
+        guard extendedRuntimeSession == nil,
+              WKExtension.shared().applicationState == .active
+        else {
+            return
+        }
+
+        let session = WKExtendedRuntimeSession()
+        session.delegate = self
+        extendedRuntimeSession = session
+        session.start()
+        #endif
+    }
+
+    private func deactivate() {
+        #if os(iOS)
+        guard backgroundTaskIdentifier != .invalid else {
+            return
+        }
+
+        let taskIdentifier = backgroundTaskIdentifier
+        backgroundTaskIdentifier = .invalid
+        UIApplication.shared.endBackgroundTask(taskIdentifier)
+        #elseif os(watchOS)
+        extendedRuntimeSession?.invalidate()
+        extendedRuntimeSession = nil
+        #endif
+    }
+
+    private func handleExpiration() {
+        #if os(iOS)
+        deactivate()
+        #endif
+    }
+
+    private static var isRunningUnitTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
+#if os(watchOS)
+extension DeviceReplyPersistenceController: WKExtendedRuntimeSessionDelegate {
+    func extendedRuntimeSessionDidStart(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    func extendedRuntimeSessionWillExpire(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    func extendedRuntimeSession(
+        _ extendedRuntimeSession: WKExtendedRuntimeSession,
+        didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason,
+        error: Error?
+    ) {
+        guard self.extendedRuntimeSession === extendedRuntimeSession else {
+            return
+        }
+
+        self.extendedRuntimeSession = nil
+    }
+}
+#endif
+
+nonisolated enum RecoveredStreamingMessageNormalizer {
+    static func normalized(conversation: ConversationThread) -> (conversation: ConversationThread, didChange: Bool) {
+        var normalizedConversation = conversation
+        var normalizedMessages: [ChatMessage] = []
+        normalizedMessages.reserveCapacity(conversation.messages.count)
+        var didChange = false
+
+        for message in conversation.messages {
+            guard message.role == .assistant, message.status == .streaming else {
+                normalizedMessages.append(message)
+                continue
+            }
+
+            let hasRecoverableContent =
+                message.cleanedText.isEmpty == false ||
+                message.cleanedThoughtSummary != nil ||
+                message.cleanedModelResponseParts != nil ||
+                message.attachments.isEmpty == false
+
+            if hasRecoverableContent {
+                var recoveredMessage = message
+                recoveredMessage.status = .failed
+                normalizedMessages.append(recoveredMessage)
+            } else {
+                didChange = true
+                continue
+            }
+
+            didChange = true
+        }
+
+        guard didChange else {
+            return (conversation, false)
+        }
+
+        normalizedConversation.messages = normalizedMessages
+        return (normalizedConversation, true)
+    }
+}
+
 @MainActor
 final class ChatStore: ObservableObject {
     static let defaultSendFailureRetryLimit = 3
     static let maximumSendFailureRetryLimit = 10
     static let minimumSendFailureRetryLimit = 1
+    static let streamingProgressPersistenceInterval: TimeInterval = 1
 
     @Published private(set) var conversations: [ConversationThread] = []
     @Published private(set) var startupError: String?
@@ -129,6 +297,7 @@ final class ChatStore: ObservableObject {
     private let completionFeedbackProvider: any CompletionFeedbackProviding
     private let memoryMaintenanceService: any AIMemoryMaintenanceService
     private let syncBridge: CompanionSyncBridge
+    private let replyPersistenceController: any ReplyPersistenceControlling
     private let activationRepository: ActivationRepository
     private let defaults: UserDefaults
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
@@ -147,6 +316,7 @@ final class ChatStore: ObservableObject {
         memoryMaintenanceService: any AIMemoryMaintenanceService = HeuristicMemoryMaintenanceService(),
         configuration: AppConfiguration,
         syncBridge: CompanionSyncBridge,
+        replyPersistenceController: (any ReplyPersistenceControlling)? = nil,
         activationRepository: ActivationRepository = ActivationRepository(),
         deviceIdentity: WatchDeviceIdentity? = nil,
         defaults: UserDefaults? = nil,
@@ -161,6 +331,7 @@ final class ChatStore: ObservableObject {
         self.memoryMaintenanceService = memoryMaintenanceService
         self.configuration = configuration
         self.syncBridge = syncBridge
+        self.replyPersistenceController = replyPersistenceController ?? DeviceReplyPersistenceController()
         self.activationRepository = activationRepository
         self.deviceIdentity = deviceIdentity ?? WatchDeviceIdentityProvider.current()
         self.defaults = resolvedDefaults
@@ -1211,7 +1382,10 @@ final class ChatStore: ObservableObject {
         normalizedConversations.reserveCapacity(conversations.count)
 
         for conversation in conversations {
-            let normalizedConversation = normalizedConversationForStorage(conversation)
+            let recoveredConversation = RecoveredStreamingMessageNormalizer
+                .normalized(conversation: conversation)
+                .conversation
+            let normalizedConversation = normalizedConversationForStorage(recoveredConversation)
             normalizedConversations.append(normalizedConversation)
 
             if normalizedConversation != conversation {
@@ -1782,6 +1956,12 @@ final class ChatStore: ObservableObject {
         }
 
         let assistantMessageID = UUID()
+        let replyPersistenceToken = replyPersistenceController.beginStreamingReplyPersistence()
+
+        defer {
+            replyPersistenceController.endStreamingReplyPersistence(replyPersistenceToken)
+        }
+
         currentConversation.append(
             ChatMessage(
                 id: assistantMessageID,
@@ -1843,13 +2023,25 @@ final class ChatStore: ObservableObject {
                     var streamedModelResponseParts: [GeminiPartPayload]?
                     var streamedAttachments: [ChatAttachment] = []
                     let flushInterval: TimeInterval = 0.05
+                    let persistenceInterval = Self.streamingProgressPersistenceInterval
                     var lastFlushAt = Date.distantPast
+                    var lastPersistAt = Date.distantPast
                     var hasFlushedVisibleContent = false
+                    var hasPersistedStreamingProgress = false
 
                     @MainActor
-                    func flushIfNeeded(force: Bool = false) {
+                    func flushIfNeeded(force: Bool = false) async {
                         let now = Date.now
-                        guard force || hasFlushedVisibleContent == false || now.timeIntervalSince(lastFlushAt) >= flushInterval else {
+                        let shouldFlushVisibleContent =
+                            force ||
+                            hasFlushedVisibleContent == false ||
+                            now.timeIntervalSince(lastFlushAt) >= flushInterval
+                        let shouldPersistStreamingProgress =
+                            force ||
+                            hasPersistedStreamingProgress == false ||
+                            now.timeIntervalSince(lastPersistAt) >= persistenceInterval
+
+                        guard shouldFlushVisibleContent || shouldPersistStreamingProgress else {
                             return
                         }
 
@@ -1864,8 +2056,17 @@ final class ChatStore: ObservableObject {
                             fallbackCreatedAt: assistantMessageCreatedAt
                         )
 
-                        lastFlushAt = now
-                        hasFlushedVisibleContent = true
+                        if shouldFlushVisibleContent {
+                            lastFlushAt = now
+                            hasFlushedVisibleContent = true
+                        }
+
+                        if shouldPersistStreamingProgress,
+                           let streamingConversation = conversation(id: conversationID) {
+                            await persist(streamingConversation, sync: false)
+                            lastPersistAt = now
+                            hasPersistedStreamingProgress = true
+                        }
                     }
 
                     for try await event in aiService.streamReply(for: requestConversation) {
@@ -1888,10 +2089,10 @@ final class ChatStore: ObservableObject {
                             streamedAttachments.append(attachment)
                         }
 
-                        flushIfNeeded(force: hasFlushedVisibleContent == false)
+                        await flushIfNeeded(force: hasFlushedVisibleContent == false)
                     }
 
-                    flushIfNeeded(force: true)
+                    await flushIfNeeded(force: true)
 
                     return (streamedText, streamedThoughtSummary, streamedModelResponseParts, streamedAttachments)
                 }

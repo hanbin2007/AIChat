@@ -2358,6 +2358,200 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(conversation.messages.last?.status, .failed)
     }
 
+    @MainActor
+    func testSendMessagePersistsStreamingReplyProgressAndReleasesReplyPersistenceController() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_980)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let aiService = CancellableStreamingAIStreamingService()
+        let replyPersistenceController = MockReplyPersistenceController()
+        let store = ChatStore(
+            repository: repository,
+            aiService: aiService,
+            transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            replyPersistenceController: replyPersistenceController
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+
+        let conversationID = await store.createConversation()
+        store.updateDraftText("Persist this answer", for: conversationID)
+
+        let sendTask = Task {
+            await store.sendMessage(in: conversationID)
+        }
+
+        let didStartSending = await waitUntil(timeoutNanoseconds: 5_000_000_000) {
+            store.isSending(conversationID: conversationID)
+        }
+        XCTAssertTrue(didStartSending)
+
+        let didStreamPartialReply = await waitUntil(timeoutNanoseconds: 5_000_000_000) {
+            store.conversation(id: conversationID)?
+                .messages
+                .last(where: { $0.role == .assistant })?
+                .text == "Partial reply"
+        }
+        XCTAssertTrue(didStreamPartialReply)
+
+        let persistedConversation = try await waitForPersistedConversation(
+            in: repository,
+            conversationID: conversationID
+        ) { conversation in
+            conversation.messages.last?.role == .assistant &&
+            conversation.messages.last?.text == "Partial reply" &&
+            conversation.messages.last?.status == .streaming
+        }
+
+        let partialConversation = try XCTUnwrap(persistedConversation)
+        XCTAssertEqual(partialConversation.messages.last?.text, "Partial reply")
+        XCTAssertEqual(partialConversation.messages.last?.status, .streaming)
+        XCTAssertEqual(replyPersistenceController.begunTokens.count, 1)
+        XCTAssertTrue(replyPersistenceController.endedTokens.isEmpty)
+
+        store.stopSending(in: conversationID)
+        await sendTask.value
+
+        XCTAssertEqual(replyPersistenceController.begunTokens, replyPersistenceController.endedTokens)
+
+        let finalConversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(finalConversation.messages.last?.status, .failed)
+        XCTAssertEqual(finalConversation.messages.last?.text, "Partial reply")
+    }
+
+    @MainActor
+    func testLoadConversationsRecoversPersistedStreamingReplyAsFailed() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let conversationID = UUID()
+        try await repository.save(
+            ConversationThread(
+                id: conversationID,
+                messages: [
+                    ChatMessage(role: .user, text: "What happened?"),
+                    ChatMessage(
+                        role: .assistant,
+                        text: "Partial reply",
+                        status: .streaming
+                    )
+                ]
+            )
+        )
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            replyPersistenceController: NoopReplyPersistenceController()
+        )
+
+        await store.loadConversationsIfNeeded()
+
+        let loadedConversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(loadedConversation.messages.last?.text, "Partial reply")
+        XCTAssertEqual(loadedConversation.messages.last?.status, .failed)
+
+        let persistedConversations = try await repository.loadConversations()
+        let persistedConversation = try XCTUnwrap(
+            persistedConversations.first(where: { $0.id == conversationID })
+        )
+        XCTAssertEqual(persistedConversation.messages.last?.status, .failed)
+    }
+
+    @MainActor
+    func testLoadConversationsDropsEmptyRecoveredStreamingReply() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-\(UUID().uuidString)", isDirectory: true)
+        )
+        let conversationID = UUID()
+        try await repository.save(
+            ConversationThread(
+                id: conversationID,
+                messages: [
+                    ChatMessage(role: .user, text: "Still there?"),
+                    ChatMessage(
+                        role: .assistant,
+                        text: "",
+                        status: .streaming
+                    )
+                ]
+            )
+        )
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            replyPersistenceController: NoopReplyPersistenceController()
+        )
+
+        await store.loadConversationsIfNeeded()
+
+        let loadedConversation = try XCTUnwrap(store.conversation(id: conversationID))
+        XCTAssertEqual(loadedConversation.messages.count, 1)
+        XCTAssertEqual(loadedConversation.messages.first?.role, .user)
+
+        let persistedConversations = try await repository.loadConversations()
+        let persistedConversation = try XCTUnwrap(
+            persistedConversations.first(where: { $0.id == conversationID })
+        )
+        XCTAssertEqual(persistedConversation.messages.count, 1)
+        XCTAssertEqual(persistedConversation.messages.first?.role, .user)
+    }
+
     func testConversationRecencySortPrefersNewestUpdatedAtThenCreatedAt() {
         let older = ConversationThread(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
@@ -2644,6 +2838,31 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         return condition()
     }
+
+    @MainActor
+    private func waitForPersistedConversation(
+        in repository: ConversationRepository,
+        conversationID: UUID,
+        timeoutNanoseconds: UInt64 = 2_000_000_000,
+        condition: @escaping (ConversationThread) -> Bool
+    ) async throws -> ConversationThread? {
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            if let conversation = try await repository
+                .loadConversations()
+                .first(where: { $0.id == conversationID && condition($0) }) {
+                return conversation
+            }
+
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        return try await repository
+            .loadConversations()
+            .first(where: { $0.id == conversationID && condition($0) })
+    }
 }
 
 private struct MockTranscriptionService: AITranscriptionService {
@@ -2672,6 +2891,22 @@ private final class MockTranscriptionCompletionFeedbackProvider: CompletionFeedb
 
     func notifyCompletion(of event: CompletionFeedbackEvent) async {
         notifiedEvents.append(event)
+    }
+}
+
+@MainActor
+private final class MockReplyPersistenceController: ReplyPersistenceControlling {
+    private(set) var begunTokens: [UUID] = []
+    private(set) var endedTokens: [UUID] = []
+
+    func beginStreamingReplyPersistence() -> UUID {
+        let token = UUID()
+        begunTokens.append(token)
+        return token
+    }
+
+    func endStreamingReplyPersistence(_ token: UUID) {
+        endedTokens.append(token)
     }
 }
 
