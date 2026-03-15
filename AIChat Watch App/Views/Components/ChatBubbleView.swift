@@ -211,6 +211,7 @@ struct ChatBubbleView: View, Equatable {
             bubbleShape
                 .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
         )
+        .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
         #if os(watchOS)
         .onLongPressGesture(minimumDuration: 0.35) {
             guard canPinMessage else {
@@ -251,21 +252,16 @@ struct ChatBubbleView: View, Equatable {
     @ViewBuilder
     private var messageTextContent: some View {
         if isUser == false, message.status != .streaming {
-            #if os(watchOS)
-            let compactRenderingMode = displayedText.preferredAssistantMessageTextRenderingMode
             let expandedRenderingMode = AssistantMessageTextRenderingDecider.expandedMode(for: displayedText)
 
-            switch (compactRenderingMode, expandedRenderingMode) {
-            case (.markdown, _):
-                AssistantMessageMarkdownView(text: displayedText)
-            case (.plain, .markdown):
+            switch expandedRenderingMode {
+            case .markdown where displayedText.shouldCollapseMessageBody:
                 CollapsibleAssistantMessageMarkdownView(text: displayedText)
-            case (.plain, .plain):
+            case .markdown:
+                AssistantMessageMarkdownView(text: displayedText)
+            case .plain:
                 MessageBodyTextView(text: displayedText)
             }
-            #else
-            AssistantMessageMarkdownView(text: displayedText)
-            #endif
         } else {
             MessageBodyTextView(text: displayedText)
         }
@@ -519,6 +515,7 @@ private struct MessageBodyTextView: View {
                         .foregroundStyle(.cyan.opacity(0.92))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("message.body.expand")
             }
         }
     }
@@ -558,6 +555,7 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
                         .foregroundStyle(.cyan.opacity(0.92))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("message.body.expand")
             }
         }
     }
@@ -747,12 +745,14 @@ private struct AttachmentGridView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("message.attachment.\(attachment.id.uuidString)")
                     .accessibilityHint("Tap to enlarge")
                 } else {
                     AttachmentThumbnailView(
                         attachment: attachment,
                         isZoomable: false
                     )
+                    .accessibilityIdentifier("message.attachment.\(attachment.id.uuidString)")
                 }
             }
         }
@@ -764,6 +764,7 @@ private struct AttachmentGridView: View {
                 )
             }
         }
+        .accessibilityIdentifier("message.attachment-grid")
     }
 }
 
@@ -891,6 +892,7 @@ private struct AttachmentImageViewer: View {
                 }
             }
         }
+        .accessibilityIdentifier("message.attachment-viewer")
     }
 
     private var currentZoomScale: CGFloat {

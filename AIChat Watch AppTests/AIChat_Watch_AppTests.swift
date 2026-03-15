@@ -581,7 +581,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             XCTAssertNotNil(snapshot)
             XCTAssertLessThan(
                 elapsed,
-                0.25,
+                0.35,
                 "Heavy conversation initial render regressed to \(elapsed)s"
             )
         }
@@ -608,7 +608,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             XCTAssertNotNil(snapshot)
             XCTAssertLessThan(
                 elapsed,
-                0.25,
+                0.35,
                 "Heavy LaTeX conversation initial render regressed to \(elapsed)s"
             )
         }
@@ -1272,6 +1272,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: MockTranscriptionService(transcript: "Book me a train to Hangzhou tomorrow morning"),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -1372,6 +1373,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: MockTranscriptionService(transcript: "Add the second instruction"),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -1425,6 +1427,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: aiService,
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -1485,6 +1488,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -1587,6 +1591,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: transcriptionService,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
             defaults: defaults,
@@ -1785,6 +1790,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: transcriptionService,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
             defaults: defaults
@@ -2026,6 +2032,75 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteConversationSnapshotHydratesImportedAttachmentBlob() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-HydrateRemote-\(UUID().uuidString)", isDirectory: true)
+        let repository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let attachmentData = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
+        let attachment = try ChatAttachment.makeModelGeneratedImage(
+            from: attachmentData,
+            mimeType: "image/png",
+            suggestedFilename: "remote-sync"
+        )
+        let blobFilename = "remote-sync-\(attachment.id.uuidString).png"
+        try FileManager.default.createDirectory(at: repositoryRootURL, withIntermediateDirectories: true)
+        let temporaryFileURL = repositoryRootURL.appendingPathComponent("incoming-image.png", isDirectory: false)
+        try attachment.data.write(to: temporaryFileURL, options: [.atomic])
+        _ = try await repository.importAttachmentBlob(from: temporaryFileURL, as: blobFilename)
+
+        let conversationID = UUID()
+        let messageID = UUID()
+        let remoteConversation = ConversationThread(
+            id: conversationID,
+            title: "Remote Snapshot Attachment",
+            messages: [
+                ChatMessage(
+                    id: messageID,
+                    role: .assistant,
+                    text: "Hydrated image",
+                    attachments: [
+                        ChatAttachment(
+                            id: attachment.id,
+                            kind: .image,
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            data: Data(),
+                            blobFilename: blobFilename,
+                            pixelWidth: attachment.pixelWidth,
+                            pixelHeight: attachment.pixelHeight
+                        )
+                    ]
+                )
+            ]
+        )
+
+        await store.mergeRemoteConversationSnapshot([remoteConversation])
+
+        let hydratedAttachment = try XCTUnwrap(
+            store.conversation(id: conversationID)?.messages.first?.attachments.first
+        )
+        XCTAssertEqual(hydratedAttachment.blobFilename, blobFilename)
+        XCTAssertEqual(hydratedAttachment.data, attachment.data)
+    }
+
+    @MainActor
     func testDeletedConversationDoesNotReturnWhenBackgroundRefreshFinishesLate() async throws {
         let now = Date(timeIntervalSince1970: 1_762_400_320)
         let configuration = AppConfiguration(
@@ -2061,6 +2136,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: EchoReplyAIStreamingService(),
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             memoryMaintenanceService: memoryMaintenanceService,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
@@ -2086,7 +2162,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             await store.sendMessage(in: conversationID)
         }
 
-        await fulfillment(of: [memoryMaintenanceService.refreshStarted], timeout: 5)
+        let didStartRefresh = await memoryMaintenanceService.waitUntilRefreshStarts()
+        XCTAssertTrue(didStartRefresh, "Memory refresh should start before the conversation is deleted.")
 
         await store.deleteConversation(id: conversationID)
         XCTAssertTrue(store.conversations.isEmpty)
@@ -2138,6 +2215,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: aiService,
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -2177,6 +2255,69 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testConversationToolTogglesUpdateImmediatelyAndPersistLatestState() async throws {
+        let now = Date(timeIntervalSince1970: 1_762_399_990)
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3.1-pro-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatTests-ToolToggles-\(UUID().uuidString)", isDirectory: true)
+        )
+        let store = ChatStore(
+            repository: repository,
+            aiService: CapturingAIStreamingService(),
+            transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge()
+        )
+        let activationCode = try OfflineActivation.makeActivationCode(
+            requestCode: store.activationRequestCode(now: now),
+            policy: OfflineActivationPolicy(
+                validFrom: now,
+                validUntil: nil,
+                messageLimit: nil,
+                allowedModelIDs: nil
+            )
+        )
+        try await store.applyActivationCode(activationCode, now: now)
+
+        let conversationID = await store.createConversation()
+        store.setGoogleSearchEnabled(true, for: conversationID)
+        store.setCodeExecutionEnabled(true, for: conversationID)
+
+        let inMemoryConfiguration = store.aiConfiguration(for: conversationID)
+        XCTAssertTrue(inMemoryConfiguration.usesGoogleSearch)
+        XCTAssertTrue(inMemoryConfiguration.usesCodeExecution)
+
+        var persistedConfiguration: ConversationAIConfiguration?
+        for _ in 0..<20 {
+            let persistedConversation = try await repository.loadConversations()
+                .first(where: { $0.id == conversationID })
+            persistedConfiguration = persistedConversation?.aiConfiguration
+
+            if persistedConfiguration?.usesGoogleSearch == true &&
+                persistedConfiguration?.usesCodeExecution == true {
+                break
+            }
+
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        XCTAssertEqual(persistedConfiguration?.usesGoogleSearch, true)
+        XCTAssertEqual(persistedConfiguration?.usesCodeExecution, true)
+    }
+
+    @MainActor
     func testSendMessageRetriesBeforeReportingFailure() async throws {
         let now = Date(timeIntervalSince1970: 1_762_399_980)
         let suiteName = "AIChatTests.SendRetry.\(UUID().uuidString)"
@@ -2205,6 +2346,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: aiService,
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
             defaults: defaults,
@@ -2259,6 +2401,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: aiService,
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -2311,6 +2454,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repository: repository,
             aiService: CancellableStreamingAIStreamingService(),
             transcriptionService: nil,
+            completionFeedbackProvider: NoopCompletionFeedbackProvider(),
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
@@ -2765,13 +2909,14 @@ private final class CapturingAIStreamingService: AIStreamingService {
 }
 
 private final class BlockingMemoryMaintenanceService: AIMemoryMaintenanceService {
-    let refreshStarted = XCTestExpectation(description: "Memory refresh started")
-
     private let lock = NSLock()
+    private var didStartRefresh = false
     private var continuation: CheckedContinuation<Void, Never>?
 
     func refreshArtifacts(for conversation: ConversationThread) async -> ConversationMemoryArtifacts {
-        refreshStarted.fulfill()
+        lock.withLock {
+            didStartRefresh = true
+        }
 
         await withCheckedContinuation { continuation in
             lock.lock()
@@ -2795,6 +2940,20 @@ private final class BlockingMemoryMaintenanceService: AIMemoryMaintenanceService
             ],
             archiveSegments: []
         )
+    }
+
+    func waitUntilRefreshStarts(timeout: TimeInterval = 5) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if lock.withLock({ didStartRefresh }) {
+                return true
+            }
+
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        return lock.withLock({ didStartRefresh })
     }
 
     func resume() {

@@ -17,32 +17,17 @@ struct CompanionBottomSurfaceHeightKey: PreferenceKey {
 }
 
 struct CompanionRootView: View {
+    @EnvironmentObject private var chatStore: ChatStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @StateObject private var chatStore: ChatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var selectedConversationID: UUID?
     @State private var bottomSurfaceHeight: CGFloat = 0
     @State private var importedActivationCode = ""
     @State private var isShowingActivationCenter = false
 
-    init() {
-        let configuration = AppConfiguration.load()
-        let repository = ConversationRepository(configuration: configuration)
-        let service = AIServiceFactory.makeService(configuration: configuration)
-        let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
-        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
-        let syncBridge = CompanionSyncBridge()
-        _chatStore = StateObject(
-            wrappedValue: ChatStore(
-                repository: repository,
-                aiService: service,
-                transcriptionService: transcriptionService,
-                memoryMaintenanceService: memoryMaintenanceService,
-                configuration: configuration,
-                syncBridge: syncBridge
-            )
-        )
+    init(initialSelectedConversationID: UUID? = nil) {
+        _selectedConversationID = State(initialValue: initialSelectedConversationID)
     }
 
     var body: some View {
@@ -75,7 +60,6 @@ struct CompanionRootView: View {
                     .allowsHitTesting(false)
             }
         }
-        .environmentObject(chatStore)
         .sheet(isPresented: $isShowingActivationCenter) {
             CompanionActivationCenterView(
                 prefilledActivationCode: importedActivationCode,

@@ -189,6 +189,11 @@ final class ChatStore: ObservableObject {
             self?.conversations ?? []
         }
 
+        let attachmentsDirectoryURL = repository.attachmentsDirectoryURL
+        syncBridge.setAttachmentFileURLProvider { blobFilename in
+            attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false)
+        }
+
         syncBridge.setDeletedConversationTombstonesProvider { [weak self] in
             self?.deletedConversationTombstones.map {
                 CompanionDeletedConversationTombstone(id: $0.key, deletedAt: $0.value)
@@ -502,8 +507,7 @@ final class ChatStore: ObservableObject {
         _ usesGlobalPinnedMemory: Bool,
         for conversationID: UUID
     ) async {
-        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
-            conversationErrors[conversationID] = activationMessage
+        guard canUpdateAIConfiguration(for: conversationID) else {
             return
         }
 
@@ -512,12 +516,28 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    func setUsesGlobalPinnedMemory(
+        _ usesGlobalPinnedMemory: Bool,
+        for conversationID: UUID
+    ) {
+        guard canUpdateAIConfiguration(for: conversationID) else {
+            return
+        }
+
+        guard applyAIConfigurationMutationInMemory(for: conversationID, mutation: { configuration in
+            configuration.usesGlobalPinnedMemory = usesGlobalPinnedMemory
+        }) else {
+            return
+        }
+
+        schedulePersistCurrentConversation(for: conversationID, sync: true)
+    }
+
     func updateGoogleSearchEnabled(
         _ usesGoogleSearch: Bool,
         for conversationID: UUID
     ) async {
-        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
-            conversationErrors[conversationID] = activationMessage
+        guard canUpdateAIConfiguration(for: conversationID) else {
             return
         }
 
@@ -526,18 +546,70 @@ final class ChatStore: ObservableObject {
         }
     }
 
+    func setGoogleSearchEnabled(
+        _ usesGoogleSearch: Bool,
+        for conversationID: UUID
+    ) {
+        guard canUpdateAIConfiguration(for: conversationID) else {
+            return
+        }
+
+        guard applyAIConfigurationMutationInMemory(for: conversationID, mutation: { configuration in
+            configuration.usesGoogleSearch = usesGoogleSearch
+        }) else {
+            return
+        }
+
+        schedulePersistCurrentConversation(for: conversationID, sync: true)
+    }
+
     func updateCodeExecutionEnabled(
         _ usesCodeExecution: Bool,
         for conversationID: UUID
     ) async {
-        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
-            conversationErrors[conversationID] = activationMessage
+        guard canUpdateAIConfiguration(for: conversationID) else {
             return
         }
 
         await updateAIConfiguration(for: conversationID) { configuration in
             configuration.usesCodeExecution = usesCodeExecution
         }
+    }
+
+    func setCodeExecutionEnabled(
+        _ usesCodeExecution: Bool,
+        for conversationID: UUID
+    ) {
+        guard canUpdateAIConfiguration(for: conversationID) else {
+            return
+        }
+
+        guard applyAIConfigurationMutationInMemory(for: conversationID, mutation: { configuration in
+            configuration.usesCodeExecution = usesCodeExecution
+        }) else {
+            return
+        }
+
+        schedulePersistCurrentConversation(for: conversationID, sync: true)
+    }
+
+    func setToolPreferences(
+        usesGoogleSearch: Bool,
+        usesCodeExecution: Bool,
+        for conversationID: UUID
+    ) {
+        guard canUpdateAIConfiguration(for: conversationID) else {
+            return
+        }
+
+        guard applyAIConfigurationMutationInMemory(for: conversationID, mutation: { configuration in
+            configuration.usesGoogleSearch = usesGoogleSearch
+            configuration.usesCodeExecution = usesCodeExecution
+        }) else {
+            return
+        }
+
+        schedulePersistCurrentConversation(for: conversationID, sync: true)
     }
 
     func clearConversation(id: UUID) async {
@@ -1148,12 +1220,13 @@ final class ChatStore: ObservableObject {
         }
 
         do {
-            try await repository.save(conversation)
+            let storedConversation = try await repository.save(conversation)
+            mergeStoredAttachmentMetadata(from: storedConversation)
             if deletedConversationTombstones.removeValue(forKey: conversation.id) != nil {
                 try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
             }
             if sync {
-                syncBridge.pushConversation(conversation)
+                syncBridge.pushConversation(storedConversation)
             }
         } catch {
             startupError = error.localizedDescription
@@ -1248,6 +1321,40 @@ final class ChatStore: ObservableObject {
         rebuildConversationIndex()
     }
 
+    private func mergeStoredAttachmentMetadata(from storedConversation: ConversationThread) {
+        guard var currentConversation = conversation(id: storedConversation.id) else {
+            return
+        }
+
+        var changedAttachmentIDs: Set<UUID> = []
+        let storedAttachmentsByID = Dictionary(
+            uniqueKeysWithValues: storedConversation.messages
+                .flatMap(\.attachments)
+                .map { ($0.id, $0) }
+        )
+
+        for messageIndex in currentConversation.messages.indices {
+            for attachmentIndex in currentConversation.messages[messageIndex].attachments.indices {
+                let currentAttachment = currentConversation.messages[messageIndex].attachments[attachmentIndex]
+                guard let storedAttachment = storedAttachmentsByID[currentAttachment.id],
+                      currentAttachment.blobFilename != storedAttachment.blobFilename
+                else {
+                    continue
+                }
+
+                currentConversation.messages[messageIndex].attachments[attachmentIndex].blobFilename =
+                    storedAttachment.blobFilename
+                changedAttachmentIDs.insert(currentAttachment.id)
+            }
+        }
+
+        guard changedAttachmentIDs.isEmpty == false else {
+            return
+        }
+
+        upsertConversation(currentConversation)
+    }
+
     private func rebuildConversationIndex() {
         conversationIndexByID = Dictionary(
             uniqueKeysWithValues: conversations.enumerated().map { ($0.element.id, $0.offset) }
@@ -1279,12 +1386,13 @@ final class ChatStore: ObservableObject {
         }
 
         let normalizedConversation = normalizedConversationForStorage(conversation)
+        let hydratedConversation = await repository.hydrateAttachments(in: normalizedConversation)
         upsertConversation(
-            normalizedConversation,
+            hydratedConversation,
             allowResurrectionFromDeletedState: true
         )
         await persist(
-            normalizedConversation,
+            hydratedConversation,
             sync: false,
             allowResurrectionFromDeletedState: true
         )
@@ -1303,12 +1411,13 @@ final class ChatStore: ObservableObject {
             }
 
             let normalizedConversation = normalizedConversationForStorage(remoteConversation)
+            let hydratedConversation = await repository.hydrateAttachments(in: normalizedConversation)
             upsertConversation(
-                normalizedConversation,
+                hydratedConversation,
                 allowResurrectionFromDeletedState: true
             )
             await persist(
-                normalizedConversation,
+                hydratedConversation,
                 sync: false,
                 allowResurrectionFromDeletedState: true
             )
@@ -1381,8 +1490,29 @@ final class ChatStore: ObservableObject {
         for conversationID: UUID,
         mutation: (inout ConversationAIConfiguration) -> Void
     ) async {
-        guard var conversation = conversation(id: conversationID) else {
+        guard applyAIConfigurationMutationInMemory(for: conversationID, mutation: mutation) else {
             return
+        }
+
+        await persistCurrentConversation(for: conversationID, sync: true)
+    }
+
+    private func canUpdateAIConfiguration(for conversationID: UUID) -> Bool {
+        if let activationMessage = activationFailureMessage(for: aiConfiguration(for: conversationID).model) {
+            conversationErrors[conversationID] = activationMessage
+            return false
+        }
+
+        return true
+    }
+
+    @discardableResult
+    private func applyAIConfigurationMutationInMemory(
+        for conversationID: UUID,
+        mutation: (inout ConversationAIConfiguration) -> Void
+    ) -> Bool {
+        guard var conversation = conversation(id: conversationID) else {
+            return false
         }
 
         var resolvedConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
@@ -1390,7 +1520,27 @@ final class ChatStore: ObservableObject {
         resolvedConfiguration = licensedConfiguration(from: resolvedConfiguration)
         conversation.updateAIConfiguration(resolvedConfiguration)
         upsertConversation(conversation)
-        await persist(conversation, sync: true)
+        return true
+    }
+
+    private func schedulePersistCurrentConversation(
+        for conversationID: UUID,
+        sync: Bool
+    ) {
+        Task { [weak self] in
+            await self?.persistCurrentConversation(for: conversationID, sync: sync)
+        }
+    }
+
+    private func persistCurrentConversation(
+        for conversationID: UUID,
+        sync: Bool
+    ) async {
+        guard let conversation = conversation(id: conversationID) else {
+            return
+        }
+
+        await persist(conversation, sync: sync)
     }
 
     private func licensedConfiguration(from configuration: ConversationAIConfiguration) -> ConversationAIConfiguration {
@@ -2066,6 +2216,8 @@ final class ChatStore: ObservableObject {
             await mergeRemoteDeletedConversationTombstones(tombstones)
         case .snapshot(let conversations):
             await mergeRemoteConversationSnapshot(conversations)
+        case .attachmentBlob(let incomingBlob):
+            await mergeIncomingAttachmentBlob(incomingBlob)
         case .globalPinnedMemories(let items):
             await mergeGlobalPinnedMemories(items, syncMergedState: true)
         case .promptPresets(let presets):
@@ -2094,6 +2246,56 @@ final class ChatStore: ObservableObject {
             }
             #endif
         }
+    }
+
+    private func mergeIncomingAttachmentBlob(_ incomingBlob: CompanionIncomingAttachmentBlob) async {
+        let blobData: Data
+
+        do {
+            blobData = try await repository.importAttachmentBlob(
+                from: incomingBlob.temporaryFileURL,
+                as: incomingBlob.blobFilename
+            )
+        } catch {
+            startupError = error.localizedDescription
+            return
+        }
+
+        guard var conversation = conversation(id: incomingBlob.conversationID) else {
+            return
+        }
+
+        var didChange = false
+
+        for messageIndex in conversation.messages.indices {
+            guard conversation.messages[messageIndex].id == incomingBlob.messageID else {
+                continue
+            }
+
+            for attachmentIndex in conversation.messages[messageIndex].attachments.indices {
+                guard conversation.messages[messageIndex].attachments[attachmentIndex].id == incomingBlob.attachmentID else {
+                    continue
+                }
+
+                conversation.messages[messageIndex].attachments[attachmentIndex].blobFilename = incomingBlob.blobFilename
+                conversation.messages[messageIndex].attachments[attachmentIndex].data = blobData
+                didChange = true
+            }
+        }
+
+        guard didChange else {
+            return
+        }
+
+        upsertConversation(
+            conversation,
+            allowResurrectionFromDeletedState: true
+        )
+        await persist(
+            conversation,
+            sync: false,
+            allowResurrectionFromDeletedState: true
+        )
     }
 
     private func shouldAcceptRemoteConversation(_ conversation: ConversationThread) -> Bool {

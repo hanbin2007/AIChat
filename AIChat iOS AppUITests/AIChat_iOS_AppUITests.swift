@@ -1,0 +1,147 @@
+//
+//  AIChat_iOS_AppUITests.swift
+//  AIChat iOS AppUITests
+//
+//  Created by Codex on 2026/3/15.
+//
+
+import Foundation
+import XCTest
+
+final class AIChat_iOS_AppUITests: XCTestCase {
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    @MainActor
+    func testHeavyMarkdownConversationRendersWithoutBlockingInitialLoad() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "companion_heavy_markdown"
+        app.launch()
+
+        let detail = app.descendants(matching: .any)["companion.conversation.detail"]
+        if !detail.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing companion detail hierarchy")
+            XCTFail("The companion conversation detail view did not appear.")
+            return
+        }
+
+        let expandButton = app.buttons["展开全文"].firstMatch
+        if !expandButton.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing heavy markdown expand button hierarchy")
+            XCTFail("The heavy markdown conversation did not finish its initial collapsed render.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(expandButton, timeout: 5))
+        XCTAssertEqual(expandButton.label, "展开全文")
+
+        expandButton.tap()
+
+        let collapseButton = app.buttons["收起全文"].firstMatch
+        XCTAssertTrue(collapseButton.waitForExistence(timeout: 10))
+        XCTAssertEqual(collapseButton.label, "收起全文")
+
+        attachScreenshot(app, named: "companion-heavy-markdown-expanded")
+    }
+
+    @MainActor
+    func testImageAttachmentRendersAndOpensViewer() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "companion_image_attachment"
+        app.launch()
+
+        let detail = app.descendants(matching: .any)["companion.conversation.detail"]
+        if !detail.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing companion image detail hierarchy")
+            XCTFail("The companion image conversation did not open.")
+            return
+        }
+
+        let attachment = app.descendants(matching: .any)["message.attachment.00000000-0000-0000-0000-000000000413"]
+        if !attachment.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing companion image attachment hierarchy")
+            XCTFail("The companion message attachment did not render.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(attachment, timeout: 5))
+        attachment.tap()
+
+        let viewer = app.descendants(matching: .any)["message.attachment-viewer"]
+        if !viewer.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing companion image viewer hierarchy")
+            XCTFail("The image attachment viewer did not open.")
+            return
+        }
+
+        attachScreenshot(app, named: "companion-image-viewer")
+    }
+
+    @MainActor
+    func testLaunchPerformance() throws {
+        measure(metrics: [XCTApplicationLaunchMetric()]) {
+            XCUIApplication().launch()
+        }
+    }
+
+    @MainActor
+    private func waitForHittable(
+        _ element: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.isHittable {
+                return true
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        return element.isHittable
+    }
+
+    @MainActor
+    private func attachDebugHierarchy(_ app: XCUIApplication, named name: String) {
+        let attachment = XCTAttachment(string: app.debugDescription)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    @discardableResult
+    private func attachScreenshot(_ app: XCUIApplication, named name: String) -> URL? {
+        let screenshot = app.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        let fileURL = screenshotArtifactsDirectory().appendingPathComponent("\(name).png")
+        do {
+            try screenshot.pngRepresentation.write(to: fileURL)
+            let pathAttachment = XCTAttachment(string: fileURL.path)
+            pathAttachment.name = "\(name)-path"
+            pathAttachment.lifetime = .keepAlways
+            add(pathAttachment)
+            return fileURL
+        } catch {
+            let errorAttachment = XCTAttachment(string: "Failed to persist screenshot \(name): \(error)")
+            errorAttachment.name = "\(name)-write-error"
+            errorAttachment.lifetime = .keepAlways
+            add(errorAttachment)
+            return nil
+        }
+    }
+
+    private func screenshotArtifactsDirectory() -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
+
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}

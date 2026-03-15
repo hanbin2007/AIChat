@@ -201,9 +201,7 @@ struct CompanionConversationSettingsView: View {
                 chatStore.aiConfiguration(for: conversationID).usesGlobalPinnedMemory
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateUsesGlobalPinnedMemory(newValue, for: conversationID)
-                }
+                chatStore.setUsesGlobalPinnedMemory(newValue, for: conversationID)
             }
         )
     }

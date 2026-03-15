@@ -42,6 +42,13 @@
 			remoteGlobalIDString = FD4A0A212F5C50E700E9D16E;
 			remoteInfo = "AIChat Watch App";
 		};
+		C0D1F0013000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD4A0A162F5C50E700E9D16E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD4A0A1B2F5C50E700E9D16E;
+			remoteInfo = AIChat;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -79,6 +86,7 @@
 		FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AIChat Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0A312F5C50E800E9D16E /* AIChat Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0D1F0013000000000000001 /* AIChat iOS AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat iOS AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0A562F5C50E800E9D16E /* AIChat Keygen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AIChat Keygen.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0B482F5CFEC000E9D16E /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -107,6 +115,11 @@
 		FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "AIChat Watch AppUITests";
+			sourceTree = "<group>";
+		};
+		C0D1F0013000000000000002 /* AIChat iOS AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "AIChat iOS AppUITests";
 			sourceTree = "<group>";
 		};
 		FD4A0A522F5C50E800E9D16E /* AIChat iOS App */ = {
@@ -166,6 +179,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0D1F0013000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FD4A0A572F5C50E800E9D16E /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -198,6 +218,7 @@
 				FD4A0A532F5C50E800E9D16E /* Shared Licensing */,
 				FD4A0A342F5C50E800E9D16E /* AIChat Watch AppTests */,
 				FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */,
+				C0D1F0013000000000000002 /* AIChat iOS AppUITests */,
 				FD4A0A1D2F5C50E700E9D16E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -212,6 +233,7 @@
 				FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */,
 				FD4A0A312F5C50E800E9D16E /* AIChat Watch AppTests.xctest */,
 				FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */,
+				C0D1F0013000000000000001 /* AIChat iOS AppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -362,6 +384,29 @@
 			productReference = FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		C0D1F0013000000000000004 /* AIChat iOS AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0D1F0013000000000000009 /* Build configuration list for PBXNativeTarget "AIChat iOS AppUITests" */;
+			buildPhases = (
+				C0D1F0013000000000000006 /* Sources */,
+				C0D1F0013000000000000007 /* Frameworks */,
+				C0D1F0013000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C0D1F0013000000000000005 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C0D1F0013000000000000002 /* AIChat iOS AppUITests */,
+			);
+			name = "AIChat iOS AppUITests";
+			packageProductDependencies = (
+			);
+			productName = "AIChat iOS AppUITests";
+			productReference = C0D1F0013000000000000001 /* AIChat iOS AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		FD4A0A5A2F5C50E800E9D16E /* AIChat Keygen */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = FD4A0A5D2F5C50E800E9D16E /* Build configuration list for PBXNativeTarget "AIChat Keygen" */;
@@ -415,6 +460,10 @@
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = FD4A0A212F5C50E700E9D16E;
 					};
+					C0D1F0013000000000000004 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = FD4A0A1B2F5C50E700E9D16E;
+					};
 					FD4A0A5A2F5C50E800E9D16E = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
@@ -445,6 +494,7 @@
 				FD4A0A212F5C50E700E9D16E /* AIChat Watch App */,
 				FD4A0A302F5C50E800E9D16E /* AIChat Watch AppTests */,
 				FD4A0A3A2F5C50E800E9D16E /* AIChat Watch AppUITests */,
+				C0D1F0013000000000000004 /* AIChat iOS AppUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -486,6 +536,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		FD4A0A392F5C50E800E9D16E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0D1F0013000000000000008 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -544,6 +601,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0D1F0013000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FD4A0A552F5C50E800E9D16E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -573,6 +637,11 @@
 			isa = PBXTargetDependency;
 			target = FD4A0A212F5C50E700E9D16E /* AIChat Watch App */;
 			targetProxy = FD4A0A3C2F5C50E800E9D16E /* PBXContainerItemProxy */;
+		};
+		C0D1F0013000000000000005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD4A0A1B2F5C50E700E9D16E /* AIChat */;
+			targetProxy = C0D1F0013000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1051,6 +1120,57 @@
 			};
 			name = Release;
 		};
+		C0D1F001300000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(APP_BUILD_VERSION)";
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = "$(APP_MARKETING_VERSION)";
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-iOS-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AIChat;
+			};
+			name = Debug;
+		};
+		C0D1F001300000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "$(APP_BUILD_VERSION)";
+				DEVELOPMENT_TEAM = NCLY9ZGRMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = "$(APP_MARKETING_VERSION)";
+				PRODUCT_BUNDLE_IDENTIFIER = "hanbin.AIChat-iOS-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AIChat;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		FD4A0A5B2F5C50E800E9D16E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1158,6 +1278,15 @@
 			buildConfigurations = (
 				FD4A0A502F5C50E800E9D16E /* Debug */,
 				FD4A0A512F5C50E800E9D16E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C0D1F0013000000000000009 /* Build configuration list for PBXNativeTarget "AIChat iOS AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0D1F001300000000000000A /* Debug */,
+				C0D1F001300000000000000B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
