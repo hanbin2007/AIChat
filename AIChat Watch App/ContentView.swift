@@ -97,6 +97,13 @@ struct ContentView: View {
             selectedPage = .conversations
             navigationPath = [initialConversationID]
         }
+        .onOpenURL { url in
+            guard let deepLink = AIChatDeepLink(url) else {
+                return
+            }
+
+            handleDeepLink(deepLink)
+        }
     }
 
     private var rootNavigationTitle: String {
@@ -107,6 +114,25 @@ struct ContentView: View {
             return "AIChat"
         case .promptLibrary:
             return L10n.tr("prompt_preset.library.title")
+        }
+    }
+
+    private func handleDeepLink(_ deepLink: AIChatDeepLink) {
+        switch deepLink {
+        case .activationImport:
+            return
+        case .newConversation:
+            selectedPage = .conversations
+            guard chatStore.isReadOnlyMode == false else {
+                return
+            }
+
+            Task {
+                let conversationID = await chatStore.createConversation()
+                await MainActor.run {
+                    navigationPath = [conversationID]
+                }
+            }
         }
     }
 }

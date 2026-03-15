@@ -126,6 +126,7 @@ final class ChatStore: ObservableObject {
     private let repository: ConversationRepository
     private let aiService: AIStreamingService
     private let transcriptionService: AITranscriptionService?
+    private let completionFeedbackProvider: any CompletionFeedbackProviding
     private let memoryMaintenanceService: any AIMemoryMaintenanceService
     private let syncBridge: CompanionSyncBridge
     private let activationRepository: ActivationRepository
@@ -142,6 +143,7 @@ final class ChatStore: ObservableObject {
         repository: ConversationRepository,
         aiService: AIStreamingService,
         transcriptionService: AITranscriptionService?,
+        completionFeedbackProvider: (any CompletionFeedbackProviding)? = nil,
         memoryMaintenanceService: any AIMemoryMaintenanceService = HeuristicMemoryMaintenanceService(),
         configuration: AppConfiguration,
         syncBridge: CompanionSyncBridge,
@@ -154,6 +156,8 @@ final class ChatStore: ObservableObject {
         self.repository = repository
         self.aiService = aiService
         self.transcriptionService = transcriptionService
+        self.completionFeedbackProvider =
+            completionFeedbackProvider ?? DeviceCompletionFeedbackProvider()
         self.memoryMaintenanceService = memoryMaintenanceService
         self.configuration = configuration
         self.syncBridge = syncBridge
@@ -592,6 +596,14 @@ final class ChatStore: ObservableObject {
         drafts[conversationID]?.text ?? ""
     }
 
+    func latestReusableUserMessageText(for conversationID: UUID) -> String? {
+        conversation(id: conversationID)?
+            .messages
+            .last(where: { $0.role == .user && $0.cleanedText.isEmpty == false })?
+            .cleanedText
+            .nonEmptyTrimmed
+    }
+
     func promptPreset(id: UUID) -> PromptPreset? {
         promptPresets.first { $0.id == id }
     }
@@ -608,6 +620,20 @@ final class ChatStore: ObservableObject {
         var draft = drafts[conversationID] ?? ConversationDraft()
         draft.text = text
         drafts[conversationID] = draft
+    }
+
+    @discardableResult
+    func restoreLatestUserMessageToDraft(for conversationID: UUID) -> Bool {
+        guard isReadOnlyMode == false,
+              let previousMessageText = latestReusableUserMessageText(for: conversationID)
+        else {
+            return false
+        }
+
+        var draft = drafts[conversationID] ?? ConversationDraft()
+        draft.text = previousMessageText
+        drafts[conversationID] = draft
+        return true
     }
 
     func draftAttachments(for conversationID: UUID) -> [ChatAttachment] {
@@ -974,6 +1000,7 @@ final class ChatStore: ObservableObject {
 
         conversationErrors[conversationID] = nil
         transcribingConversationIDs.insert(conversationID)
+        await completionFeedbackProvider.prepareForPossibleBackgroundFeedback()
 
         let transcriptionConfiguration = VoiceTranscriptionConfiguration(
             model: selectedTranscriptionModel,
@@ -1009,6 +1036,7 @@ final class ChatStore: ObservableObject {
                     addition: transcription.text
                 )
                 drafts[conversationID] = draft
+                await completionFeedbackProvider.notifyCompletion(of: .transcriptionCompleted)
                 return
             } catch {
                 finalError = error
@@ -1721,6 +1749,7 @@ final class ChatStore: ObservableObject {
             status: .streaming,
             fallbackCreatedAt: assistantMessageCreatedAt
         )
+        await completionFeedbackProvider.prepareForPossibleBackgroundFeedback()
 
         let maximumRetryCount = sendFailureRetryLimit
         var finalError: Error?
@@ -1835,6 +1864,12 @@ final class ChatStore: ObservableObject {
                 if let finalizedConversation = conversation(id: conversationID) {
                     await persist(finalizedConversation, sync: true)
                     await refreshConversationArtifacts(for: conversationID)
+
+                    if finalizedConversation.messages.contains(where: {
+                        $0.id == assistantMessageID && $0.hasVisibleContent && $0.status == .sent
+                    }) {
+                        await completionFeedbackProvider.notifyCompletion(of: .assistantReplyCompleted)
+                    }
                 }
                 return
             } catch {

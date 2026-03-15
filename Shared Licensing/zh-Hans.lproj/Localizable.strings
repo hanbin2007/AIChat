@@ -123,6 +123,7 @@
 "activation.import.success" = "已从 iPhone 导入并应用激活码。";
 "activation.import.failure" = "从 iPhone 导入失败：%@";
 "operation.voice_transcription" = "语音转录";
+"conversation.restore_previous_message" = "恢复上一条消息";
 "activation.feedback.cleared" = "已清除本机授权。";
 "activation.feedback.enter_code" = "请输入激活码。";
 "activation.feedback.success" = "激活成功，当前设备已解锁发送权限。";
@@ -155,6 +156,10 @@
 "conversation.recording" = "录音中 %@";
 "conversation.transcribing" = "正在转录 %@…";
 "conversation.microphone.preparing" = "麦克风准备中…";
+"transcription.feedback.title" = "语音转录完成";
+"transcription.feedback.body" = "已回填到输入框，可以直接发送。";
+"assistant_reply.feedback.title" = "回答已完成";
+"assistant_reply.feedback.body" = "AIChat 已返回最新回复。";
 "conversation.recording.zh" = "录音中 %@";
 "conversation.transcribing.zh" = "转录中 %@…";
 "conversation.microphone.preparing.zh" = "麦克风准备中…";
