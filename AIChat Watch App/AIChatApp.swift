@@ -60,6 +60,7 @@ struct AIChat_Watch_AppApp: App {
 }
 
 private enum UITestLaunchDestination: Equatable {
+    case root
     case conversationDetail(UUID)
     case formulaHarness
 }
@@ -99,6 +100,24 @@ private struct UITestBootstrap {
                 store: ChatStore.previewStore(conversations: [conversation]),
                 initialConversationID: nil,
                 launchDestination: .conversationDetail(conversationID)
+            )
+        case "conversation_navigation":
+            let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000201") ?? UUID()
+            let conversation = ConversationThread(
+                id: conversationID,
+                title: "Navigation Test",
+                messages: [
+                    ChatMessage(
+                        role: .assistant,
+                        text: "打开这个对话，确认 watch 端详情页能正常进入。"
+                    )
+                ]
+            )
+
+            return UITestBootstrap(
+                store: ChatStore.previewStore(conversations: [conversation]),
+                initialConversationID: nil,
+                launchDestination: .root
             )
         default:
             return nil

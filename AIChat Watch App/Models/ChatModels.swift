@@ -829,6 +829,127 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         attachments.isEmpty == false ||
         status == .streaming
     }
+
+    var renderSignature: ChatMessageRenderSignature {
+        ChatMessageRenderSignature(
+            id: id,
+            role: role,
+            text: cleanedText,
+            thoughtSummary: cleanedThoughtSummary,
+            createdAt: createdAt,
+            status: status,
+            attachments: attachments.map(\.renderSignature)
+        )
+    }
+}
+
+nonisolated enum AssistantMessageTextRenderingMode: Equatable {
+    case plain
+    case markdown
+}
+
+nonisolated struct ChatAttachmentRenderSignature: Equatable {
+    let id: UUID
+    let kind: ChatAttachmentKind
+    let filename: String
+    let mimeType: String
+    let blobFilename: String?
+    let pixelWidth: Int?
+    let pixelHeight: Int?
+    let durationSeconds: Double?
+    let sizeInBytes: Int
+}
+
+nonisolated struct ChatMessageRenderSignature: Equatable {
+    let id: UUID
+    let role: ChatRole
+    let text: String
+    let thoughtSummary: String?
+    let createdAt: Date
+    let status: ChatMessageStatus
+    let attachments: [ChatAttachmentRenderSignature]
+}
+
+extension ChatAttachment {
+    var renderSignature: ChatAttachmentRenderSignature {
+        ChatAttachmentRenderSignature(
+            id: id,
+            kind: kind,
+            filename: filename,
+            mimeType: mimeType,
+            blobFilename: blobFilename,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            durationSeconds: durationSeconds,
+            sizeInBytes: data.count
+        )
+    }
+}
+
+extension String {
+    private enum AssistantMessageRenderingThreshold {
+        static let maximumMarkdownCharacters = 2_400
+        static let maximumMarkdownLines = 48
+    }
+
+    var preferredAssistantMessageTextRenderingMode: AssistantMessageTextRenderingMode {
+        guard isEmpty == false else {
+            return .plain
+        }
+
+        guard containsMarkdownFormattingHint else {
+            return .plain
+        }
+
+        let lineCount = reduce(into: 1) { count, character in
+            if character == "\n" {
+                count += 1
+            }
+        }
+
+        if count > AssistantMessageRenderingThreshold.maximumMarkdownCharacters ||
+            lineCount > AssistantMessageRenderingThreshold.maximumMarkdownLines {
+            return .plain
+        }
+
+        return .markdown
+    }
+
+    private var containsMarkdownFormattingHint: Bool {
+        if contains("```") ||
+            contains("`") ||
+            contains("![") ||
+            contains("](") ||
+            contains("$$") ||
+            contains("\\(") ||
+            contains("\\[") {
+            return true
+        }
+
+        return split(separator: "\n", omittingEmptySubsequences: false).contains { rawLine in
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.isEmpty == false else {
+                return false
+            }
+
+            if line.hasPrefix("# ") ||
+                line.hasPrefix("##") ||
+                line.hasPrefix("- ") ||
+                line.hasPrefix("* ") ||
+                line.hasPrefix("> ") {
+                return true
+            }
+
+            if line.hasPrefix("|") && line.hasSuffix("|") {
+                return true
+            }
+
+            return line.range(
+                of: #"^\d+\.\s+\S"#,
+                options: .regularExpression
+            ) != nil
+        }
+    }
 }
 
 nonisolated struct EmbeddedModelGeneratedImageExtraction: Equatable {

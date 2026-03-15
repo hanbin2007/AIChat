@@ -133,6 +133,7 @@ final class ChatStore: ObservableObject {
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
+    private var conversationIndexByID: [UUID: Int] = [:]
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
     private var lastHandledCompanionActivationTransferID: String?
     private var deletedConversationTombstones: [UUID: Date] = [:]
@@ -302,7 +303,7 @@ final class ChatStore: ObservableObject {
                 normalizedLoadedConversations,
                 with: loadedDeletedConversationTombstones
             )
-            conversations = reconciledState.conversations
+            setConversations(reconciledState.conversations)
             deletedConversationTombstones = reconciledState.tombstones
             if reconciledState.tombstonesChanged {
                 try await repository.saveDeletedConversationTombstones(reconciledState.tombstones)
@@ -567,7 +568,18 @@ final class ChatStore: ObservableObject {
     }
 
     func conversation(id: UUID) -> ConversationThread? {
-        conversations.first { $0.id == id }
+        if let index = conversationIndexByID[id],
+           conversations.indices.contains(index),
+           conversations[index].id == id {
+            return conversations[index]
+        }
+
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+
+        conversationIndexByID[id] = index
+        return conversations[index]
     }
 
     func draftText(for conversationID: UUID) -> String {
@@ -1128,7 +1140,7 @@ final class ChatStore: ObservableObject {
     private func deleteConversation(id: UUID, sync: Bool) async {
         sendTasks[id]?.cancel()
         sendTasks[id] = nil
-        conversations.removeAll { $0.id == id }
+        setConversations(conversations.filter { $0.id != id })
         drafts[id] = nil
         conversationErrors[id] = nil
         sendingConversationIDs.remove(id)
@@ -1170,9 +1182,21 @@ final class ChatStore: ObservableObject {
     }
 
     private func upsertConversation(_ conversation: ConversationThread) {
-        conversations.removeAll { $0.id == conversation.id }
-        conversations.append(conversation)
-        conversations.sort(by: ConversationThread.sortsByMostRecentFirst)
+        var updatedConversations = conversations.filter { $0.id != conversation.id }
+        updatedConversations.append(conversation)
+        updatedConversations.sort(by: ConversationThread.sortsByMostRecentFirst)
+        setConversations(updatedConversations)
+    }
+
+    private func setConversations(_ updatedConversations: [ConversationThread]) {
+        conversations = updatedConversations
+        rebuildConversationIndex()
+    }
+
+    private func rebuildConversationIndex() {
+        conversationIndexByID = Dictionary(
+            uniqueKeysWithValues: conversations.enumerated().map { ($0.element.id, $0.offset) }
+        )
     }
 
     func mergeRemoteConversation(_ conversation: ConversationThread) async {
@@ -2208,7 +2232,7 @@ extension ChatStore {
             syncBridge: CompanionSyncBridge()
         )
 
-        store.conversations = conversations.sorted(by: ConversationThread.sortsByMostRecentFirst)
+        store.setConversations(conversations.sorted(by: ConversationThread.sortsByMostRecentFirst))
         store.drafts = drafts
         store.sendingConversationIDs = sendingConversationIDs
         store.transcribingConversationIDs = []

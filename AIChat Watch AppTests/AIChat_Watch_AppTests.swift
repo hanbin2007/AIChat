@@ -480,6 +480,28 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(normalization.conversation.messages[0].attachments.first?.mimeType, "image/png")
     }
 
+    func testAssistantMessageRenderingModeUsesPlainTextForSimpleReplies() {
+        let text = "这是一个普通回复，没有列表、代码块或数学公式。"
+
+        XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .plain)
+    }
+
+    func testAssistantMessageRenderingModeUsesMarkdownForCompactStructuredReplies() {
+        let text = """
+        ## 总结
+        - 第一项
+        - 第二项
+        """
+
+        XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .markdown)
+    }
+
+    func testAssistantMessageRenderingModeFallsBackToPlainForLongMarkdownReplies() {
+        let text = Array(repeating: "- 长列表项内容", count: 80).joined(separator: "\n")
+
+        XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .plain)
+    }
+
     func testGemini31ProExtremeUsesDynamicMaximumThinking() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Think as deeply as possible")],

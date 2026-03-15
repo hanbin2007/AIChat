@@ -67,6 +67,7 @@ struct ConversationListView: View {
                                     aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
                                 )
                             }
+                            .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -81,6 +82,7 @@ struct ConversationListView: View {
                                     aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
                                 )
                             }
+                            .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
