@@ -8,9 +8,8 @@
 import Foundation
 
 struct AssembledContext: Equatable {
-    var systemPrompt: String?
+    var systemInstructionParts: [GeminiPartPayload]?
     var mode: ContextMode
-    var prefaceText: String?
     var recentMessages: [ChatMessage]
 }
 
@@ -69,15 +68,15 @@ nonisolated enum AIContextAssembler {
         let focusState = includedFocusState(for: conversation.focusState, mode: mode)
 
         return AssembledContext(
-            systemPrompt: systemPrompt(for: configuration),
-            mode: mode,
-            prefaceText: prefaceText(
+            systemInstructionParts: systemInstructionParts(
+                for: configuration,
                 mode: mode,
                 focusState: focusState,
                 pinnedMemories: pinnedMemories,
                 memoryItems: memoryItems,
                 archiveSegments: archiveSegments
             ),
+            mode: mode,
             recentMessages: recentMessages
         )
     }
@@ -305,28 +304,60 @@ nonisolated enum AIContextAssembler {
         return title
     }
 
-    private static func prefaceText(
+    private static func systemInstructionParts(
+        for configuration: ConversationAIConfiguration,
         mode: ContextMode,
         focusState: ConversationFocusState?,
         pinnedMemories: [PinnedMemoryItem],
         memoryItems: [ConversationMemoryItem],
         archiveSegments: [ConversationArchiveSegment]
-    ) -> String? {
+    ) -> [GeminiPartPayload]? {
+        var sectionTexts: [String] = []
+
+        if let systemPrompt = systemPrompt(for: configuration)?.nonEmptyTrimmed {
+            sectionTexts.append(systemPrompt)
+        }
+
+        sectionTexts.append(
+            contentsOf: supportInstructionSections(
+                mode: mode,
+                focusState: focusState,
+                pinnedMemories: pinnedMemories,
+                memoryItems: memoryItems,
+                archiveSegments: archiveSegments
+            )
+        )
+
+        let parts = makeInstructionParts(
+            from: sectionTexts,
+            totalLimit: mode == .casual ? 2_800 : 6_400
+        )
+
+        return parts.isEmpty ? nil : parts
+    }
+
+    private static func supportInstructionSections(
+        mode: ContextMode,
+        focusState: ConversationFocusState?,
+        pinnedMemories: [PinnedMemoryItem],
+        memoryItems: [ConversationMemoryItem],
+        archiveSegments: [ConversationArchiveSegment]
+    ) -> [String] {
         guard focusState != nil ||
                 pinnedMemories.isEmpty == false ||
                 memoryItems.isEmpty == false ||
                 archiveSegments.isEmpty == false
         else {
-            return nil
+            return []
         }
 
         var sections: [String] = []
 
         sections.append(
             """
-            Context preface:
-            This is support memory for the next reply, not a fresh user turn.
-            Prefer the newest raw messages if anything below conflicts with them.
+            Support context for the next reply.
+            Do not treat anything below as a fresh user message.
+            Prefer the newest raw conversation turns if anything below conflicts with them.
             Current mode: \(mode.rawValue)
             """
         )
@@ -343,27 +374,24 @@ nonisolated enum AIContextAssembler {
         }
 
         if pinnedMemories.isEmpty == false {
-            let lines = pinnedMemories.map { "- \($0.text)" }
-            sections.append("Pinned memory:\n\(lines.joined(separator: "\n"))")
+            sections.append(contentsOf: pinnedMemories.map { "Pinned memory: \($0.text)" })
         }
 
         if memoryItems.isEmpty == false {
-            let lines = memoryItems.map { "- \($0.text)" }
-            sections.append("Relevant conversation memory:\n\(lines.joined(separator: "\n"))")
+            sections.append(contentsOf: memoryItems.map { "Relevant conversation memory: \($0.text)" })
         }
 
         if archiveSegments.isEmpty == false {
-            let lines = archiveSegments.map { segment in
-                var archiveLine = "- \(segment.title): \(segment.summary)"
+            sections.append(contentsOf: archiveSegments.map { segment in
+                var archiveLine = "Archived context: [\(segment.title)] \(segment.summary)"
                 if segment.openLoops.isEmpty == false {
                     archiveLine.append(" [Open loops: \(segment.openLoops.joined(separator: " | "))]")
                 }
                 return archiveLine
-            }
-            sections.append("Archived context:\n\(lines.joined(separator: "\n"))")
+            })
         }
 
-        return trimJoinedSections(sections, to: mode == .casual ? 2_400 : 6_000)
+        return sections
     }
 
     private static func compactFocusText(
@@ -485,6 +513,40 @@ nonisolated enum AIContextAssembler {
         }
 
         return output.nonEmptyTrimmed
+    }
+
+    private static func makeInstructionParts(
+        from sections: [String],
+        totalLimit: Int
+    ) -> [GeminiPartPayload] {
+        let filtered = sections.compactMap(\.nonEmptyTrimmed)
+        guard filtered.isEmpty == false else {
+            return []
+        }
+
+        var parts: [GeminiPartPayload] = []
+        var consumed = 0
+
+        for section in filtered {
+            let remaining = totalLimit - consumed
+            guard remaining > 0 else {
+                break
+            }
+
+            let trimmedSection = trimText(section, limit: remaining)
+            guard let text = trimmedSection.nonEmptyTrimmed else {
+                continue
+            }
+
+            parts.append(GeminiPartPayload(text: text, inlineData: nil))
+            consumed += text.count
+
+            if trimmedSection != section {
+                break
+            }
+        }
+
+        return parts
     }
 
     private static func trimText(_ text: String, limit: Int) -> String {

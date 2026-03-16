@@ -13,6 +13,16 @@ if (!geminiApiKey || !relayBearerToken) {
 
 const decoder = new TextDecoder();
 
+function valueForKeys(object, ...keys) {
+  for (const key of keys) {
+    if (object && Object.prototype.hasOwnProperty.call(object, key) && object[key] !== undefined) {
+      return object[key];
+    }
+  }
+
+  return undefined;
+}
+
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
@@ -73,74 +83,139 @@ function temperatureForModel(model, fallbackTemperature) {
 function toolsFor(body) {
   const tools = [];
 
-  if (body.usesGoogleSearch === true) {
+  if (valueForKeys(body, "usesGoogleSearch", "uses_google_search") === true) {
     tools.push({ google_search: {} });
   }
 
-  if (body.usesCodeExecution === true) {
+  if (valueForKeys(body, "usesCodeExecution", "uses_code_execution") === true) {
     tools.push({ code_execution: {} });
   }
 
   return tools.length > 0 ? tools : undefined;
 }
 
+function chatSafetySettings() {
+  return [
+    { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" }
+  ];
+}
+
+function hasVisualMedia(messages) {
+  return messages.some((message) =>
+    (valueForKeys(message, "attachments") || []).some((attachment) =>
+      String(valueForKeys(attachment, "mimeType", "mime_type") || "")
+        .toLowerCase()
+        .startsWith("image/")
+    )
+  );
+}
+
 function toGeminiRequest(body, model) {
+  const systemPrompt = valueForKeys(body, "systemPrompt", "system_prompt");
+  const systemInstructionParts = valueForKeys(
+    body,
+    "systemInstructionParts",
+    "system_instruction_parts"
+  );
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+
   return {
-    systemInstruction: body.systemPrompt
+    systemInstruction:
+      Array.isArray(systemInstructionParts) && systemInstructionParts.length > 0
+        ? {
+            parts: systemInstructionParts
+          }
+        : systemPrompt
       ? {
-          parts: [{ text: body.systemPrompt }]
+          parts: [{ text: systemPrompt }]
         }
       : undefined,
-    contents: body.messages.map((message) => {
-      const parts = [];
+    contents: messages.reduce((contents, message) => {
+      const role = valueForKeys(message, "role") === "assistant" ? "model" : "user";
+      const modelResponseParts = valueForKeys(
+        message,
+        "modelResponseParts",
+        "model_response_parts"
+      );
 
-      if (message.text) {
-        parts.push({ text: message.text });
+      let parts;
+      if (role === "model" && Array.isArray(modelResponseParts) && modelResponseParts.length > 0) {
+        parts = modelResponseParts;
+      } else {
+        parts = [];
+
+        const text = valueForKeys(message, "text");
+        if (text) {
+          parts.push({ text });
+        }
+
+        for (const attachment of valueForKeys(message, "attachments") || []) {
+          parts.push({
+            inlineData: {
+              mimeType: valueForKeys(attachment, "mimeType", "mime_type") || "",
+              data: valueForKeys(attachment, "base64Data", "base64_data") || ""
+            }
+          });
+        }
       }
 
-      for (const attachment of message.attachments || []) {
-        parts.push({
-          inlineData: {
-            mimeType: attachment.mimeType,
-            data: attachment.base64Data
-          }
-        });
+      if (parts.length === 0) {
+        return contents;
       }
 
-      return {
-        role: message.role === "assistant" ? "model" : "user",
-        parts
-      };
-    }),
+      const lastContent = contents[contents.length - 1];
+      if (lastContent && lastContent.role === role) {
+        lastContent.parts.push(...parts);
+      } else {
+        contents.push({ role, parts });
+      }
+
+      return contents;
+    }, []),
+    safetySettings: chatSafetySettings(),
     generationConfig: {
       temperature: temperatureForModel(model, 0.65),
-      topP: 0.9,
+      topP: 0.95,
       maxOutputTokens:
-        Number.isFinite(body.maxOutputTokens) && body.maxOutputTokens > 0
-          ? Math.floor(body.maxOutputTokens)
+        Number.isFinite(valueForKeys(body, "maxOutputTokens", "max_output_tokens")) &&
+        valueForKeys(body, "maxOutputTokens", "max_output_tokens") > 0
+          ? Math.floor(valueForKeys(body, "maxOutputTokens", "max_output_tokens"))
           : maxOutputTokensForModel(model),
-      thinkingConfig: thinkingConfigFor(model, body.thinkingIntensity, body.includeThoughts !== false)
+      thinkingConfig: thinkingConfigFor(
+        model,
+        valueForKeys(body, "thinkingIntensity", "thinking_intensity"),
+        valueForKeys(body, "includeThoughts", "include_thoughts") !== false
+      ),
+      enableEnhancedCivicAnswers: String(model || "").startsWith("gemini-3") ? true : undefined,
+      mediaResolution: hasVisualMedia(messages) ? "MEDIA_RESOLUTION_HIGH" : undefined
     },
     tools: toolsFor(body)
   };
 }
 
 function toGeminiTranscriptionRequest(body, model) {
+  const systemPrompt = valueForKeys(body, "systemPrompt", "system_prompt");
+  const prompt = valueForKeys(body, "prompt") || "";
+  const audio = valueForKeys(body, "audio") || {};
+
   return {
-    systemInstruction: body.systemPrompt
+    systemInstruction: systemPrompt
       ? {
-          parts: [{ text: body.systemPrompt }]
+          parts: [{ text: systemPrompt }]
         }
       : undefined,
     contents: [
       {
         role: "user",
         parts: [
-          { text: body.prompt || "" },
+          { text: prompt },
           {
             inlineData: {
-              mimeType: body.audio?.mimeType || "",
-              data: body.audio?.base64Data || ""
+              mimeType: valueForKeys(audio, "mimeType", "mime_type") || "",
+              data: valueForKeys(audio, "base64Data", "base64_data") || ""
             }
           }
         ]

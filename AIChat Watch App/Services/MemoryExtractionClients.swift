@@ -97,9 +97,12 @@ struct GeminiMemoryExtractionClient: AIMemoryExtractionClient {
                 generationConfig: GeminiGenerationConfig(
                     temperature: 0.1,
                     topP: 0.9,
+                    topK: nil,
                     maxOutputTokens: MemoryExtractionConstants.maxOutputTokens,
                     thinkingConfig: nil,
-                    responseMimeType: "application/json"
+                    responseMimeType: "application/json",
+                    enableEnhancedCivicAnswers: nil,
+                    mediaResolution: nil
                 )
             )
         )

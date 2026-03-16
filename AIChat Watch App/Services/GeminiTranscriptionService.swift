@@ -252,8 +252,12 @@ struct GeminiTranscriptionService: AITranscriptionService {
             generationConfig: GeminiGenerationConfig(
                 temperature: Self.requestTemperature(for: model, fallback: 0.1),
                 topP: 0.95,
+                topK: nil,
                 maxOutputTokens: VoiceTranscriptionLimits.maxOutputTokens,
-                thinkingConfig: nil
+                thinkingConfig: nil,
+                responseMimeType: nil,
+                enableEnhancedCivicAnswers: nil,
+                mediaResolution: nil
             )
         )
     }
