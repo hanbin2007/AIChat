@@ -10,6 +10,7 @@ import SwiftUI
 #if os(watchOS)
 @main
 struct AIChat_Watch_AppApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var chatStore: ChatStore
     private let initialConversationID: UUID?
     private let uiTestLaunchDestination: UITestLaunchDestination?
@@ -30,6 +31,7 @@ struct AIChat_Watch_AppApp: App {
         let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
         let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
         let syncBridge = CompanionSyncBridge()
+        let cloudSyncService = ICloudConversationSyncService(configuration: configuration)
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
@@ -37,7 +39,8 @@ struct AIChat_Watch_AppApp: App {
                 transcriptionService: transcriptionService,
                 memoryMaintenanceService: memoryMaintenanceService,
                 configuration: configuration,
-                syncBridge: syncBridge
+                syncBridge: syncBridge,
+                cloudSyncService: cloudSyncService
             )
         )
         initialConversationID = nil
@@ -59,6 +62,15 @@ struct AIChat_Watch_AppApp: App {
             }
             .environmentObject(chatStore)
             .background(WatchDisplayStateObserver())
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else {
+                    return
+                }
+
+                Task {
+                    await chatStore.refreshRemoteSyncState()
+                }
+            }
         }
     }
 }
@@ -206,7 +218,7 @@ private struct UITestBootstrap {
             aiService: AIServiceFactory.makeService(configuration: configuration),
             transcriptionService: AIServiceFactory.makeTranscriptionService(configuration: configuration),
             configuration: configuration,
-            syncBridge: CompanionSyncBridge(),
+            syncBridge: CompanionSyncBridge(isEnabled: false),
             activationRepository: ActivationRepository(defaults: defaults),
             deviceIdentity: deviceIdentity,
             defaults: defaults

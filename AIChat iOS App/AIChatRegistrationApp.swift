@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct AIChatRegistrationApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     #if COMPANION_APP
     @StateObject private var chatStore: ChatStore
     private let initialConversationID: UUID?
@@ -30,6 +31,7 @@ struct AIChatRegistrationApp: App {
         let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
         let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
         let syncBridge = CompanionSyncBridge()
+        let cloudSyncService = ICloudConversationSyncService(configuration: configuration)
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
@@ -37,7 +39,8 @@ struct AIChatRegistrationApp: App {
                 transcriptionService: transcriptionService,
                 memoryMaintenanceService: memoryMaintenanceService,
                 configuration: configuration,
-                syncBridge: syncBridge
+                syncBridge: syncBridge,
+                cloudSyncService: cloudSyncService
             )
         )
         initialConversationID = nil
@@ -58,6 +61,15 @@ struct AIChatRegistrationApp: App {
                 }
             }
             .environmentObject(chatStore)
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else {
+                    return
+                }
+
+                Task {
+                    await chatStore.refreshRemoteSyncState()
+                }
+            }
             #else
             OfflineActivationKeygenView()
             #endif

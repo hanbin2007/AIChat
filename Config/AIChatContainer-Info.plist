@@ -14,6 +14,8 @@
 	<string>$(AI_RELAY_STREAM_PATH)</string>
 	<key>APP_GROUP_IDENTIFIER</key>
 	<string>$(APP_GROUP_IDENTIFIER)</string>
+	<key>ICLOUD_CONTAINER_IDENTIFIER</key>
+	<string>$(ICLOUD_CONTAINER_IDENTIFIER)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

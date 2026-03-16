@@ -17,10 +17,11 @@ final class AIChat_iOS_AppUITests: XCTestCase {
     @MainActor
     func testHeavyMarkdownConversationRendersWithoutBlockingInitialLoad() throws {
         let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "companion_heavy_markdown"
         app.launch()
 
-        let detail = app.descendants(matching: .any)["companion.conversation.detail"]
+        let detail = app.scrollViews["companion.conversation.detail"].firstMatch
         if !detail.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing companion detail hierarchy")
             XCTFail("The companion conversation detail view did not appear.")
@@ -49,10 +50,11 @@ final class AIChat_iOS_AppUITests: XCTestCase {
     @MainActor
     func testImageAttachmentRendersAndOpensViewer() throws {
         let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "companion_image_attachment"
         app.launch()
 
-        let detail = app.descendants(matching: .any)["companion.conversation.detail"]
+        let detail = app.scrollViews["companion.conversation.detail"].firstMatch
         if !detail.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing companion image detail hierarchy")
             XCTFail("The companion image conversation did not open.")
@@ -66,7 +68,12 @@ final class AIChat_iOS_AppUITests: XCTestCase {
             return
         }
 
-        XCTAssertTrue(waitForHittable(attachment, timeout: 5))
+        if revealElementIfNeeded(attachment, in: detail) == false {
+            attachDebugHierarchy(app, named: "Companion image attachment never became hittable")
+            XCTFail("The companion message attachment did not become tappable.")
+            return
+        }
+
         attachment.tap()
 
         let viewer = app.descendants(matching: .any)["message.attachment-viewer"]
@@ -98,6 +105,34 @@ final class AIChat_iOS_AppUITests: XCTestCase {
             }
 
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        return element.isHittable
+    }
+
+    @MainActor
+    private func revealElementIfNeeded(
+        _ element: XCUIElement,
+        in container: XCUIElement,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        if waitForHittable(element, timeout: 1) {
+            return true
+        }
+
+        let gestures: [(XCUIElement) -> Void] = [
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeDown() }
+        ]
+
+        let deadline = Date().addingTimeInterval(timeout)
+        for gesture in gestures where Date() < deadline {
+            gesture(container)
+
+            if waitForHittable(element, timeout: 1) {
+                return true
+            }
         }
 
         return element.isHittable

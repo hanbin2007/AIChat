@@ -61,6 +61,7 @@ nonisolated enum CompanionSyncEvent {
     case delete(UUID, deletedAt: Date)
     case deletedConversationTombstones([CompanionDeletedConversationTombstone])
     case snapshot([ConversationThread])
+    case syncSummary(ConversationSyncSummary)
     case attachmentBlob(CompanionIncomingAttachmentBlob)
     case globalPinnedMemories([PinnedMemoryItem])
     case promptPresets([PromptPreset])
@@ -90,9 +91,11 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias DeletedConversationTombstonesProvider = @MainActor () -> [CompanionDeletedConversationTombstone]
     typealias GlobalPinnedMemoriesProvider = @MainActor () -> [PinnedMemoryItem]
     typealias PromptPresetsProvider = @MainActor () -> [PromptPreset]
+    typealias SyncSummaryProvider = @MainActor () -> ConversationSyncSummary?
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let syncEnabled: Bool
     private var eventHandler: EventHandler?
     private var statusHandler: StatusHandler?
     private var snapshotProvider: SnapshotProvider?
@@ -100,15 +103,17 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     private var deletedConversationTombstonesProvider: DeletedConversationTombstonesProvider?
     private var globalPinnedMemoriesProvider: GlobalPinnedMemoriesProvider?
     private var promptPresetsProvider: PromptPresetsProvider?
+    private var syncSummaryProvider: SyncSummaryProvider?
     private var queuedAttachmentTransferBlobFilenames: Set<String> = []
     private let attachmentTransferStateLock = NSLock()
 
     private(set) var currentStatus: CompanionSyncStatus = .unavailable
 
-    override init() {
+    init(isEnabled: Bool = true) {
+        self.syncEnabled = isEnabled
         super.init()
 
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             currentStatus = .unavailable
             return
         }
@@ -150,8 +155,12 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         promptPresetsProvider = provider
     }
 
+    func setSyncSummaryProvider(_ provider: SyncSummaryProvider?) {
+        syncSummaryProvider = provider
+    }
+
     func pushConversation(_ conversation: ConversationThread) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -176,7 +185,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     func pushDeletion(conversationID: UUID, deletedAt: Date) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -195,7 +204,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     func pushGlobalPinnedMemories(_ items: [PinnedMemoryItem]) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -218,7 +227,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     func pushPromptPresets(_ items: [PromptPreset]) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -240,8 +249,31 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         }
     }
 
+    func pushSyncSummary(_ summary: ConversationSyncSummary) {
+        guard syncEnabled, WCSession.isSupported() else {
+            return
+        }
+
+        do {
+            let data = try encoder.encode(summary)
+            let payload: [String: Any] = [
+                "type": "sync_summary",
+                "payload": data.base64EncodedString()
+            ]
+            let session = WCSession.default
+
+            if session.isReachable {
+                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+            }
+
+            session.transferUserInfo(payload)
+        } catch {
+            return
+        }
+    }
+
     func requestBootstrapIfPossible() {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -254,7 +286,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     func pushActivationRequestCode(_ requestCode: String) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -272,7 +304,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     func pushActivationCodeImport(_ activationCode: String) {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -421,6 +453,17 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             Task { @MainActor in
                 eventHandler?(.snapshot(conversations))
             }
+        case "sync_summary":
+            guard let base64Payload = payload["payload"] as? String,
+                  let data = Data(base64Encoded: base64Payload),
+                  let summary = try? decoder.decode(ConversationSyncSummary.self, from: data)
+            else {
+                return
+            }
+
+            Task { @MainActor in
+                eventHandler?(.syncSummary(summary))
+            }
         case "bootstrap_snapshot":
             let conversations = (payload["conversationsPayload"] as? String)
                 .flatMap { Data(base64Encoded: $0) }
@@ -434,8 +477,15 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             let promptPresets = (payload["promptPresetsPayload"] as? String)
                 .flatMap { Data(base64Encoded: $0) }
                 .flatMap { try? decoder.decode([PromptPreset].self, from: $0) }
+            let syncSummary = (payload["syncSummaryPayload"] as? String)
+                .flatMap { Data(base64Encoded: $0) }
+                .flatMap { try? decoder.decode(ConversationSyncSummary.self, from: $0) }
 
             Task { @MainActor in
+                if let syncSummary {
+                    eventHandler?(.syncSummary(syncSummary))
+                }
+
                 if let deletedConversationTombstones {
                     eventHandler?(.deletedConversationTombstones(deletedConversationTombstones))
                 }
@@ -499,7 +549,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     private func sendBootstrapSnapshot() {
-        guard WCSession.isSupported() else {
+        guard syncEnabled, WCSession.isSupported() else {
             return
         }
 
@@ -512,6 +562,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             let deletedConversationTombstones = self.deletedConversationTombstonesProvider?() ?? []
             let globalPinnedMemories = self.globalPinnedMemoriesProvider?() ?? []
             let promptPresets = self.promptPresetsProvider?() ?? []
+            let syncSummary = self.syncSummaryProvider?()
             guard let conversationsData = try? self.encoder.encode(conversations),
                   let deletedConversationTombstonesData = try? self.encoder.encode(deletedConversationTombstones),
                   let globalPinnedData = try? self.encoder.encode(globalPinnedMemories),
@@ -520,17 +571,24 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
+            let syncSummaryPayload = syncSummary
+                .flatMap { try? self.encoder.encode($0) }
+                .map { $0.base64EncodedString() }
+
             do {
                 let session = WCSession.default
-                try session.updateApplicationContext(
-                    [
-                        "type": "bootstrap_snapshot",
-                        "conversationsPayload": conversationsData.base64EncodedString(),
-                        "deletedConversationTombstonesPayload": deletedConversationTombstonesData.base64EncodedString(),
-                        "globalPinnedPayload": globalPinnedData.base64EncodedString(),
-                        "promptPresetsPayload": promptPresetsData.base64EncodedString()
-                    ]
-                )
+                var payload: [String: Any] = [
+                    "type": "bootstrap_snapshot",
+                    "conversationsPayload": conversationsData.base64EncodedString(),
+                    "deletedConversationTombstonesPayload": deletedConversationTombstonesData.base64EncodedString(),
+                    "globalPinnedPayload": globalPinnedData.base64EncodedString(),
+                    "promptPresetsPayload": promptPresetsData.base64EncodedString()
+                ]
+                if let syncSummaryPayload {
+                    payload["syncSummaryPayload"] = syncSummaryPayload
+                }
+
+                try session.updateApplicationContext(payload)
                 self.enqueueAttachmentTransfers(for: conversations, using: session)
             } catch {
                 return

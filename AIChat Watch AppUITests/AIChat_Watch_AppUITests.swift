@@ -195,7 +195,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         app.launch()
 
         let row = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000201"]
-        if !revealElement(row, in: app, directions: [.up], timeout: 10) {
+        if !revealConversationRowIfNeeded(row, in: app) {
             attachDebugHierarchy(app, named: "Missing conversation row hierarchy")
             XCTFail("Missing conversation row in the watch list.")
             return
@@ -296,6 +296,33 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         return element.isHittable
+    }
+
+    @MainActor
+    private func revealConversationRowIfNeeded(
+        _ row: XCUIElement,
+        in app: XCUIApplication
+    ) -> Bool {
+        if revealElement(row, in: app, directions: [.up], timeout: 10) {
+            return true
+        }
+
+        let horizontalSwipes: [(XCUIApplication) -> Void] = [
+            { $0.swipeLeft() },
+            { $0.swipeRight() },
+            { $0.swipeLeft() }
+        ]
+
+        for horizontalSwipe in horizontalSwipes {
+            horizontalSwipe(app)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+
+            if revealElement(row, in: app, directions: [.up], timeout: 4) {
+                return true
+            }
+        }
+
+        return false
     }
 
     @MainActor
