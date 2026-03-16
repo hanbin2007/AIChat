@@ -142,9 +142,69 @@ private struct UITestBootstrap {
             )
         case "conversation_delete_persistence":
             return makeDeletePersistenceBootstrap(environment: environment)
+        case "conversation_autoscroll_interrupt":
+            return makeAutoScrollInterruptBootstrap()
         default:
             return nil
         }
+    }
+
+    private static func makeAutoScrollInterruptBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000401") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_400_500)
+        var messages: [ChatMessage] = []
+
+        for index in 1...10 {
+            let baseDate = seededDate.addingTimeInterval(Double(index * 60))
+            messages.append(
+                ChatMessage(
+                    role: .user,
+                    text: "Question \(index): summarize item \(index) and keep the reply structured.",
+                    createdAt: baseDate
+                )
+            )
+            messages.append(
+                ChatMessage(
+                    role: .assistant,
+                    text: "Answer \(index): a seeded paragraph that makes the transcript tall enough for scrolling during the UI test.",
+                    createdAt: baseDate.addingTimeInterval(20)
+                )
+            )
+        }
+
+        messages.append(
+            ChatMessage(
+                role: .user,
+                text: "Give me a long final answer that arrives in multiple chunks so I can interrupt auto scroll.",
+                createdAt: seededDate.addingTimeInterval(800)
+            )
+        )
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Auto Scroll Interrupt",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(800),
+            isFavorite: false,
+            messages: messages
+        )
+
+        let store = ChatStore.previewStore(
+            conversations: [conversation],
+            aiService: UITestAutoScrollStreamingService(),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider()
+        )
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await store.retryLatestReply(in: conversationID)
+        }
+
+        return UITestBootstrap(
+            store: store,
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
     }
 
     private static func makeDeletePersistenceBootstrap(
@@ -281,6 +341,37 @@ private struct UITestBootstrap {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(conversation) {
             try? data.write(to: conversationFileURL, options: [.atomic])
+        }
+    }
+}
+
+private struct UITestAutoScrollStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                continuation.yield(.thoughtDelta("Preparing a deterministic streaming reply for auto-scroll UI verification."))
+
+                let chunks = [
+                    "Chunk 1: This reply is intentionally long so the detail view keeps receiving streaming updates while the UI test scrolls away from the bottom.\n\n",
+                    "Chunk 2: After the interrupt happens, the same assistant bubble should never trigger another programmatic scroll-to-bottom call.\n\n",
+                    "Chunk 3: The UI test waits while these extra chunks arrive and checks a debug counter exposed from the conversation view.\n\n",
+                    "Chunk 4: The streaming window is intentionally stretched so the UI test can reliably observe an active reply before interrupting it.\n\n",
+                    "Chunk 5: Once the user has scrolled away, later deltas in this same bubble should keep rendering without forcing the scroll view to jump.\n\n",
+                    "Chunk 6: If auto scroll restarts inside the same answer bubble, the counter would increase and the test would fail."
+                ]
+
+                for chunk in chunks {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continuation.yield(.answerDelta(chunk))
+                }
+
+                continuation.finish()
+            }
         }
     }
 }

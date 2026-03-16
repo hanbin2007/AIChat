@@ -280,6 +280,94 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testInterruptingReplyStopsAllFurtherAutoScrollInSameBubble() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_autoscroll_interrupt"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing conversation scroll view hierarchy")
+            XCTFail("Missing conversation scroll view for auto-scroll interrupt scenario.")
+            return
+        }
+
+        let telemetry = app.staticTexts["conversation.scroll.debug"]
+        if !telemetry.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing auto-scroll telemetry hierarchy")
+            XCTFail("Missing auto-scroll telemetry for UI verification.")
+            return
+        }
+
+        let initialDeadline = Date().addingTimeInterval(10)
+        var initialTelemetry: [String: String] = [:]
+        while Date() < initialDeadline {
+            initialTelemetry = debugTelemetry(from: telemetry.label)
+            if initialTelemetry["streaming"] != nil, initialTelemetry["streaming"] != "nil" {
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        XCTAssertNotEqual(initialTelemetry["streaming"], "nil")
+
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.86))
+        start.press(forDuration: 0.05, thenDragTo: end)
+
+        let interruptDeadline = Date().addingTimeInterval(4)
+        var interruptedTelemetry = initialTelemetry
+        while Date() < interruptDeadline {
+            interruptedTelemetry = debugTelemetry(from: telemetry.label)
+            let locked = interruptedTelemetry["locked"]
+            let interrupted = interruptedTelemetry["interrupted"]
+            if locked != nil, locked != "nil", interrupted == "1" {
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        let lockedSession = interruptedTelemetry["locked"]
+        let currentSession = interruptedTelemetry["session"]
+        let interruptedAttachment = XCTAttachment(string: "interrupted: \(interruptedTelemetry)")
+        interruptedAttachment.name = "auto-scroll-interrupted-telemetry"
+        interruptedAttachment.lifetime = .keepAlways
+        add(interruptedAttachment)
+
+        XCTAssertNotEqual(lockedSession, "nil")
+        XCTAssertEqual(interruptedTelemetry["interrupted"], "1")
+
+        let countAfterInterrupt = Int(interruptedTelemetry["count"] ?? "") ?? -1
+        XCTAssertGreaterThanOrEqual(countAfterInterrupt, 1)
+
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5))
+
+        let finalTelemetry = debugTelemetry(from: telemetry.label)
+        let telemetryAttachment = XCTAttachment(
+            string: [
+                "initial: \(telemetry.label)",
+                "interrupted: \(interruptedTelemetry)",
+                "final: \(finalTelemetry)"
+            ].joined(separator: "\n")
+        )
+        telemetryAttachment.name = "auto-scroll-telemetry"
+        telemetryAttachment.lifetime = .keepAlways
+        add(telemetryAttachment)
+
+        if finalTelemetry["streaming"] != nil,
+           finalTelemetry["streaming"] != "nil",
+           currentSession != nil,
+           currentSession != "nil" {
+            XCTAssertEqual(finalTelemetry["session"], currentSession)
+            XCTAssertEqual(finalTelemetry["locked"], lockedSession)
+        }
+
+        XCTAssertEqual(Int(finalTelemetry["count"] ?? "") ?? -2, countAfterInterrupt)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
@@ -358,6 +446,21 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         return element.value as? String ?? ""
+    }
+
+    private func debugTelemetry(from label: String) -> [String: String] {
+        Dictionary(
+            uniqueKeysWithValues: label
+                .split(separator: ";")
+                .compactMap { item in
+                    let parts = item.split(separator: "=", maxSplits: 1)
+                    guard parts.count == 2 else {
+                        return nil
+                    }
+
+                    return (String(parts[0]), String(parts[1]))
+                }
+        )
     }
 
     @MainActor
