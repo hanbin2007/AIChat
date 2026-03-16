@@ -71,17 +71,21 @@ struct ConversationDetailView: View {
     @State private var isShowingThinkingPicker = false
     @State private var isComposerExpanded = true
     @State private var isShowingActivationCenter = false
-    @State private var interruptedAutoScrollMessageID: UUID?
+    @State private var isAutoScrollInterrupted = false
+    @State private var activeAutoScrollSessionMessageID: UUID?
+    @State private var interruptedAutoScrollSessionMessageID: UUID?
     @State private var suspendedStreamingRenderMessageID: UUID?
     @State private var pendingHistoryAnchorMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
     @State private var messagesViewportHeight: CGFloat = 0
+    @State private var currentDistanceFromBottom: CGFloat = 0
     @State private var voiceCaptureMode: VoiceCaptureMode = .transcribe
     @State private var suppressedVoiceTapUntil = Date.distantPast
     @State private var renderedMessageBudget = ConversationRendering.prewarmedRenderBudget
     @State private var lastObservedMessageCount = 0
     @State private var lastObservedHistoryCost = 0
     @State private var isPreparingHistory = true
+    @State private var autoScrollInvocationCount = 0
     @State private var voiceRecorderNoticeMessage: String?
     @State private var toolSettingsDraft: ToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
@@ -206,6 +210,8 @@ struct ConversationDetailView: View {
 
     private func messagesView(conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
+        let latestAssistantMessageID = latestAssistantMessageID(in: conversation.messages)
+        let autoScrollSessionMessageID = activeAutoScrollSessionMessageID ?? latestAssistantMessageID
         let visibleMessages = visibleMessages(in: conversation)
         let hiddenMessageCount = max(conversation.messages.count - visibleMessages.count, 0)
 
@@ -261,6 +267,7 @@ struct ConversationDetailView: View {
                 }
                 .padding(.horizontal, 4)
             }
+            .accessibilityIdentifier("conversation.messages.scroll")
             .coordinateSpace(name: ConversationScrollLayout.coordinateSpaceName)
             .background(
                 GeometryReader { geometry in
@@ -270,6 +277,14 @@ struct ConversationDetailView: View {
                     )
                 }
             )
+            .overlay(alignment: .topLeading) {
+                if isAutoScrollUITestDiagnosticsEnabled {
+                    autoScrollDebugProbe(
+                        autoScrollSessionMessageID: autoScrollSessionMessageID,
+                        streamingMessageID: streamingMessageID
+                    )
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if chatStore.canRetryLatestReply(in: conversationID) {
                     retryButton
@@ -279,27 +294,43 @@ struct ConversationDetailView: View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        pauseStreamingRefresh(for: streamingMessageID)
+                    .onChanged { value in
+                        guard abs(value.translation.height) > 6,
+                              isPredominantlyVertical(value.translation)
+                        else {
+                            return
+                        }
+
+                        pauseStreamingRefresh(
+                            for: streamingMessageID,
+                            autoScrollSessionMessageID: autoScrollSessionMessageID
+                        )
                     }
             )
             .onPreferenceChange(ConversationViewportHeightPreferenceKey.self) { height in
                 messagesViewportHeight = height
             }
             .onPreferenceChange(ConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
-                handleBottomAnchorPositionChange(maxY, streamingMessageID: streamingMessageID)
+                handleBottomAnchorPositionChange(
+                    maxY,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                )
             }
             .onAppear {
-                interruptedAutoScrollMessageID = nil
+                activeAutoScrollSessionMessageID = latestAssistantMessageID
+                isAutoScrollInterrupted = false
+                interruptedAutoScrollSessionMessageID = nil
                 suspendedStreamingRenderMessageID = nil
                 pendingHistoryAnchorMessageID = nil
+                currentDistanceFromBottom = 0
+                autoScrollInvocationCount = 0
                 streamingRenderResumeTask?.cancel()
                 streamingRenderResumeTask = nil
                 prepareInitialHistoryIfNeeded(messages: conversation.messages)
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
                     force: true
                 )
             }
@@ -308,7 +339,7 @@ struct ConversationDetailView: View {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: true,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: renderedMessageBudget) { _, newBudget in
@@ -329,27 +360,28 @@ struct ConversationDetailView: View {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID,
-                    force: true
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: conversation.updatedAt) { _, _ in
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, _ in
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: streamingMessageID) { _, newMessageID in
                 handleStreamingMessageChange(
                     newMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
                     with: proxy
                 )
             }
@@ -879,6 +911,8 @@ struct ConversationDetailView: View {
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+        isAutoScrollInterrupted = false
+        autoScrollInvocationCount += 1
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
 
         if animated {
@@ -916,40 +950,53 @@ struct ConversationDetailView: View {
     private func scrollToBottomIfNeeded(
         with proxy: ScrollViewProxy,
         animated: Bool,
-        streamingMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?,
         force: Bool = false
     ) {
-        guard force || shouldAutoScroll(for: streamingMessageID) else {
+        guard force || shouldAutoScroll(for: autoScrollSessionMessageID) else {
             return
         }
 
         scrollToBottom(with: proxy, animated: animated)
     }
 
-    private func shouldAutoScroll(for streamingMessageID: UUID?) -> Bool {
-        guard let streamingMessageID else {
-            return interruptedAutoScrollMessageID == nil
+    private func shouldAutoScroll(for autoScrollSessionMessageID: UUID?) -> Bool {
+        if interruptedAutoScrollSessionMessageID == autoScrollSessionMessageID,
+           interruptedAutoScrollSessionMessageID != nil {
+            return false
         }
 
-        return interruptedAutoScrollMessageID != streamingMessageID
+        return isAutoScrollInterrupted == false
     }
 
     private func handleStreamingMessageChange(
         _ streamingMessageID: UUID?,
+        latestAssistantMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?,
         with proxy: ScrollViewProxy
     ) {
         if let streamingMessageID {
-            interruptedAutoScrollMessageID = nil
+            activeAutoScrollSessionMessageID = streamingMessageID
+
+            if interruptedAutoScrollSessionMessageID != nil,
+               interruptedAutoScrollSessionMessageID != streamingMessageID {
+                interruptedAutoScrollSessionMessageID = nil
+                isAutoScrollInterrupted = false
+            }
+
             suspendedStreamingRenderMessageID = nil
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
             scrollToBottomIfNeeded(
                 with: proxy,
                 animated: false,
-                streamingMessageID: streamingMessageID,
-                force: true
+                autoScrollSessionMessageID: autoScrollSessionMessageID
             )
             return
+        }
+
+        if let latestAssistantMessageID {
+            activeAutoScrollSessionMessageID = latestAssistantMessageID
         }
 
         suspendedStreamingRenderMessageID = nil
@@ -958,29 +1005,32 @@ struct ConversationDetailView: View {
         scrollToBottomIfNeeded(
             with: proxy,
             animated: false,
-            streamingMessageID: nil
+            autoScrollSessionMessageID: autoScrollSessionMessageID
         )
     }
 
-    private func interruptAutoScroll(for streamingMessageID: UUID?) {
-        guard let streamingMessageID else {
-            return
-        }
+    private func interruptAutoScroll(for autoScrollSessionMessageID: UUID?) {
+        isAutoScrollInterrupted = true
 
-        interruptedAutoScrollMessageID = streamingMessageID
+        if let autoScrollSessionMessageID {
+            interruptedAutoScrollSessionMessageID = autoScrollSessionMessageID
+        }
     }
 
-    private func interruptAutoScrollImmediately(for streamingMessageID: UUID?) {
-        guard interruptedAutoScrollMessageID != streamingMessageID else {
+    private func interruptAutoScrollImmediately(for autoScrollSessionMessageID: UUID?) {
+        guard shouldAutoScroll(for: autoScrollSessionMessageID) else {
             return
         }
 
         scrollInterruptionsSuppressedUntil = .distantPast
-        interruptAutoScroll(for: streamingMessageID)
+        interruptAutoScroll(for: autoScrollSessionMessageID)
     }
 
-    private func pauseStreamingRefresh(for streamingMessageID: UUID?) {
-        interruptAutoScrollImmediately(for: streamingMessageID)
+    private func pauseStreamingRefresh(
+        for streamingMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?
+    ) {
+        interruptAutoScrollImmediately(for: autoScrollSessionMessageID)
         suspendStreamingRender(for: streamingMessageID)
     }
 
@@ -1012,20 +1062,28 @@ struct ConversationDetailView: View {
         }
     }
 
-    private func handleBottomAnchorPositionChange(_ maxY: CGFloat, streamingMessageID: UUID?) {
-        guard let streamingMessageID,
-              Date.now >= scrollInterruptionsSuppressedUntil,
+    private func handleBottomAnchorPositionChange(
+        _ maxY: CGFloat,
+        autoScrollSessionMessageID: UUID?
+    ) {
+        guard Date.now >= scrollInterruptionsSuppressedUntil,
               messagesViewportHeight > 0
         else {
             return
         }
 
         let distanceFromBottom = maxY - messagesViewportHeight
+        currentDistanceFromBottom = max(distanceFromBottom, 0)
         guard distanceFromBottom > ConversationScrollLayout.interruptionThreshold else {
+            guard interruptedAutoScrollSessionMessageID != autoScrollSessionMessageID else {
+                return
+            }
+
+            isAutoScrollInterrupted = false
             return
         }
 
-        interruptAutoScroll(for: streamingMessageID)
+        interruptAutoScroll(for: autoScrollSessionMessageID)
     }
 
     private func visibleMessages(in conversation: ConversationThread) -> ArraySlice<ChatMessage> {
@@ -1134,6 +1192,7 @@ struct ConversationDetailView: View {
             return
         }
 
+        interruptAutoScroll(for: activeAutoScrollSessionMessageID ?? latestAssistantMessageID(in: messages))
         pendingHistoryAnchorMessageID = ConversationHistoryRenderBudget.lastHiddenMessageID(
             in: messages,
             budget: renderedMessageBudget
@@ -1229,6 +1288,46 @@ struct ConversationDetailView: View {
 
     private func isPredominantlyVertical(_ translation: CGSize) -> Bool {
         abs(translation.height) > abs(translation.width)
+    }
+
+    private var isAutoScrollUITestDiagnosticsEnabled: Bool {
+        ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_autoscroll_interrupt"
+    }
+
+    private func latestAssistantMessageID(in messages: [ChatMessage]) -> UUID? {
+        messages.last(where: { $0.role == .assistant })?.id
+    }
+
+    private func autoScrollDebugLabel(
+        autoScrollSessionMessageID: UUID?,
+        streamingMessageID: UUID?
+    ) -> String {
+        [
+            "session=\(autoScrollSessionMessageID?.uuidString ?? "nil")",
+            "locked=\(interruptedAutoScrollSessionMessageID?.uuidString ?? "nil")",
+            "interrupted=\(isAutoScrollInterrupted ? 1 : 0)",
+            "streaming=\(streamingMessageID?.uuidString ?? "nil")",
+            "distance=\(Int(currentDistanceFromBottom.rounded()))",
+            "count=\(autoScrollInvocationCount)"
+        ].joined(separator: ";")
+    }
+
+    private func autoScrollDebugProbe(
+        autoScrollSessionMessageID: UUID?,
+        streamingMessageID: UUID?
+    ) -> some View {
+        Text(
+            autoScrollDebugLabel(
+                autoScrollSessionMessageID: autoScrollSessionMessageID,
+                streamingMessageID: streamingMessageID
+            )
+        )
+        .font(.system(size: 1))
+        .foregroundStyle(.clear)
+        .frame(width: 1, height: 1)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("conversation.scroll.debug")
     }
 
     private func recordingStatusTitle() -> String {

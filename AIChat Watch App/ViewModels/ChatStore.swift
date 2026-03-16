@@ -2884,6 +2884,9 @@ extension ChatStore {
         sendingConversationIDs: Set<UUID> = [],
         conversationErrors: [UUID: String] = [:],
         startupError: String? = nil,
+        aiService: AIStreamingService = PreviewAIStreamingService(),
+        transcriptionService: AITranscriptionService? = PreviewAITranscriptionService(),
+        completionFeedbackProvider: (any CompletionFeedbackProviding)? = nil,
         configuration: AppConfiguration = AppConfiguration(
             backendMode: .direct,
             geminiAPIKey: "preview-key",
@@ -2903,8 +2906,9 @@ extension ChatStore {
 
         let store = ChatStore(
             repository: repository,
-            aiService: PreviewAIStreamingService(),
-            transcriptionService: PreviewAITranscriptionService(),
+            aiService: aiService,
+            transcriptionService: transcriptionService,
+            completionFeedbackProvider: completionFeedbackProvider,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(isEnabled: false)
         )
