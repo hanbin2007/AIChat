@@ -404,51 +404,76 @@ struct GeminiRelayBridge {
 
     private func makeGeminiRequest(from request: RelayChatRequest, model: String) -> GeminiGenerateContentRequest {
         GeminiGenerateContentRequest(
-            systemInstruction: request.systemPrompt?.trimmedNonEmpty.map {
-                GeminiContent(role: nil, parts: [GeminiPartPayload(text: $0, inlineData: nil)])
-            },
-            contents: request.messages.map { message in
-                if message.role.lowercased() == "assistant",
+            systemInstruction: systemInstructionContent(from: request),
+            contents: request.messages.reduce(into: []) { partialResult, message in
+                let role = message.role.lowercased() == "assistant" ? "model" : "user"
+
+                let parts: [GeminiPartPayload]
+                if role == "model",
                    let modelResponseParts = message.modelResponseParts,
                    modelResponseParts.isEmpty == false {
-                    return GeminiContent(role: "model", parts: modelResponseParts)
-                }
+                    parts = modelResponseParts
+                } else {
+                    var messageParts: [GeminiPartPayload] = []
 
-                var parts: [GeminiPartPayload] = []
+                    if let text = message.text?.trimmedNonEmpty {
+                        messageParts.append(GeminiPartPayload(text: text, inlineData: nil))
+                    }
 
-                if let text = message.text?.trimmedNonEmpty {
-                    parts.append(GeminiPartPayload(text: text, inlineData: nil))
-                }
-
-                for attachment in message.attachments {
-                    parts.append(
-                        GeminiPartPayload(
-                            text: nil,
-                            inlineData: GeminiInlineData(
-                                mimeType: attachment.mimeType,
-                                data: attachment.base64Data
+                    for attachment in message.attachments {
+                        messageParts.append(
+                            GeminiPartPayload(
+                                text: nil,
+                                inlineData: GeminiInlineData(
+                                    mimeType: attachment.mimeType,
+                                    data: attachment.base64Data
+                                )
                             )
                         )
-                    )
+                    }
+
+                    parts = messageParts
                 }
 
-                return GeminiContent(
-                    role: message.role.lowercased() == "assistant" ? "model" : "user",
-                    parts: parts
-                )
+                guard parts.isEmpty == false else {
+                    return
+                }
+
+                if let lastIndex = partialResult.indices.last, partialResult[lastIndex].role == role {
+                    partialResult[lastIndex].parts.append(contentsOf: parts)
+                } else {
+                    partialResult.append(GeminiContent(role: role, parts: parts))
+                }
             },
+            safetySettings: GeminiSafetySetting.aiStudioDefaults,
             tools: requestTools(for: request),
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature(for: model, fallback: 0.65),
-                topP: 0.9,
+                topP: 0.95,
+                topK: nil,
                 maxOutputTokens: request.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil } ?? maxOutputTokens(for: model),
                 thinkingConfig: thinkingConfig(
                     model: model,
                     intensity: request.thinkingIntensity ?? "balanced",
                     includeThoughts: request.includeThoughts != false
-                )
+                ),
+                responseMimeType: nil,
+                enableEnhancedCivicAnswers: model.hasPrefix("gemini-3") ? true : nil,
+                mediaResolution: request.messages.contains { message in
+                    message.attachments.contains { $0.mimeType.lowercased().hasPrefix("image/") }
+                } ? "MEDIA_RESOLUTION_HIGH" : nil
             )
         )
+    }
+
+    private func systemInstructionContent(from request: RelayChatRequest) -> GeminiContent? {
+        if let parts = request.systemInstructionParts, parts.isEmpty == false {
+            return GeminiContent(role: nil, parts: parts)
+        }
+
+        return request.systemPrompt?.trimmedNonEmpty.map {
+            GeminiContent(role: nil, parts: [GeminiPartPayload(text: $0, inlineData: nil)])
+        }
     }
 
     private func requestTools(for request: RelayChatRequest) -> [GeminiTool]? {
@@ -491,9 +516,12 @@ struct GeminiRelayBridge {
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature(for: model, fallback: 0.1),
                 topP: 0.95,
+                topK: nil,
                 maxOutputTokens: RelayTranscriptionLimits.maxOutputTokens,
                 thinkingConfig: nil,
-                responseMimeType: nil
+                responseMimeType: nil,
+                enableEnhancedCivicAnswers: nil,
+                mediaResolution: nil
             )
         )
     }
@@ -526,9 +554,12 @@ struct GeminiRelayBridge {
             generationConfig: GeminiGenerationConfig(
                 temperature: temperature(for: model, fallback: 0.1),
                 topP: 0.9,
+                topK: nil,
                 maxOutputTokens: RelayMemoryExtractionLimits.maxOutputTokens,
                 thinkingConfig: nil,
-                responseMimeType: "application/json"
+                responseMimeType: "application/json",
+                enableEnhancedCivicAnswers: nil,
+                mediaResolution: nil
             )
         )
     }

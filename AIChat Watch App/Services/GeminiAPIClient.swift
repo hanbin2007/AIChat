@@ -167,68 +167,59 @@ struct GeminiAPIClient: AIStreamingService {
         )
 
         return GeminiGenerateContentRequest(
-            systemInstruction: assembledContext.systemPrompt.map(GeminiContent.systemPrompt),
-            contents: contextWindow(
-                from: assembledContext.recentMessages,
-                prefaceText: assembledContext.prefaceText
-            ),
+            systemInstruction: assembledContext.systemInstructionParts.map(GeminiContent.systemInstruction),
+            contents: contextWindow(from: assembledContext.recentMessages),
+            safetySettings: chatSafetySettings(),
             tools: requestTools(for: runtimeConfiguration),
-            generationConfig: GeminiGenerationConfig(
-                temperature: requestTemperature(for: runtimeConfiguration.model, fallback: 0.65),
-                topP: 0.9,
-                maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
-                thinkingConfig: thinkingConfiguration(for: runtimeConfiguration)
+            generationConfig: generationConfig(
+                for: runtimeConfiguration,
+                recentMessages: assembledContext.recentMessages
             )
         )
     }
 
-    func contextWindow(
-        from messages: [ChatMessage],
-        prefaceText: String?
-    ) -> [GeminiContent] {
+    func contextWindow(from messages: [ChatMessage]) -> [GeminiContent] {
         var contents: [GeminiContent] = []
 
-        if let prefaceText = prefaceText?.nonEmptyTrimmed {
-            contents.append(
-                GeminiContent(
-                    role: "user",
-                    parts: [GeminiPart(text: prefaceText, inlineData: nil)]
-                )
-            )
-        }
-
-        contents.append(contentsOf: messages.compactMap { message in
+        for message in messages {
             guard let role = message.role.geminiRole else {
-                return nil
+                continue
             }
 
+            let parts: [GeminiPartPayload]
             if role == "model",
                let modelResponseParts = message.cleanedModelResponseParts {
-                return GeminiContent(role: role, parts: modelResponseParts)
-            }
-
-            var parts = message.attachments.map { attachment in
-                GeminiPartPayload(
-                    text: nil,
-                    inlineData: GeminiPartInlineData(
-                        mimeType: attachment.mimeType,
-                        data: attachment.data.base64EncodedString()
+                parts = modelResponseParts
+            } else {
+                var messageParts = message.attachments.map { attachment in
+                    GeminiPartPayload(
+                        text: nil,
+                        inlineData: GeminiPartInlineData(
+                            mimeType: attachment.mimeType,
+                            data: attachment.data.base64EncodedString()
+                        )
                     )
-                )
+                }
+
+                if let text = requestText(for: message) {
+                    messageParts.insert(GeminiPartPayload(text: text, inlineData: nil), at: 0)
+                }
+
+                parts = messageParts
             }
 
-            if let text = requestText(for: message) {
-                parts.insert(GeminiPartPayload(text: text, inlineData: nil), at: 0)
+            guard parts.isEmpty == false else {
+                continue
             }
 
-            return GeminiContent(role: role, parts: parts)
-        })
+            if let lastIndex = contents.indices.last, contents[lastIndex].role == role {
+                contents[lastIndex].parts.append(contentsOf: parts)
+            } else {
+                contents.append(GeminiContent(role: role, parts: parts))
+            }
+        }
 
         return contents
-    }
-
-    func contextWindow(from messages: [ChatMessage]) -> [GeminiContent] {
-        contextWindow(from: messages, prefaceText: nil)
     }
 
     private func extractChunk(from responseEnvelope: GeminiGenerateContentResponse) -> GeminiStreamChunk {
@@ -268,6 +259,24 @@ struct GeminiAPIClient: AIStreamingService {
         AIModelCatalog.usesThinkingLevel(model: model) ? 1 : fallback
     }
 
+    private func generationConfig(
+        for runtimeConfiguration: ConversationAIConfiguration,
+        recentMessages: [ChatMessage]
+    ) -> GeminiGenerationConfig {
+        GeminiGenerationConfig(
+            temperature: requestTemperature(for: runtimeConfiguration.model, fallback: 0.65),
+            topP: 0.95,
+            topK: nil,
+            maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
+            thinkingConfig: thinkingConfiguration(for: runtimeConfiguration),
+            responseMimeType: nil,
+            enableEnhancedCivicAnswers: AIModelCatalog.usesThinkingLevel(model: runtimeConfiguration.model) ? true : nil,
+            mediaResolution: recentMessages.contains { message in
+                message.attachments.contains(where: \.isImage)
+            } ? "MEDIA_RESOLUTION_HIGH" : nil
+        )
+    }
+
     private func thinkingConfiguration(for runtimeConfiguration: ConversationAIConfiguration) -> GeminiThinkingConfig {
         if AIModelCatalog.usesThinkingLevel(model: runtimeConfiguration.model) {
             return GeminiThinkingConfig(
@@ -296,6 +305,10 @@ struct GeminiAPIClient: AIStreamingService {
         }
 
         return tools.isEmpty ? nil : tools
+    }
+
+    private func chatSafetySettings() -> [GeminiSafetySetting] {
+        GeminiSafetySetting.aiStudioDefaults
     }
 
     private func geminiError(from data: Data) -> Error {
@@ -413,17 +426,20 @@ func readAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
 nonisolated struct GeminiGenerateContentRequest: Encodable, Sendable {
     var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
+    var safetySettings: [GeminiSafetySetting]?
     var tools: [GeminiTool]?
     var generationConfig: GeminiGenerationConfig
 
     init(
         systemInstruction: GeminiContent?,
         contents: [GeminiContent],
+        safetySettings: [GeminiSafetySetting]? = nil,
         tools: [GeminiTool]? = nil,
         generationConfig: GeminiGenerationConfig
     ) {
         self.systemInstruction = systemInstruction
         self.contents = contents
+        self.safetySettings = safetySettings
         self.tools = tools
         self.generationConfig = generationConfig
     }
@@ -441,9 +457,12 @@ nonisolated struct GeminiCodeExecutionTool: Codable, Equatable, Sendable {}
 nonisolated struct GeminiGenerationConfig: Codable, Equatable, Sendable {
     var temperature: Double
     var topP: Double
+    var topK: Int?
     var maxOutputTokens: Int
     var thinkingConfig: GeminiThinkingConfig?
     var responseMimeType: String?
+    var enableEnhancedCivicAnswers: Bool?
+    var mediaResolution: String?
 }
 
 nonisolated struct GeminiThinkingConfig: Codable, Equatable, Sendable {
@@ -452,12 +471,28 @@ nonisolated struct GeminiThinkingConfig: Codable, Equatable, Sendable {
     var includeThoughts: Bool?
 }
 
+nonisolated struct GeminiSafetySetting: Codable, Equatable, Sendable {
+    var category: String
+    var threshold: String
+
+    nonisolated static let aiStudioDefaults: [GeminiSafetySetting] = [
+        GeminiSafetySetting(category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF")
+    ]
+}
+
 nonisolated struct GeminiContent: Codable, Equatable, Sendable {
     var role: String?
     var parts: [GeminiPartPayload]
 
+    nonisolated static func systemInstruction(_ parts: [GeminiPartPayload]) -> GeminiContent {
+        GeminiContent(role: nil, parts: parts)
+    }
+
     nonisolated static func systemPrompt(_ text: String) -> GeminiContent {
-        GeminiContent(role: nil, parts: [GeminiPartPayload(text: text, inlineData: nil)])
+        systemInstruction([GeminiPartPayload(text: text, inlineData: nil)])
     }
 }
 

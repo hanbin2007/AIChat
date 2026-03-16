@@ -125,6 +125,35 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(contents[0].parts.last?.inlineData?.data, audioData.base64EncodedString())
     }
 
+    func testContextWindowMergesConsecutiveMessagesFromSameRoleIntoParts() {
+        let messages = [
+            ChatMessage(role: .user, text: "第一句"),
+            ChatMessage(role: .user, text: "第二句"),
+            ChatMessage(role: .assistant, text: "回答")
+        ]
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let contents = client.contextWindow(from: messages)
+
+        XCTAssertEqual(contents.count, 2)
+        XCTAssertEqual(contents[0].role, "user")
+        XCTAssertEqual(contents[0].parts.compactMap(\.text), ["第一句", "第二句"])
+        XCTAssertEqual(contents[1].role, "model")
+        XCTAssertEqual(contents[1].parts.compactMap(\.text), ["回答"])
+    }
+
     func testRecordedAudioDefaultsToAacMimeTypeAndExtension() throws {
         let attachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x10, 0x20, 0x30]),
@@ -284,10 +313,14 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         XCTAssertEqual(requestBody.systemInstruction?.parts.first?.text, AIContextAssembler.conciseSystemPrompt)
         XCTAssertEqual(requestBody.generationConfig.temperature, 1)
+        XCTAssertEqual(requestBody.generationConfig.topP, 0.95)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, "high")
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+        XCTAssertEqual(requestBody.generationConfig.enableEnhancedCivicAnswers, true)
+        XCTAssertNil(requestBody.generationConfig.mediaResolution)
         XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
+        XCTAssertEqual(requestBody.safetySettings, GeminiSafetySetting.aiStudioDefaults)
     }
 
     func testDefaultPromptModeOmitsSystemInstruction() {
@@ -338,10 +371,11 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
 
         XCTAssertEqual(assembled.mode, .casual)
-        XCTAssertNil(assembled.prefaceText)
+        XCTAssertEqual(assembled.systemInstructionParts?.count, 1)
+        XCTAssertEqual(assembled.systemInstructionParts?.first?.text, AIContextAssembler.conciseSystemPrompt)
     }
 
-    func testContextAssemblerIncludesTeachingArtifactsInPreface() {
+    func testContextAssemblerIncludesTeachingArtifactsInSystemInstructionParts() {
         let conversation = ConversationThread(
             title: "函数导数",
             messages: [
@@ -381,12 +415,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
             for: conversation,
             configuration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
         )
+        let instructionText = assembled.systemInstructionParts?.compactMap(\.text).joined(separator: "\n\n")
 
         XCTAssertEqual(assembled.mode, .teaching)
-        XCTAssertTrue(assembled.prefaceText?.contains("Current focus:") == true)
-        XCTAssertTrue(assembled.prefaceText?.contains("Pinned memory:") == true)
-        XCTAssertTrue(assembled.prefaceText?.contains("Relevant conversation memory:") == true)
-        XCTAssertTrue(assembled.prefaceText?.contains("Archived context:") == true)
+        XCTAssertTrue(instructionText?.contains("Current focus:") == true)
+        XCTAssertTrue(instructionText?.contains("Pinned memory:") == true)
+        XCTAssertTrue(instructionText?.contains("Relevant conversation memory:") == true)
+        XCTAssertTrue(instructionText?.contains("Archived context:") == true)
     }
 
     func testCustomSystemPromptOverridesBuiltInPrompt() {
@@ -463,10 +498,49 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let requestBody = client.makeRequestBody(for: conversation)
 
         XCTAssertEqual(requestBody.generationConfig.temperature, 0.65)
+        XCTAssertEqual(requestBody.generationConfig.topP, 0.95)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingLevel, nil)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.thinkingBudget, 8_192)
         XCTAssertEqual(requestBody.generationConfig.thinkingConfig?.includeThoughts, true)
+        XCTAssertNil(requestBody.generationConfig.enableEnhancedCivicAnswers)
+        XCTAssertNil(requestBody.generationConfig.mediaResolution)
         XCTAssertEqual(requestBody.generationConfig.maxOutputTokens, 65_536)
+        XCTAssertEqual(requestBody.safetySettings, GeminiSafetySetting.aiStudioDefaults)
+    }
+
+    func testGeminiRequestUsesHighMediaResolutionWhenImageIsAttached() {
+        let imageData = Data([0x01, 0x02, 0x03])
+        let attachment = ChatImageAttachment(
+            kind: .image,
+            filename: "photo.jpg",
+            mimeType: "image/jpeg",
+            data: imageData,
+            pixelWidth: 10,
+            pixelHeight: 10
+        )
+        let conversation = ConversationThread(
+            messages: [
+                ChatMessage(role: .user, text: "看这张图", attachments: [attachment])
+            ],
+            aiConfiguration: ConversationAIConfiguration(model: "gemini-3-flash-preview")
+        )
+
+        let client = GeminiAPIClient(
+            configuration: AppConfiguration(
+                backendMode: .direct,
+                geminiAPIKey: "test",
+                geminiModel: "gemini-3-flash-preview",
+                geminiTranscriptionModel: "gemini-3-flash-preview",
+                relayBaseURL: nil,
+                relayBearerToken: nil,
+                relayStreamPath: "v1/chat/stream",
+                appGroupIdentifier: nil
+            )
+        )
+
+        let requestBody = client.makeRequestBody(for: conversation)
+
+        XCTAssertEqual(requestBody.generationConfig.mediaResolution, "MEDIA_RESOLUTION_HIGH")
     }
 
     func testGeminiRequestIncludesEnabledTools() {
@@ -776,7 +850,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let request = client.makeRelayRequest(for: conversation)
 
         XCTAssertEqual(request.maxOutputTokens, 65_536)
-        XCTAssertEqual(request.systemPrompt, AIContextAssembler.conciseSystemPrompt)
+        XCTAssertNil(request.systemPrompt)
+        XCTAssertEqual(request.systemInstructionParts?.first?.text, AIContextAssembler.conciseSystemPrompt)
     }
 
     func testRelayRequestCarriesGeminiToolFlags() {

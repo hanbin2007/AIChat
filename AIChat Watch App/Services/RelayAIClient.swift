@@ -86,20 +86,7 @@ struct RelayAIClient: AIStreamingService {
             for: conversation,
             configuration: runtimeConfiguration
         )
-        var relayMessages: [RelayMessage] = []
-
-        if let prefaceText = assembledContext.prefaceText?.nonEmptyTrimmed {
-            relayMessages.append(
-                RelayMessage(
-                    role: ChatRole.user.rawValue,
-                    text: prefaceText,
-                    modelResponseParts: nil,
-                    attachments: []
-                )
-            )
-        }
-
-        relayMessages.append(contentsOf: assembledContext.recentMessages.map { message in
+        let relayMessages = assembledContext.recentMessages.map { message in
             let modelResponseParts = message.cleanedModelResponseParts
             return RelayMessage(
                 role: message.role.rawValue,
@@ -113,11 +100,12 @@ struct RelayAIClient: AIStreamingService {
                     )
                 } : []
             )
-        })
+        }
 
         return RelayChatRequest(
             model: runtimeConfiguration.model,
-            systemPrompt: assembledContext.systemPrompt,
+            systemPrompt: nil,
+            systemInstructionParts: assembledContext.systemInstructionParts,
             thinkingIntensity: runtimeConfiguration.thinkingIntensity,
             maxOutputTokens: AIModelCatalog.maxOutputTokens(for: runtimeConfiguration.model),
             includeThoughts: true,
@@ -291,6 +279,7 @@ struct RelayTranscriptionService: AITranscriptionService {
 nonisolated struct RelayChatRequest: Codable, Equatable, Sendable {
     var model: String
     var systemPrompt: String?
+    var systemInstructionParts: [GeminiPartPayload]?
     var thinkingIntensity: AIThinkingIntensity
     var maxOutputTokens: Int
     var includeThoughts: Bool

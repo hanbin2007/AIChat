@@ -129,6 +129,7 @@ enum RelayServerEvent: Sendable {
 struct RelayChatRequest: Decodable, Sendable {
     var model: String?
     var systemPrompt: String?
+    var systemInstructionParts: [GeminiPartPayload]?
     var thinkingIntensity: String?
     var maxOutputTokens: Int?
     var includeThoughts: Bool?
@@ -417,17 +418,20 @@ enum JSONValue: Codable, Equatable, Hashable, Sendable {
 struct GeminiGenerateContentRequest: Encodable, Sendable {
     var systemInstruction: GeminiContent?
     var contents: [GeminiContent]
+    var safetySettings: [GeminiSafetySetting]?
     var tools: [GeminiTool]?
     var generationConfig: GeminiGenerationConfig
 
     init(
         systemInstruction: GeminiContent?,
         contents: [GeminiContent],
+        safetySettings: [GeminiSafetySetting]? = nil,
         tools: [GeminiTool]? = nil,
         generationConfig: GeminiGenerationConfig
     ) {
         self.systemInstruction = systemInstruction
         self.contents = contents
+        self.safetySettings = safetySettings
         self.tools = tools
         self.generationConfig = generationConfig
     }
@@ -546,15 +550,30 @@ struct GeminiInlineData: Codable, Sendable {
 struct GeminiGenerationConfig: Encodable, Sendable {
     var temperature: Double
     var topP: Double
+    var topK: Int?
     var maxOutputTokens: Int
     var thinkingConfig: GeminiThinkingConfig?
     var responseMimeType: String?
+    var enableEnhancedCivicAnswers: Bool?
+    var mediaResolution: String?
 }
 
 struct GeminiThinkingConfig: Encodable, Sendable {
     var thinkingLevel: String?
     var thinkingBudget: Int?
     var includeThoughts: Bool
+}
+
+struct GeminiSafetySetting: Encodable, Sendable {
+    var category: String
+    var threshold: String
+
+    static let aiStudioDefaults: [GeminiSafetySetting] = [
+        GeminiSafetySetting(category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF"),
+        GeminiSafetySetting(category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF")
+    ]
 }
 
 struct GeminiStreamChunk: Decodable, Sendable {
