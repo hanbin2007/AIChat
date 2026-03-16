@@ -14,11 +14,12 @@ struct AIChatRelayApp: App {
     var body: some Scene {
         WindowGroup {
             RelayDashboardView(controller: controller)
-                .frame(minWidth: 980, minHeight: 760)
+                .frame(minWidth: 1120, minHeight: 860)
                 .task {
                     controller.handleInitialLaunch()
                 }
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 1320, height: 920)
+        .windowResizability(.contentMinSize)
     }
 }

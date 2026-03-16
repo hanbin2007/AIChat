@@ -21,10 +21,56 @@ struct RelayLogEntry: Identifiable, Equatable, Sendable {
     let message: String
 }
 
+enum RelayDebugSource: String, Codable, CaseIterable, Sendable {
+    case client
+    case relay
+    case upstream
+
+    var displayName: String {
+        switch self {
+        case .client:
+            return "Client"
+        case .relay:
+            return "Relay"
+        case .upstream:
+            return "Gemini"
+        }
+    }
+}
+
+enum RelayDebugKind: String, Codable, CaseIterable, Sendable {
+    case request
+    case response
+    case event
+
+    var displayName: String {
+        rawValue.capitalized
+    }
+}
+
+struct RelayDebugEvent: Equatable, Sendable {
+    let source: RelayDebugSource
+    let kind: RelayDebugKind
+    let title: String
+    let summary: String
+    let method: String?
+    let path: String?
+    let address: String?
+    let statusCode: Int?
+    let body: String
+}
+
 struct RelayDebugEntry: Identifiable, Equatable, Sendable {
     let id = UUID()
     let timestamp: Date
+    let source: RelayDebugSource
+    let kind: RelayDebugKind
     let title: String
+    let summary: String
+    let method: String?
+    let path: String?
+    let address: String?
+    let statusCode: Int?
     let body: String
 }
 
@@ -33,6 +79,33 @@ struct RelayEndpoint: Identifiable, Equatable, Sendable {
     let title: String
     let urlString: String
     let detail: String
+}
+
+enum RelaySetupStepStatus: Equatable, Sendable {
+    case complete
+    case pending
+    case blocked
+}
+
+struct RelaySetupStep: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let title: String
+    let detail: String
+    let status: RelaySetupStepStatus
+}
+
+enum RelayFeedbackStyle: Equatable, Sendable {
+    case info
+    case success
+    case warning
+    case error
+}
+
+struct RelayActionFeedback: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let style: RelayFeedbackStyle
 }
 
 enum RelayServerStatus: Equatable {
@@ -48,7 +121,7 @@ enum RelayServerEvent: Sendable {
     case didReceiveRequest(path: String, remoteAddress: String?)
     case didCompleteRequest(path: String, remoteAddress: String?)
     case didFailRequest(path: String, remoteAddress: String?, statusCode: Int, message: String)
-    case debug(title: String, body: String)
+    case debug(RelayDebugEvent)
     case log(level: RelayLogLevel, message: String)
     case listenerFailed(message: String)
 }
