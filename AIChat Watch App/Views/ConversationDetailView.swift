@@ -53,6 +53,11 @@ private enum ConversationRendering {
     static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
 }
 
+private struct ToolSettingsDraft: Equatable {
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
+}
+
 struct ConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -78,6 +83,7 @@ struct ConversationDetailView: View {
     @State private var lastObservedHistoryCost = 0
     @State private var isPreparingHistory = true
     @State private var voiceRecorderNoticeMessage: String?
+    @State private var toolSettingsDraft: ToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
 
@@ -142,7 +148,7 @@ struct ConversationDetailView: View {
         .sheet(isPresented: $isShowingSettings) {
             ConversationSettingsView(conversationID: conversationID)
         }
-        .sheet(isPresented: $isShowingToolSettings) {
+        .sheet(isPresented: $isShowingToolSettings, onDismiss: commitToolSettingsDraft) {
             conversationToolSheet
         }
         .sheet(isPresented: $isShowingActivationCenter) {
@@ -619,9 +625,7 @@ struct ConversationDetailView: View {
                 )
                 .accessibilityHint("Long press to send the recorded audio directly.")
 
-                Button {
-                    isShowingToolSettings = true
-                } label: {
+                Button(action: presentToolSettings) {
                     ComposerToolButtonLabel(
                         symbolNames: toolButtonSymbols(for: aiConfiguration),
                         tintColor: toolButtonTint(for: aiConfiguration)
@@ -630,7 +634,9 @@ struct ConversationDetailView: View {
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity)
                 .disabled(voiceRecorder.isRecording || isTranscribing)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+                .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
                 .accessibilityIdentifier("conversation.tool-entry")
             }
         }
@@ -1248,12 +1254,12 @@ struct ConversationDetailView: View {
     private func googleSearchEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
+                toolSettingsDraft?.usesGoogleSearch ??
+                    chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateGoogleSearchEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesGoogleSearch = newValue
             }
         )
     }
@@ -1261,13 +1267,53 @@ struct ConversationDetailView: View {
     private func codeExecutionEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesCodeExecution
+                toolSettingsDraft?.usesCodeExecution ??
+                    chatStore.aiConfiguration(for: conversationID).usesCodeExecution
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateCodeExecutionEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesCodeExecution = newValue
             }
+        )
+    }
+
+    private func presentToolSettings() {
+        toolSettingsDraft = currentToolSettingsDraft()
+        isShowingToolSettings = true
+    }
+
+    private func ensureToolSettingsDraft() {
+        if toolSettingsDraft == nil {
+            toolSettingsDraft = currentToolSettingsDraft()
+        }
+    }
+
+    private func currentToolSettingsDraft() -> ToolSettingsDraft {
+        let configuration = chatStore.aiConfiguration(for: conversationID)
+        return ToolSettingsDraft(
+            usesGoogleSearch: configuration.usesGoogleSearch,
+            usesCodeExecution: configuration.usesCodeExecution
+        )
+    }
+
+    private func commitToolSettingsDraft() {
+        guard let draft = toolSettingsDraft else {
+            return
+        }
+
+        toolSettingsDraft = nil
+
+        let currentConfiguration = chatStore.aiConfiguration(for: conversationID)
+        guard currentConfiguration.usesGoogleSearch != draft.usesGoogleSearch ||
+                currentConfiguration.usesCodeExecution != draft.usesCodeExecution
+        else {
+            return
+        }
+
+        chatStore.setToolPreferences(
+            usesGoogleSearch: draft.usesGoogleSearch,
+            usesCodeExecution: draft.usesCodeExecution,
+            for: conversationID
         )
     }
 
@@ -1304,6 +1350,19 @@ struct ConversationDetailView: View {
         }
 
         return "工具与图片，已启用\(enabledFeatures.joined(separator: "、"))"
+    }
+
+    private func toolButtonAccessibilityValue(for configuration: ConversationAIConfiguration) -> String {
+        let enabledFeatures = [
+            configuration.usesGoogleSearch ? "联网搜索" : nil,
+            configuration.usesCodeExecution ? "运行代码" : nil
+        ].compactMap { $0 }
+
+        guard enabledFeatures.isEmpty == false else {
+            return "未启用附加工具"
+        }
+
+        return enabledFeatures.joined(separator: "、")
     }
 }
 

@@ -15,6 +15,7 @@ private struct DeletedConversationTombstone: Codable, Hashable {
 actor ConversationRepository {
     nonisolated let storageDescription: String
     nonisolated let resolvedRootURL: URL
+    nonisolated let attachmentsDirectoryURL: URL
 
     private let rootURL: URL
     private let attachmentsRootURL: URL
@@ -36,6 +37,7 @@ actor ConversationRepository {
         self.rootURL = resolvedStorage.url
         self.attachmentsRootURL = resolvedStorage.url.appendingPathComponent("attachments", isDirectory: true)
         self.resolvedRootURL = resolvedStorage.url
+        self.attachmentsDirectoryURL = self.attachmentsRootURL
         self.storageDescription = resolvedStorage.description
 
         let encoder = JSONEncoder()
@@ -60,17 +62,24 @@ actor ConversationRepository {
         let conversations = try fileURLs.map { url -> ConversationThread in
             let data = try Data(contentsOf: url)
             let conversation = try decoder.decode(ConversationThread.self, from: data)
-            return hydrateAttachments(in: conversation)
+            return hydratedConversation(for: conversation)
         }
 
         return conversations.sorted(by: ConversationThread.sortsByMostRecentFirst)
     }
 
-    func save(_ conversation: ConversationThread) throws {
+    @discardableResult
+    func save(_ conversation: ConversationThread) throws -> ConversationThread {
         try ensureDirectoryExists()
+        let existingConversation = try loadConversationIfPresent(id: conversation.id)
         let persistedConversation = try persistAttachmentBlobs(for: conversation)
         let data = try encoder.encode(persistedConversation)
         try data.write(to: fileURL(for: conversation.id), options: [.atomic])
+        try removeOrphanedAttachmentBlobs(
+            previouslyReferencedBy: existingConversation,
+            keeping: persistedConversation
+        )
+        return persistedConversation
     }
 
     func loadGlobalPinnedMemories() throws -> [PinnedMemoryItem] {
@@ -135,11 +144,32 @@ actor ConversationRepository {
 
     func deleteConversation(id: UUID) throws {
         let url = fileURL(for: id)
+        let existingConversation = try loadConversationIfPresent(id: id)
         guard fileManager.fileExists(atPath: url.path()) else {
             return
         }
 
         try fileManager.removeItem(at: url)
+        try removeAttachmentBlobs(referencedBy: existingConversation)
+    }
+
+    func importAttachmentBlob(
+        from temporaryFileURL: URL,
+        as blobFilename: String
+    ) throws -> Data {
+        try ensureDirectoryExists()
+
+        let destinationURL = attachmentsRootURL.appendingPathComponent(blobFilename, isDirectory: false)
+        if fileManager.fileExists(atPath: destinationURL.path()) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        try fileManager.copyItem(at: temporaryFileURL, to: destinationURL)
+        return try Data(contentsOf: destinationURL)
+    }
+
+    func hydrateAttachments(in conversation: ConversationThread) -> ConversationThread {
+        hydratedConversation(for: conversation)
     }
 
     private func fileURL(for id: UUID) -> URL {
@@ -191,7 +221,7 @@ actor ConversationRepository {
         return persistedConversation
     }
 
-    private func hydrateAttachments(in conversation: ConversationThread) -> ConversationThread {
+    private func hydratedConversation(for conversation: ConversationThread) -> ConversationThread {
         var hydratedConversation = conversation
 
         for messageIndex in hydratedConversation.messages.indices {
@@ -213,6 +243,48 @@ actor ConversationRepository {
         }
 
         return hydratedConversation
+    }
+
+    private func loadConversationIfPresent(id: UUID) throws -> ConversationThread? {
+        let url = fileURL(for: id)
+        guard fileManager.fileExists(atPath: url.path()) else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        return try decoder.decode(ConversationThread.self, from: data)
+    }
+
+    private func removeOrphanedAttachmentBlobs(
+        previouslyReferencedBy previousConversation: ConversationThread?,
+        keeping persistedConversation: ConversationThread
+    ) throws {
+        let previousBlobFilenames = Set(previousConversation?.allAttachmentBlobFilenames ?? [])
+        let currentBlobFilenames = Set(persistedConversation.allAttachmentBlobFilenames)
+
+        for blobFilename in previousBlobFilenames.subtracting(currentBlobFilenames) {
+            let url = attachmentsRootURL.appendingPathComponent(blobFilename, isDirectory: false)
+            guard fileManager.fileExists(atPath: url.path()) else {
+                continue
+            }
+
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    private func removeAttachmentBlobs(referencedBy conversation: ConversationThread?) throws {
+        guard let conversation else {
+            return
+        }
+
+        for blobFilename in conversation.allAttachmentBlobFilenames {
+            let url = attachmentsRootURL.appendingPathComponent(blobFilename, isDirectory: false)
+            guard fileManager.fileExists(atPath: url.path()) else {
+                continue
+            }
+
+            try fileManager.removeItem(at: url)
+        }
     }
 
     private func blobFilename(for attachment: ChatAttachment) -> String {
@@ -290,5 +362,15 @@ actor ConversationRepository {
         #else
         return L10n.tr("storage.local.iphone")
         #endif
+    }
+}
+
+nonisolated private extension ConversationThread {
+    var allAttachmentBlobFilenames: [String] {
+        messages.flatMap { message in
+            message.attachments.compactMap { attachment in
+                attachment.blobFilename?.nonEmptyTrimmed
+            }
+        }
     }
 }

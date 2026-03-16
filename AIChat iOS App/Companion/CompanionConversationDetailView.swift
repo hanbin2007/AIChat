@@ -29,6 +29,11 @@ private enum CompanionConversationRendering {
     static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
 }
 
+private struct CompanionToolSettingsDraft: Equatable {
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
+}
+
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -51,6 +56,7 @@ struct CompanionConversationDetailView: View {
     @State private var lastObservedMessageCount = 0
     @State private var lastObservedHistoryCost = 0
     @State private var isPreparingHistory = true
+    @State private var toolSettingsDraft: CompanionToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
 
@@ -89,7 +95,7 @@ struct CompanionConversationDetailView: View {
         .sheet(isPresented: $isShowingSettings) {
             CompanionConversationSettingsView(conversationID: conversationID)
         }
-        .sheet(isPresented: $isShowingToolSettings) {
+        .sheet(isPresented: $isShowingToolSettings, onDismiss: commitToolSettingsDraft) {
             conversationToolSheet
         }
         .sheet(isPresented: $isShowingActivationCenter) {
@@ -121,6 +127,7 @@ struct CompanionConversationDetailView: View {
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
         }
+        .accessibilityIdentifier("companion.conversation.detail")
     }
 
     private func conversationContent(_ conversation: ConversationThread) -> some View {
@@ -587,9 +594,7 @@ struct CompanionConversationDetailView: View {
                             }
                     )
 
-                    Button {
-                        isShowingToolSettings = true
-                    } label: {
+                    Button(action: presentToolSettings) {
                         HStack(spacing: 6) {
                             ForEach(toolButtonSymbols(for: aiConfiguration), id: \.self) { symbolName in
                                 Image(systemName: symbolName)
@@ -602,7 +607,10 @@ struct CompanionConversationDetailView: View {
                     .buttonStyle(.bordered)
                     .tint(toolButtonTint(for: aiConfiguration))
                     .disabled(voiceRecorder.isRecording || isTranscribing)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+                    .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
+                    .accessibilityIdentifier("conversation.tool-entry")
 
                     Button {
                         if canRestorePreviousMessage {
@@ -644,7 +652,9 @@ struct CompanionConversationDetailView: View {
             Form {
                 Section {
                     Toggle("联网搜索", isOn: googleSearchEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-search")
                     Toggle("运行代码", isOn: codeExecutionEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-code")
                 } footer: {
                     Text("是否可用取决于当前 Gemini 模型是否支持对应工具。")
                 }
@@ -658,8 +668,10 @@ struct CompanionConversationDetailView: View {
                         Label("添加图片", systemImage: "photo.on.rectangle")
                     }
                     .disabled(voiceRecorder.isRecording || chatStore.isTranscribing(conversationID: conversationID))
+                    .accessibilityIdentifier("conversation.tool-photo-picker")
                 }
             }
+            .accessibilityIdentifier("conversation.tool-sheet")
             .navigationTitle("工具与图片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -667,6 +679,7 @@ struct CompanionConversationDetailView: View {
                     Button("完成") {
                         isShowingToolSettings = false
                     }
+                    .accessibilityIdentifier("conversation.tool-done")
                 }
             }
         }
@@ -1082,12 +1095,12 @@ struct CompanionConversationDetailView: View {
     private func googleSearchEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
+                toolSettingsDraft?.usesGoogleSearch ??
+                    chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateGoogleSearchEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesGoogleSearch = newValue
             }
         )
     }
@@ -1095,13 +1108,53 @@ struct CompanionConversationDetailView: View {
     private func codeExecutionEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesCodeExecution
+                toolSettingsDraft?.usesCodeExecution ??
+                    chatStore.aiConfiguration(for: conversationID).usesCodeExecution
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateCodeExecutionEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesCodeExecution = newValue
             }
+        )
+    }
+
+    private func presentToolSettings() {
+        toolSettingsDraft = currentToolSettingsDraft()
+        isShowingToolSettings = true
+    }
+
+    private func ensureToolSettingsDraft() {
+        if toolSettingsDraft == nil {
+            toolSettingsDraft = currentToolSettingsDraft()
+        }
+    }
+
+    private func currentToolSettingsDraft() -> CompanionToolSettingsDraft {
+        let configuration = chatStore.aiConfiguration(for: conversationID)
+        return CompanionToolSettingsDraft(
+            usesGoogleSearch: configuration.usesGoogleSearch,
+            usesCodeExecution: configuration.usesCodeExecution
+        )
+    }
+
+    private func commitToolSettingsDraft() {
+        guard let draft = toolSettingsDraft else {
+            return
+        }
+
+        toolSettingsDraft = nil
+
+        let currentConfiguration = chatStore.aiConfiguration(for: conversationID)
+        guard currentConfiguration.usesGoogleSearch != draft.usesGoogleSearch ||
+                currentConfiguration.usesCodeExecution != draft.usesCodeExecution
+        else {
+            return
+        }
+
+        chatStore.setToolPreferences(
+            usesGoogleSearch: draft.usesGoogleSearch,
+            usesCodeExecution: draft.usesCodeExecution,
+            for: conversationID
         )
     }
 
@@ -1138,6 +1191,19 @@ struct CompanionConversationDetailView: View {
         }
 
         return "工具与图片，已启用\(enabledFeatures.joined(separator: "、"))"
+    }
+
+    private func toolButtonAccessibilityValue(for configuration: ConversationAIConfiguration) -> String {
+        let enabledFeatures = [
+            configuration.usesGoogleSearch ? "联网搜索" : nil,
+            configuration.usesCodeExecution ? "运行代码" : nil
+        ].compactMap { $0 }
+
+        guard enabledFeatures.isEmpty == false else {
+            return "未启用附加工具"
+        }
+
+        return enabledFeatures.joined(separator: "、")
     }
 }
 
