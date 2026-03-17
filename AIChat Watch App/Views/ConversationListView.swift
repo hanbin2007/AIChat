@@ -140,6 +140,7 @@ struct ConversationListView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(chatStore.isReadOnlyMode ? .orange : .cyan)
+            .accessibilityIdentifier("conversation.empty-state.action")
         }
         .padding(14)
         .background(
@@ -150,6 +151,8 @@ struct ConversationListView: View {
                         .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 )
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("conversation.empty-state")
     }
 
     @ViewBuilder

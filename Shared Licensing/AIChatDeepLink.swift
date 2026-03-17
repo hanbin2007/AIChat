@@ -42,6 +42,10 @@ enum AIChatDeepLink: Equatable {
             return nil
         }
 
+        if code.contains(where: \.isNumber) {
+            return OfflineActivation.formatForDisplay(normalizedCode, groupSize: 4)
+        }
+
         return OfflineActivation.formatActivationCodeForDisplay(normalizedCode)
     }
 

@@ -21,7 +21,7 @@ struct GeminiRelayBridge {
     func streamChat(
         relayRequest: RelayChatRequest,
         apiKey: String,
-        debugLog: (@Sendable (String, String) async -> Void)? = nil,
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil,
         onOpen: @escaping @Sendable () async throws -> Void,
         onEvent: @escaping @Sendable (RelayOutboundEvent) async throws -> Void
     ) async throws {
@@ -44,12 +44,21 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Request • Chat",
-                RelayDebugFormatter.httpRequest(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .request,
+                    title: "Gemini Request",
+                    summary: "Chat stream request",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: nil,
+                    body: RelayDebugFormatter.httpRequest(
                     method: request.httpMethod ?? "POST",
                     url: request.url?.absoluteString ?? "",
                     headers: request.allHTTPHeaderFields ?? [:],
                     body: requestBody
+                )
                 )
             )
         }
@@ -63,11 +72,20 @@ struct GeminiRelayBridge {
             let errorData = try await readAllBytes(from: bytes)
             if let debugLog {
                 await debugLog(
-                    "Gemini Response • Chat Error",
-                    RelayDebugFormatter.httpResponse(
+                    RelayDebugEvent(
+                        source: .upstream,
+                        kind: .response,
+                        title: "Gemini Response",
+                        summary: "Chat stream error",
+                        method: request.httpMethod ?? "POST",
+                        path: request.url?.path,
+                        address: request.url?.host,
+                        statusCode: httpResponse.statusCode,
+                        body: RelayDebugFormatter.httpResponse(
                         statusCode: httpResponse.statusCode,
                         headers: httpHeaders(from: httpResponse),
                         body: errorData
+                    )
                     )
                 )
             }
@@ -138,14 +156,23 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Response • Chat",
-                RelayDebugFormatter.prettyJSON(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .response,
+                    title: "Gemini Response",
+                    summary: "Chat stream completed",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: httpResponse.statusCode,
+                    body: RelayDebugFormatter.prettyJSON(
                     [
                         "status_code": httpResponse.statusCode,
                         "finish_reason": finishReason,
                         "answer_text": emittedAnswerText,
                         "thought_text": emittedThoughtText
                     ]
+                )
                 )
             )
         }
@@ -160,7 +187,7 @@ struct GeminiRelayBridge {
     func transcribeAudio(
         relayRequest: RelayTranscriptionRequest,
         apiKey: String,
-        debugLog: (@Sendable (String, String) async -> Void)? = nil
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
     ) async throws -> RelayTranscriptionResponse {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
@@ -180,12 +207,21 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Request • Transcription",
-                RelayDebugFormatter.httpRequest(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .request,
+                    title: "Gemini Request",
+                    summary: "Transcription request",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: nil,
+                    body: RelayDebugFormatter.httpRequest(
                     method: request.httpMethod ?? "POST",
                     url: request.url?.absoluteString ?? "",
                     headers: request.allHTTPHeaderFields ?? [:],
                     body: requestBody
+                )
                 )
             )
         }
@@ -198,11 +234,20 @@ struct GeminiRelayBridge {
         guard (200...299).contains(httpResponse.statusCode) else {
             if let debugLog {
                 await debugLog(
-                    "Gemini Response • Transcription Error",
-                    RelayDebugFormatter.httpResponse(
+                    RelayDebugEvent(
+                        source: .upstream,
+                        kind: .response,
+                        title: "Gemini Response",
+                        summary: "Transcription error",
+                        method: request.httpMethod ?? "POST",
+                        path: request.url?.path,
+                        address: request.url?.host,
+                        statusCode: httpResponse.statusCode,
+                        body: RelayDebugFormatter.httpResponse(
                         statusCode: httpResponse.statusCode,
                         headers: httpHeaders(from: httpResponse),
                         body: data
+                    )
                     )
                 )
             }
@@ -229,11 +274,20 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Response • Transcription",
-                RelayDebugFormatter.httpResponse(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .response,
+                    title: "Gemini Response",
+                    summary: "Transcription response",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: httpResponse.statusCode,
+                    body: RelayDebugFormatter.httpResponse(
                     statusCode: httpResponse.statusCode,
                     headers: httpHeaders(from: httpResponse),
                     body: data
+                )
                 )
             )
         }
@@ -247,7 +301,7 @@ struct GeminiRelayBridge {
     func extractMemory(
         relayRequest: RelayMemoryExtractionRequest,
         apiKey: String,
-        debugLog: (@Sendable (String, String) async -> Void)? = nil
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
     ) async throws -> RelayMemoryExtractionResponse {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
@@ -267,12 +321,21 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Request • Memory Extract",
-                RelayDebugFormatter.httpRequest(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .request,
+                    title: "Gemini Request",
+                    summary: "Memory extract request",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: nil,
+                    body: RelayDebugFormatter.httpRequest(
                     method: request.httpMethod ?? "POST",
                     url: request.url?.absoluteString ?? "",
                     headers: request.allHTTPHeaderFields ?? [:],
                     body: requestBody
+                )
                 )
             )
         }
@@ -285,11 +348,20 @@ struct GeminiRelayBridge {
         guard (200...299).contains(httpResponse.statusCode) else {
             if let debugLog {
                 await debugLog(
-                    "Gemini Response • Memory Extract Error",
-                    RelayDebugFormatter.httpResponse(
+                    RelayDebugEvent(
+                        source: .upstream,
+                        kind: .response,
+                        title: "Gemini Response",
+                        summary: "Memory extract error",
+                        method: request.httpMethod ?? "POST",
+                        path: request.url?.path,
+                        address: request.url?.host,
+                        statusCode: httpResponse.statusCode,
+                        body: RelayDebugFormatter.httpResponse(
                         statusCode: httpResponse.statusCode,
                         headers: httpHeaders(from: httpResponse),
                         body: data
+                    )
                     )
                 )
             }
@@ -313,8 +385,17 @@ struct GeminiRelayBridge {
 
         if let debugLog {
             await debugLog(
-                "Gemini Response • Memory Extract",
-                RelayDebugFormatter.prettyJSON(extractionResponse)
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .response,
+                    title: "Gemini Response",
+                    summary: "Memory extract response",
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: httpResponse.statusCode,
+                    body: RelayDebugFormatter.prettyJSON(extractionResponse)
+                )
             )
         }
 
@@ -619,16 +700,93 @@ struct GeminiRelayBridge {
             return previousParts ?? []
         }
 
-        if incomingParts.contains(where: \.hasNonSignaturePayload) {
+        let previousParts = previousParts ?? []
+        guard previousParts.isEmpty == false else {
             return incomingParts
         }
 
-        var mergedParts = previousParts ?? []
-        for part in incomingParts where mergedParts.contains(part) == false {
-            mergedParts.append(part)
+        let overlap = largestGeminiPartSequenceOverlap(
+            previousParts: previousParts,
+            incomingParts: incomingParts
+        )
+
+        guard overlap > 0 else {
+            return previousParts + incomingParts
         }
 
+        var mergedParts = Array(previousParts.dropLast(overlap))
+        let previousOverlap = previousParts.suffix(overlap)
+        let incomingOverlap = incomingParts.prefix(overlap)
+
+        for (previousPart, incomingPart) in zip(previousOverlap, incomingOverlap) {
+            mergedParts.append(
+                mergeEquivalentGeminiStreamPart(
+                    previousPart: previousPart,
+                    incomingPart: incomingPart
+                )
+            )
+        }
+
+        mergedParts.append(contentsOf: incomingParts.dropFirst(overlap))
         return mergedParts
+    }
+
+    private func largestGeminiPartSequenceOverlap(
+        previousParts: [GeminiPartPayload],
+        incomingParts: [GeminiPartPayload]
+    ) -> Int {
+        let maxOverlap = min(previousParts.count, incomingParts.count)
+        guard maxOverlap > 0 else {
+            return 0
+        }
+
+        for overlap in stride(from: maxOverlap, through: 1, by: -1) {
+            let previousSuffix = previousParts.suffix(overlap)
+            let incomingPrefix = incomingParts.prefix(overlap)
+
+            if zip(previousSuffix, incomingPrefix).allSatisfy(geminiStreamPartsEquivalent) {
+                return overlap
+            }
+        }
+
+        return 0
+    }
+
+    private func geminiStreamPartsEquivalent(
+        _ lhs: GeminiPartPayload,
+        _ rhs: GeminiPartPayload
+    ) -> Bool {
+        let lhsInlineData = lhs.inlineData
+        let rhsInlineData = rhs.inlineData
+
+        guard lhsInlineData?.mimeType == rhsInlineData?.mimeType,
+              lhsInlineData?.data == rhsInlineData?.data,
+              lhs.thought == rhs.thought,
+              lhs.thoughtSignature == rhs.thoughtSignature
+        else {
+            return false
+        }
+
+        let lhsText = lhs.text ?? ""
+        let rhsText = rhs.text ?? ""
+
+        if lhsText.isEmpty || rhsText.isEmpty {
+            return lhsText == rhsText
+        }
+
+        return lhsText == rhsText ||
+            lhsText.hasPrefix(rhsText) ||
+            rhsText.hasPrefix(lhsText)
+    }
+
+    private func mergeEquivalentGeminiStreamPart(
+        previousPart: GeminiPartPayload,
+        incomingPart: GeminiPartPayload
+    ) -> GeminiPartPayload {
+        let previousTextCount = previousPart.text?.count ?? 0
+        let incomingTextCount = incomingPart.text?.count ?? 0
+
+        return incomingTextCount >= previousTextCount ? incomingPart : previousPart
     }
 
     private func transcriptionCompletionError(

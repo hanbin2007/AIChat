@@ -19,11 +19,11 @@ struct RelayRuntimeConfiguration: Equatable, Sendable {
 @MainActor
 final class RelaySettingsStore: ObservableObject {
     @Published var geminiAPIKey: String {
-        didSet { defaults.set(geminiAPIKey, forKey: Keys.geminiAPIKey) }
+        didSet { secureStore.set(geminiAPIKey, for: .geminiAPIKey) }
     }
 
     @Published var relayBearerToken: String {
-        didSet { defaults.set(relayBearerToken, forKey: Keys.relayBearerToken) }
+        didSet { secureStore.set(relayBearerToken, for: .relayBearerToken) }
     }
 
     @Published var portText: String {
@@ -43,12 +43,29 @@ final class RelaySettingsStore: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let secureStore: RelaySecureStore
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.geminiAPIKey = defaults.string(forKey: Keys.geminiAPIKey) ?? ""
+        self.secureStore = RelaySecureStore()
 
-        let storedToken = defaults.string(forKey: Keys.relayBearerToken)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let migratedGeminiKey = defaults.string(forKey: Keys.geminiAPIKey) ?? ""
+        if secureStore.string(for: .geminiAPIKey) == nil, migratedGeminiKey.isEmpty == false {
+            secureStore.set(migratedGeminiKey, for: .geminiAPIKey)
+            defaults.removeObject(forKey: Keys.geminiAPIKey)
+        }
+
+        self.geminiAPIKey = secureStore.string(for: .geminiAPIKey) ?? ""
+
+        let legacyToken = defaults.string(forKey: Keys.relayBearerToken)
+        if secureStore.string(for: .relayBearerToken) == nil,
+           let legacyToken,
+           legacyToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            secureStore.set(legacyToken, for: .relayBearerToken)
+            defaults.removeObject(forKey: Keys.relayBearerToken)
+        }
+
+        let storedToken = secureStore.string(for: .relayBearerToken)?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.relayBearerToken = storedToken?.isEmpty == false ? storedToken! : Self.makeRelayToken()
         self.portText = defaults.string(forKey: Keys.portText) ?? "8787"
 
@@ -70,7 +87,7 @@ final class RelaySettingsStore: ObservableObject {
             self.debugLoggingEnabled = defaults.bool(forKey: Keys.debugLoggingEnabled)
         }
 
-        defaults.set(self.relayBearerToken, forKey: Keys.relayBearerToken)
+        secureStore.set(self.relayBearerToken, for: .relayBearerToken)
     }
 
     var runtimeConfiguration: RelayRuntimeConfiguration {

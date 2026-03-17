@@ -297,6 +297,7 @@ actor LocalRelayServer {
                         relayResponse,
                         path: path,
                         statusCode: 200,
+                        remoteAddress: remoteAddress,
                         enabled: configuration.debugLoggingEnabled
                     )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
@@ -349,6 +350,7 @@ actor LocalRelayServer {
                         relayResponse,
                         path: path,
                         statusCode: 200,
+                        remoteAddress: remoteAddress,
                         enabled: configuration.debugLoggingEnabled
                     )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
@@ -636,13 +638,13 @@ actor LocalRelayServer {
 
     private func debugLogger(
         enabled: Bool
-    ) -> (@Sendable (String, String) async -> Void)? {
+    ) -> (@Sendable (RelayDebugEvent) async -> Void)? {
         guard enabled else {
             return nil
         }
 
-        return { [eventHandler] title, body in
-            await eventHandler(.debug(title: title, body: body))
+        return { [eventHandler] event in
+            await eventHandler(.debug(event))
         }
     }
 
@@ -659,12 +661,21 @@ actor LocalRelayServer {
         let location = remoteAddress.map { " from \($0)" } ?? ""
         await eventHandler(
             .debug(
-                title: "Client Request • \(request.method) \(path)\(location)",
-                body: RelayDebugFormatter.httpRequest(
+                RelayDebugEvent(
+                    source: .client,
+                    kind: .request,
+                    title: "Client Request",
+                    summary: "\(request.method) \(path)\(location)",
+                    method: request.method,
+                    path: path,
+                    address: remoteAddress,
+                    statusCode: nil,
+                    body: RelayDebugFormatter.httpRequest(
                     method: request.method,
                     url: path,
                     headers: request.headers,
                     body: request.body
+                )
                 )
             )
         )
@@ -674,6 +685,7 @@ actor LocalRelayServer {
         _ payload: T,
         path: String,
         statusCode: Int,
+        remoteAddress: String?,
         enabled: Bool
     ) async {
         guard enabled else {
@@ -685,11 +697,20 @@ actor LocalRelayServer {
 
         await eventHandler(
             .debug(
-                title: "Client Response • \(path)",
-                body: RelayDebugFormatter.httpResponse(
+                RelayDebugEvent(
+                    source: .relay,
+                    kind: .response,
+                    title: "Relay Response",
+                    summary: "\(statusCode) \(path)",
+                    method: nil,
+                    path: path,
+                    address: remoteAddress,
+                    statusCode: statusCode,
+                    body: RelayDebugFormatter.httpResponse(
                     statusCode: statusCode,
                     headers: ["content-type": "application/json; charset=utf-8"],
                     body: body
+                )
                 )
             )
         )

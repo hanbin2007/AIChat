@@ -31,6 +31,7 @@ nonisolated struct AppConfiguration: Equatable {
     let relayStreamPath: String
     let relayAllowsInsecureTLS: Bool
     let appGroupIdentifier: String?
+    let iCloudContainerIdentifier: String?
 
     init(
         backendMode: AIBackendMode,
@@ -41,7 +42,8 @@ nonisolated struct AppConfiguration: Equatable {
         relayBearerToken: String?,
         relayStreamPath: String,
         relayAllowsInsecureTLS: Bool = false,
-        appGroupIdentifier: String?
+        appGroupIdentifier: String?,
+        iCloudContainerIdentifier: String? = nil
     ) {
         self.backendMode = backendMode
         self.geminiAPIKey = geminiAPIKey
@@ -52,6 +54,7 @@ nonisolated struct AppConfiguration: Equatable {
         self.relayStreamPath = relayStreamPath
         self.relayAllowsInsecureTLS = relayAllowsInsecureTLS
         self.appGroupIdentifier = appGroupIdentifier
+        self.iCloudContainerIdentifier = iCloudContainerIdentifier?.nonEmptyTrimmed
     }
 
     static func load(bundle: Bundle = .main, processInfo: ProcessInfo = .processInfo) -> AppConfiguration {
@@ -78,6 +81,11 @@ nonisolated struct AppConfiguration: Equatable {
             environment: environment
         )
         let appGroupIdentifier = value(for: "APP_GROUP_IDENTIFIER", bundle: bundle, environment: environment)
+        let iCloudContainerIdentifier = value(
+            for: "ICLOUD_CONTAINER_IDENTIFIER",
+            bundle: bundle,
+            environment: environment
+        )
 
         return AppConfiguration(
             backendMode: backendMode,
@@ -88,7 +96,8 @@ nonisolated struct AppConfiguration: Equatable {
             relayBearerToken: relayBearerToken,
             relayStreamPath: relayStreamPath,
             relayAllowsInsecureTLS: relayAllowsInsecureTLS,
-            appGroupIdentifier: appGroupIdentifier
+            appGroupIdentifier: appGroupIdentifier,
+            iCloudContainerIdentifier: iCloudContainerIdentifier
         )
     }
 

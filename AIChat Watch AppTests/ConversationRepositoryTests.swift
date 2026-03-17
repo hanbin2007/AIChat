@@ -10,6 +10,9 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class ConversationRepositoryTests: XCTestCase {
+    private let onePixelPNGBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
+
     func testSaveLoadAndDeleteConversation() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -72,5 +75,149 @@ final class ConversationRepositoryTests: XCTestCase {
         let loadedTombstones = try await repository.loadDeletedConversationTombstones()
 
         XCTAssertEqual(loadedTombstones[deletedConversationID], deletedAt)
+    }
+
+    func testSaveReturnsBlobBackedConversationAndHydratesOnLoad() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = ConversationRepository(rootURL: rootURL)
+        let attachment = try makeImageAttachment(suggestedFilename: "persisted")
+        let conversation = ConversationThread(
+            title: "Image Chat",
+            messages: [
+                ChatMessage(role: .assistant, text: "Rendered image", attachments: [attachment])
+            ]
+        )
+
+        let storedConversation = try await repository.save(conversation)
+        let storedAttachment = try XCTUnwrap(storedConversation.messages.first?.attachments.first)
+
+        XCTAssertTrue(storedAttachment.data.isEmpty)
+        XCTAssertNotNil(storedAttachment.blobFilename)
+
+        let loadedConversations = try await repository.loadConversations()
+        let loadedConversation = try XCTUnwrap(loadedConversations.first)
+        let loadedAttachment = try XCTUnwrap(loadedConversation.messages.first?.attachments.first)
+
+        XCTAssertEqual(loadedAttachment.blobFilename, storedAttachment.blobFilename)
+        XCTAssertEqual(loadedAttachment.data, attachment.data)
+    }
+
+    func testSaveRemovesObsoleteAttachmentBlob() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = ConversationRepository(rootURL: rootURL)
+        let firstAttachment = try makeImageAttachment(suggestedFilename: "first")
+        let replacementAttachment = try makeImageAttachment(suggestedFilename: "replacement")
+        let conversationID = UUID()
+        let originalConversation = ConversationThread(
+            id: conversationID,
+            title: "Blob Cleanup",
+            messages: [
+                ChatMessage(role: .assistant, text: "First", attachments: [firstAttachment])
+            ]
+        )
+
+        let storedOriginalConversation = try await repository.save(originalConversation)
+        let removedBlobFilename = try XCTUnwrap(storedOriginalConversation.messages.first?.attachments.first?.blobFilename)
+        let removedBlobURL = repository.attachmentsDirectoryURL
+            .appendingPathComponent(removedBlobFilename, isDirectory: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: removedBlobURL.path))
+
+        let replacementConversation = ConversationThread(
+            id: conversationID,
+            title: "Blob Cleanup",
+            messages: [
+                ChatMessage(role: .assistant, text: "Replacement", attachments: [replacementAttachment])
+            ]
+        )
+
+        let storedReplacementConversation = try await repository.save(replacementConversation)
+        let replacementBlobFilename = try XCTUnwrap(
+            storedReplacementConversation.messages.first?.attachments.first?.blobFilename
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: removedBlobURL.path))
+        XCTAssertNotEqual(replacementBlobFilename, removedBlobFilename)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: repository.attachmentsDirectoryURL
+                    .appendingPathComponent(replacementBlobFilename, isDirectory: false)
+                    .path
+            )
+        )
+    }
+
+    func testDeleteConversationRemovesPersistedAttachmentBlobs() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = ConversationRepository(rootURL: rootURL)
+        let attachment = try makeImageAttachment(suggestedFilename: "delete")
+        let conversation = ConversationThread(
+            title: "Delete With Attachment",
+            messages: [
+                ChatMessage(role: .assistant, text: "Image", attachments: [attachment])
+            ]
+        )
+
+        let storedConversation = try await repository.save(conversation)
+        let blobFilename = try XCTUnwrap(storedConversation.messages.first?.attachments.first?.blobFilename)
+        let blobURL = repository.attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: blobURL.path))
+
+        try await repository.deleteConversation(id: conversation.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: blobURL.path))
+    }
+
+    func testImportAttachmentBlobHydratesConversation() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = ConversationRepository(rootURL: rootURL)
+        let attachment = try makeImageAttachment(suggestedFilename: "remote")
+        let blobFilename = "remote-attachment.png"
+        let temporaryFileURL = rootURL.appendingPathComponent("incoming.png", isDirectory: false)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try attachment.data.write(to: temporaryFileURL, options: [.atomic])
+
+        _ = try await repository.importAttachmentBlob(from: temporaryFileURL, as: blobFilename)
+
+        let remoteConversation = ConversationThread(
+            title: "Hydrate Remote",
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "Remote image",
+                    attachments: [
+                        ChatAttachment(
+                            id: attachment.id,
+                            kind: .image,
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            data: Data(),
+                            blobFilename: blobFilename,
+                            pixelWidth: attachment.pixelWidth,
+                            pixelHeight: attachment.pixelHeight
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let hydratedConversation = await repository.hydrateAttachments(in: remoteConversation)
+
+        XCTAssertEqual(
+            hydratedConversation.messages.first?.attachments.first?.data,
+            attachment.data
+        )
+    }
+
+    private func makeImageAttachment(suggestedFilename: String) throws -> ChatAttachment {
+        let data = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
+        return try ChatAttachment.makeModelGeneratedImage(
+            from: data,
+            mimeType: "image/png",
+            suggestedFilename: suggestedFilename
+        )
     }
 }

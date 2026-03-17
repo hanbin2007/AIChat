@@ -29,6 +29,11 @@ private enum CompanionConversationRendering {
     static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
 }
 
+private struct CompanionToolSettingsDraft: Equatable {
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
+}
+
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -39,7 +44,9 @@ struct CompanionConversationDetailView: View {
     @State private var isShowingSettings = false
     @State private var isShowingToolSettings = false
     @State private var isShowingActivationCenter = false
-    @State private var interruptedAutoScrollMessageID: UUID?
+    @State private var isAutoScrollInterrupted = false
+    @State private var activeAutoScrollSessionMessageID: UUID?
+    @State private var interruptedAutoScrollSessionMessageID: UUID?
     @State private var suspendedStreamingRenderMessageID: UUID?
     @State private var pendingHistoryAnchorMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
@@ -51,6 +58,7 @@ struct CompanionConversationDetailView: View {
     @State private var lastObservedMessageCount = 0
     @State private var lastObservedHistoryCost = 0
     @State private var isPreparingHistory = true
+    @State private var toolSettingsDraft: CompanionToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
 
@@ -89,7 +97,7 @@ struct CompanionConversationDetailView: View {
         .sheet(isPresented: $isShowingSettings) {
             CompanionConversationSettingsView(conversationID: conversationID)
         }
-        .sheet(isPresented: $isShowingToolSettings) {
+        .sheet(isPresented: $isShowingToolSettings, onDismiss: commitToolSettingsDraft) {
             conversationToolSheet
         }
         .sheet(isPresented: $isShowingActivationCenter) {
@@ -121,10 +129,13 @@ struct CompanionConversationDetailView: View {
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
         }
+        .accessibilityIdentifier("companion.conversation.detail")
     }
 
     private func conversationContent(_ conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
+        let latestAssistantMessageID = latestAssistantMessageID(in: conversation.messages)
+        let autoScrollSessionMessageID = activeAutoScrollSessionMessageID ?? latestAssistantMessageID
         let visibleMessages = visibleMessages(in: conversation)
         let hiddenMessageCount = max(conversation.messages.count - visibleMessages.count, 0)
 
@@ -206,18 +217,32 @@ struct CompanionConversationDetailView: View {
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        pauseStreamingRefresh(for: streamingMessageID)
+                    .onChanged { value in
+                        guard abs(value.translation.height) > 6,
+                              isPredominantlyVertical(value.translation)
+                        else {
+                            return
+                        }
+
+                        pauseStreamingRefresh(
+                            for: streamingMessageID,
+                            autoScrollSessionMessageID: autoScrollSessionMessageID
+                        )
                     }
             )
             .onPreferenceChange(CompanionConversationViewportHeightPreferenceKey.self) { height in
                 messagesViewportHeight = height
             }
             .onPreferenceChange(CompanionConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
-                handleBottomAnchorPositionChange(maxY, streamingMessageID: streamingMessageID)
+                handleBottomAnchorPositionChange(
+                    maxY,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                )
             }
             .onAppear {
-                interruptedAutoScrollMessageID = nil
+                activeAutoScrollSessionMessageID = latestAssistantMessageID
+                isAutoScrollInterrupted = false
+                interruptedAutoScrollSessionMessageID = nil
                 suspendedStreamingRenderMessageID = nil
                 pendingHistoryAnchorMessageID = nil
                 streamingRenderResumeTask?.cancel()
@@ -226,7 +251,7 @@ struct CompanionConversationDetailView: View {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
                     force: true
                 )
             }
@@ -235,7 +260,7 @@ struct CompanionConversationDetailView: View {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: true,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: renderedMessageBudget) { newBudget in
@@ -256,27 +281,28 @@ struct CompanionConversationDetailView: View {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID,
-                    force: true
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: conversation.updatedAt) { _ in
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: chatStore.isSending(conversationID: conversationID)) { _ in
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
-                    streamingMessageID: streamingMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
             .onChange(of: streamingMessageID) { newMessageID in
                 handleStreamingMessageChange(
                     newMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID,
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
                     with: proxy
                 )
             }
@@ -587,9 +613,7 @@ struct CompanionConversationDetailView: View {
                             }
                     )
 
-                    Button {
-                        isShowingToolSettings = true
-                    } label: {
+                    Button(action: presentToolSettings) {
                         HStack(spacing: 6) {
                             ForEach(toolButtonSymbols(for: aiConfiguration), id: \.self) { symbolName in
                                 Image(systemName: symbolName)
@@ -602,7 +626,10 @@ struct CompanionConversationDetailView: View {
                     .buttonStyle(.bordered)
                     .tint(toolButtonTint(for: aiConfiguration))
                     .disabled(voiceRecorder.isRecording || isTranscribing)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+                    .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
+                    .accessibilityIdentifier("conversation.tool-entry")
 
                     Button {
                         if canRestorePreviousMessage {
@@ -644,7 +671,9 @@ struct CompanionConversationDetailView: View {
             Form {
                 Section {
                     Toggle("联网搜索", isOn: googleSearchEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-search")
                     Toggle("运行代码", isOn: codeExecutionEnabledBinding())
+                        .accessibilityIdentifier("conversation.tool-code")
                 } footer: {
                     Text("是否可用取决于当前 Gemini 模型是否支持对应工具。")
                 }
@@ -658,8 +687,10 @@ struct CompanionConversationDetailView: View {
                         Label("添加图片", systemImage: "photo.on.rectangle")
                     }
                     .disabled(voiceRecorder.isRecording || chatStore.isTranscribing(conversationID: conversationID))
+                    .accessibilityIdentifier("conversation.tool-photo-picker")
                 }
             }
+            .accessibilityIdentifier("conversation.tool-sheet")
             .navigationTitle("工具与图片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -667,6 +698,7 @@ struct CompanionConversationDetailView: View {
                     Button("完成") {
                         isShowingToolSettings = false
                     }
+                    .accessibilityIdentifier("conversation.tool-done")
                 }
             }
         }
@@ -788,6 +820,7 @@ struct CompanionConversationDetailView: View {
     }
 
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
+        isAutoScrollInterrupted = false
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(CompanionConversationScrollLayout.suppressionDuration)
 
         if animated {
@@ -825,40 +858,53 @@ struct CompanionConversationDetailView: View {
     private func scrollToBottomIfNeeded(
         with proxy: ScrollViewProxy,
         animated: Bool,
-        streamingMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?,
         force: Bool = false
     ) {
-        guard force || shouldAutoScroll(for: streamingMessageID) else {
+        guard force || shouldAutoScroll(for: autoScrollSessionMessageID) else {
             return
         }
 
         scrollToBottom(with: proxy, animated: animated)
     }
 
-    private func shouldAutoScroll(for streamingMessageID: UUID?) -> Bool {
-        guard let streamingMessageID else {
-            return interruptedAutoScrollMessageID == nil
+    private func shouldAutoScroll(for autoScrollSessionMessageID: UUID?) -> Bool {
+        if interruptedAutoScrollSessionMessageID == autoScrollSessionMessageID,
+           interruptedAutoScrollSessionMessageID != nil {
+            return false
         }
 
-        return interruptedAutoScrollMessageID != streamingMessageID
+        return isAutoScrollInterrupted == false
     }
 
     private func handleStreamingMessageChange(
         _ streamingMessageID: UUID?,
+        latestAssistantMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?,
         with proxy: ScrollViewProxy
     ) {
         if let streamingMessageID {
-            interruptedAutoScrollMessageID = nil
+            activeAutoScrollSessionMessageID = streamingMessageID
+
+            if interruptedAutoScrollSessionMessageID != nil,
+               interruptedAutoScrollSessionMessageID != streamingMessageID {
+                interruptedAutoScrollSessionMessageID = nil
+                isAutoScrollInterrupted = false
+            }
+
             suspendedStreamingRenderMessageID = nil
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
             scrollToBottomIfNeeded(
                 with: proxy,
                 animated: false,
-                streamingMessageID: streamingMessageID,
-                force: true
+                autoScrollSessionMessageID: autoScrollSessionMessageID
             )
             return
+        }
+
+        if let latestAssistantMessageID {
+            activeAutoScrollSessionMessageID = latestAssistantMessageID
         }
 
         suspendedStreamingRenderMessageID = nil
@@ -867,29 +913,32 @@ struct CompanionConversationDetailView: View {
         scrollToBottomIfNeeded(
             with: proxy,
             animated: false,
-            streamingMessageID: nil
+            autoScrollSessionMessageID: autoScrollSessionMessageID
         )
     }
 
-    private func interruptAutoScroll(for streamingMessageID: UUID?) {
-        guard let streamingMessageID else {
-            return
-        }
+    private func interruptAutoScroll(for autoScrollSessionMessageID: UUID?) {
+        isAutoScrollInterrupted = true
 
-        interruptedAutoScrollMessageID = streamingMessageID
+        if let autoScrollSessionMessageID {
+            interruptedAutoScrollSessionMessageID = autoScrollSessionMessageID
+        }
     }
 
-    private func interruptAutoScrollImmediately(for streamingMessageID: UUID?) {
-        guard interruptedAutoScrollMessageID != streamingMessageID else {
+    private func interruptAutoScrollImmediately(for autoScrollSessionMessageID: UUID?) {
+        guard shouldAutoScroll(for: autoScrollSessionMessageID) else {
             return
         }
 
         scrollInterruptionsSuppressedUntil = .distantPast
-        interruptAutoScroll(for: streamingMessageID)
+        interruptAutoScroll(for: autoScrollSessionMessageID)
     }
 
-    private func pauseStreamingRefresh(for streamingMessageID: UUID?) {
-        interruptAutoScrollImmediately(for: streamingMessageID)
+    private func pauseStreamingRefresh(
+        for streamingMessageID: UUID?,
+        autoScrollSessionMessageID: UUID?
+    ) {
+        interruptAutoScrollImmediately(for: autoScrollSessionMessageID)
         suspendStreamingRender(for: streamingMessageID)
     }
 
@@ -921,9 +970,11 @@ struct CompanionConversationDetailView: View {
         }
     }
 
-    private func handleBottomAnchorPositionChange(_ maxY: CGFloat, streamingMessageID: UUID?) {
-        guard let streamingMessageID,
-              Date.now >= scrollInterruptionsSuppressedUntil,
+    private func handleBottomAnchorPositionChange(
+        _ maxY: CGFloat,
+        autoScrollSessionMessageID: UUID?
+    ) {
+        guard Date.now >= scrollInterruptionsSuppressedUntil,
               messagesViewportHeight > 0
         else {
             return
@@ -931,10 +982,15 @@ struct CompanionConversationDetailView: View {
 
         let distanceFromBottom = maxY - messagesViewportHeight
         guard distanceFromBottom > CompanionConversationScrollLayout.interruptionThreshold else {
+            guard interruptedAutoScrollSessionMessageID != autoScrollSessionMessageID else {
+                return
+            }
+
+            isAutoScrollInterrupted = false
             return
         }
 
-        interruptAutoScroll(for: streamingMessageID)
+        interruptAutoScroll(for: autoScrollSessionMessageID)
     }
 
     private func recordingStatusTitle() -> String {
@@ -1053,6 +1109,7 @@ struct CompanionConversationDetailView: View {
             return
         }
 
+        interruptAutoScroll(for: activeAutoScrollSessionMessageID ?? latestAssistantMessageID(in: messages))
         pendingHistoryAnchorMessageID = ConversationHistoryRenderBudget.lastHiddenMessageID(
             in: messages,
             budget: renderedMessageBudget
@@ -1082,12 +1139,12 @@ struct CompanionConversationDetailView: View {
     private func googleSearchEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
+                toolSettingsDraft?.usesGoogleSearch ??
+                    chatStore.aiConfiguration(for: conversationID).usesGoogleSearch
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateGoogleSearchEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesGoogleSearch = newValue
             }
         )
     }
@@ -1095,13 +1152,53 @@ struct CompanionConversationDetailView: View {
     private func codeExecutionEnabledBinding() -> Binding<Bool> {
         Binding(
             get: {
-                chatStore.aiConfiguration(for: conversationID).usesCodeExecution
+                toolSettingsDraft?.usesCodeExecution ??
+                    chatStore.aiConfiguration(for: conversationID).usesCodeExecution
             },
             set: { newValue in
-                Task {
-                    await chatStore.updateCodeExecutionEnabled(newValue, for: conversationID)
-                }
+                ensureToolSettingsDraft()
+                toolSettingsDraft?.usesCodeExecution = newValue
             }
+        )
+    }
+
+    private func presentToolSettings() {
+        toolSettingsDraft = currentToolSettingsDraft()
+        isShowingToolSettings = true
+    }
+
+    private func ensureToolSettingsDraft() {
+        if toolSettingsDraft == nil {
+            toolSettingsDraft = currentToolSettingsDraft()
+        }
+    }
+
+    private func currentToolSettingsDraft() -> CompanionToolSettingsDraft {
+        let configuration = chatStore.aiConfiguration(for: conversationID)
+        return CompanionToolSettingsDraft(
+            usesGoogleSearch: configuration.usesGoogleSearch,
+            usesCodeExecution: configuration.usesCodeExecution
+        )
+    }
+
+    private func commitToolSettingsDraft() {
+        guard let draft = toolSettingsDraft else {
+            return
+        }
+
+        toolSettingsDraft = nil
+
+        let currentConfiguration = chatStore.aiConfiguration(for: conversationID)
+        guard currentConfiguration.usesGoogleSearch != draft.usesGoogleSearch ||
+                currentConfiguration.usesCodeExecution != draft.usesCodeExecution
+        else {
+            return
+        }
+
+        chatStore.setToolPreferences(
+            usesGoogleSearch: draft.usesGoogleSearch,
+            usesCodeExecution: draft.usesCodeExecution,
+            for: conversationID
         )
     }
 
@@ -1138,6 +1235,27 @@ struct CompanionConversationDetailView: View {
         }
 
         return "工具与图片，已启用\(enabledFeatures.joined(separator: "、"))"
+    }
+
+    private func toolButtonAccessibilityValue(for configuration: ConversationAIConfiguration) -> String {
+        let enabledFeatures = [
+            configuration.usesGoogleSearch ? "联网搜索" : nil,
+            configuration.usesCodeExecution ? "运行代码" : nil
+        ].compactMap { $0 }
+
+        guard enabledFeatures.isEmpty == false else {
+            return "未启用附加工具"
+        }
+
+        return enabledFeatures.joined(separator: "、")
+    }
+
+    private func isPredominantlyVertical(_ translation: CGSize) -> Bool {
+        abs(translation.height) > abs(translation.width)
+    }
+
+    private func latestAssistantMessageID(in messages: [ChatMessage]) -> UUID? {
+        messages.last(where: { $0.role == .assistant })?.id
     }
 }
 

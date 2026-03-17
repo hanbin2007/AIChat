@@ -16,12 +16,19 @@ final class RelayServerController: ObservableObject {
     @Published private(set) var logEntries: [RelayLogEntry] = []
     @Published private(set) var debugEntries: [RelayDebugEntry] = []
     @Published private(set) var requestCount: Int = 0
+    @Published private(set) var completedRequestCount: Int = 0
+    @Published private(set) var failedRequestCount: Int = 0
     @Published private(set) var lastRequestAt: Date?
+    @Published private(set) var lastFailureAt: Date?
+    @Published private(set) var lastFailureMessage: String?
+    @Published private(set) var startedAt: Date?
+    @Published private(set) var feedback: RelayActionFeedback?
 
     let settings: RelaySettingsStore
 
     private var hasHandledInitialLaunch = false
     private var cancellables: Set<AnyCancellable> = []
+    private var feedbackDismissTask: Task<Void, Never>?
     private let eventSink: RelayServerEventSink
     private let server: LocalRelayServer
 
@@ -128,6 +135,58 @@ final class RelayServerController: ObservableObject {
         "\(recommendedClientBaseURL)/health"
     }
 
+    var activeBindingMode: String {
+        settings.allowNetworkClients ? "LAN + Localhost" : "Localhost only"
+    }
+
+    var requestSuccessRate: Double? {
+        let total = completedRequestCount + failedRequestCount
+        guard total > 0 else {
+            return nil
+        }
+
+        return Double(completedRequestCount) / Double(total)
+    }
+
+    var setupSteps: [RelaySetupStep] {
+        [
+            RelaySetupStep(
+                title: "Gemini access",
+                detail: settings.geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Add a Gemini API key to enable upstream requests."
+                    : "API key is stored securely in the macOS Keychain.",
+                status: settings.geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .blocked : .complete
+            ),
+            RelaySetupStep(
+                title: "Relay authentication",
+                detail: settings.relayBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "Generate or paste a bearer token for client authentication."
+                    : "Bearer token is ready and copied into generated client snippets.",
+                status: settings.relayBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .blocked : .complete
+            ),
+            RelaySetupStep(
+                title: "Listener configuration",
+                detail: settings.validatedPort == nil
+                    ? "Choose a valid TCP port before the relay can bind."
+                    : "Relay will bind to port \(settings.runtimeConfiguration.port) in \(activeBindingMode.lowercased()).",
+                status: settings.validatedPort == nil ? .blocked : .complete
+            ),
+            RelaySetupStep(
+                title: "Traffic acceptance",
+                detail: isRunning
+                    ? "Relay is online and ready to receive AIChat requests."
+                    : configurationIssue == nil
+                        ? "Start the relay to expose `/health` and API endpoints."
+                        : "Resolve the configuration issues above, then start the relay.",
+                status: isRunning ? .complete : (configurationIssue == nil ? .pending : .blocked)
+            )
+        ]
+    }
+
+    var completedSetupStepCount: Int {
+        setupSteps.filter { $0.status == .complete }.count
+    }
+
     var clientConfigurationSnippet: String {
         """
         AI_BACKEND_MODE = relay
@@ -160,6 +219,11 @@ final class RelayServerController: ObservableObject {
         if let configurationIssue = configurationIssue {
             status = .failed(configurationIssue)
             appendLog(level: .error, message: configurationIssue)
+            showFeedback(
+                title: "Configuration Required",
+                message: configurationIssue,
+                style: .warning
+            )
             return
         }
 
@@ -172,6 +236,11 @@ final class RelayServerController: ObservableObject {
             let message = error.localizedDescription
             status = .failed(message)
             appendLog(level: .error, message: "Relay failed to start: \(message)")
+            showFeedback(
+                title: "Relay Failed",
+                message: message,
+                style: .error
+            )
         }
     }
 
@@ -197,34 +266,99 @@ final class RelayServerController: ObservableObject {
     func regenerateRelayToken() {
         settings.regenerateRelayToken()
         appendLog(level: .info, message: "Generated a new relay bearer token.")
+        showFeedback(
+            title: "Relay Token Updated",
+            message: "A new bearer token was generated and stored in the Keychain.",
+            style: .success
+        )
     }
 
     func copyToPasteboard(_ value: String, label: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
         appendLog(level: .info, message: "Copied \(label) to the pasteboard.")
+        showFeedback(
+            title: "Copied",
+            message: "Copied \(label) to the pasteboard.",
+            style: .success
+        )
     }
 
     func clearDebugEntries() {
         debugEntries.removeAll()
         appendLog(level: .info, message: "Cleared relay debug entries.")
+        showFeedback(
+            title: "Debug Cleared",
+            message: "Removed captured debug payloads from the dashboard.",
+            style: .info
+        )
+    }
+
+    func clearLogEntries() {
+        logEntries.removeAll()
+        showFeedback(
+            title: "Activity Cleared",
+            message: "Removed activity log entries from the dashboard.",
+            style: .info
+        )
+    }
+
+    func openHealthURL() {
+        guard let url = URL(string: relayHealthURL) else {
+            showFeedback(
+                title: "Invalid URL",
+                message: "The health endpoint could not be opened because the relay URL is invalid.",
+                style: .error
+            )
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+        appendLog(level: .info, message: "Opened the relay health endpoint in the default browser.")
+        showFeedback(
+            title: "Health Check Opened",
+            message: "Opened \(relayHealthURL) in the default browser.",
+            style: .info
+        )
+    }
+
+    func dismissFeedback() {
+        feedbackDismissTask?.cancel()
+        feedbackDismissTask = nil
+        feedback = nil
     }
 
     private func handleServerEvent(_ event: RelayServerEvent) {
         switch event {
-        case .didStart:
+        case .didStart(let port):
             status = .running
+            startedAt = .now
+            showFeedback(
+                title: "Relay Online",
+                message: "Listening on port \(port) and ready to accept requests.",
+                style: .success
+            )
         case .didStop:
             status = .stopped
+            startedAt = nil
             appendLog(level: .info, message: "Relay server stopped.")
+            showFeedback(
+                title: "Relay Stopped",
+                message: "The local relay listener has been stopped.",
+                style: .info
+            )
         case .didReceiveRequest(let path, let remoteAddress):
             requestCount += 1
             lastRequestAt = .now
             appendLog(level: .info, message: requestLogMessage(prefix: "Received", path: path, remoteAddress: remoteAddress))
         case .didCompleteRequest(let path, let remoteAddress):
+            completedRequestCount += 1
             appendLog(level: .success, message: requestLogMessage(prefix: "Completed", path: path, remoteAddress: remoteAddress))
         case .didFailRequest(let path, let remoteAddress, let statusCode, let message):
             let level: RelayLogLevel = statusCode >= 500 ? .error : .warning
+            failedRequestCount += 1
+            lastFailureAt = .now
+            lastFailureMessage = message
             appendLog(
                 level: level,
                 message: requestLogMessage(
@@ -234,13 +368,19 @@ final class RelayServerController: ObservableObject {
                     suffix: message
                 )
             )
-        case .debug(let title, let body):
-            appendDebug(title: title, body: body)
+        case .debug(let event):
+            appendDebug(event)
         case .log(let level, let message):
             appendLog(level: level, message: message)
         case .listenerFailed(let message):
             status = .failed(message)
+            startedAt = nil
             appendLog(level: .error, message: "Listener failed: \(message)")
+            showFeedback(
+                title: "Relay Failed",
+                message: message,
+                style: .error
+            )
         }
     }
 
@@ -258,17 +398,24 @@ final class RelayServerController: ObservableObject {
         }
     }
 
-    private func appendDebug(title: String, body: String) {
+    private func appendDebug(_ event: RelayDebugEvent) {
         debugEntries.append(
             RelayDebugEntry(
                 timestamp: .now,
-                title: title,
-                body: body
+                source: event.source,
+                kind: event.kind,
+                title: event.title,
+                summary: event.summary,
+                method: event.method,
+                path: event.path,
+                address: event.address,
+                statusCode: event.statusCode,
+                body: event.body
             )
         )
 
-        if debugEntries.count > 60 {
-            debugEntries.removeFirst(debugEntries.count - 60)
+        if debugEntries.count > 150 {
+            debugEntries.removeFirst(debugEntries.count - 150)
         }
     }
 
@@ -314,6 +461,34 @@ final class RelayServerController: ObservableObject {
 
     private static func xcconfigEscaped(_ value: String) -> String {
         value.replacingOccurrences(of: "//", with: "/$()/")
+    }
+
+    private func showFeedback(
+        title: String,
+        message: String,
+        style: RelayFeedbackStyle
+    ) {
+        feedbackDismissTask?.cancel()
+
+        let newFeedback = RelayActionFeedback(
+            title: title,
+            message: message,
+            style: style
+        )
+        feedback = newFeedback
+
+        feedbackDismissTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_200_000_000)
+
+            await MainActor.run {
+                guard let self, self.feedback?.id == newFeedback.id else {
+                    return
+                }
+
+                self.feedback = nil
+                self.feedbackDismissTask = nil
+            }
+        }
     }
 }
 
