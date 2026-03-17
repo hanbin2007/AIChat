@@ -901,12 +901,14 @@ nonisolated enum ConversationHistoryRenderBudget {
         }
 
         let clampedBudget = max(budget, 1)
+        let minimumVisibleCount = minimumVisibleCountForLatestExchange(in: messages)
         var accumulatedCost = 0
         var visibleCount = 0
 
         for message in messages.reversed() {
             let messageCost = cost(of: message)
-            if visibleCount > 0 && accumulatedCost + messageCost > clampedBudget {
+            if visibleCount >= minimumVisibleCount &&
+                accumulatedCost + messageCost > clampedBudget {
                 break
             }
 
@@ -914,7 +916,7 @@ nonisolated enum ConversationHistoryRenderBudget {
             visibleCount += 1
         }
 
-        return max(visibleCount, 1)
+        return max(visibleCount, minimumVisibleCount)
     }
 
     static func lastHiddenMessageID(
@@ -998,6 +1000,14 @@ nonisolated enum ConversationHistoryRenderBudget {
         }
 
         return max(cost, 1)
+    }
+
+    private static func minimumVisibleCountForLatestExchange(in messages: [ChatMessage]) -> Int {
+        guard let latestUserIndex = messages.lastIndex(where: { $0.role == .user }) else {
+            return 1
+        }
+
+        return max(messages.count - latestUserIndex, 1)
     }
 
     private static func overflowUnits(
