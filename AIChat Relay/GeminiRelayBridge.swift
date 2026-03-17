@@ -700,16 +700,93 @@ struct GeminiRelayBridge {
             return previousParts ?? []
         }
 
-        if incomingParts.contains(where: \.hasNonSignaturePayload) {
+        let previousParts = previousParts ?? []
+        guard previousParts.isEmpty == false else {
             return incomingParts
         }
 
-        var mergedParts = previousParts ?? []
-        for part in incomingParts where mergedParts.contains(part) == false {
-            mergedParts.append(part)
+        let overlap = largestGeminiPartSequenceOverlap(
+            previousParts: previousParts,
+            incomingParts: incomingParts
+        )
+
+        guard overlap > 0 else {
+            return previousParts + incomingParts
         }
 
+        var mergedParts = Array(previousParts.dropLast(overlap))
+        let previousOverlap = previousParts.suffix(overlap)
+        let incomingOverlap = incomingParts.prefix(overlap)
+
+        for (previousPart, incomingPart) in zip(previousOverlap, incomingOverlap) {
+            mergedParts.append(
+                mergeEquivalentGeminiStreamPart(
+                    previousPart: previousPart,
+                    incomingPart: incomingPart
+                )
+            )
+        }
+
+        mergedParts.append(contentsOf: incomingParts.dropFirst(overlap))
         return mergedParts
+    }
+
+    private func largestGeminiPartSequenceOverlap(
+        previousParts: [GeminiPartPayload],
+        incomingParts: [GeminiPartPayload]
+    ) -> Int {
+        let maxOverlap = min(previousParts.count, incomingParts.count)
+        guard maxOverlap > 0 else {
+            return 0
+        }
+
+        for overlap in stride(from: maxOverlap, through: 1, by: -1) {
+            let previousSuffix = previousParts.suffix(overlap)
+            let incomingPrefix = incomingParts.prefix(overlap)
+
+            if zip(previousSuffix, incomingPrefix).allSatisfy(geminiStreamPartsEquivalent) {
+                return overlap
+            }
+        }
+
+        return 0
+    }
+
+    private func geminiStreamPartsEquivalent(
+        _ lhs: GeminiPartPayload,
+        _ rhs: GeminiPartPayload
+    ) -> Bool {
+        let lhsInlineData = lhs.inlineData
+        let rhsInlineData = rhs.inlineData
+
+        guard lhsInlineData?.mimeType == rhsInlineData?.mimeType,
+              lhsInlineData?.data == rhsInlineData?.data,
+              lhs.thought == rhs.thought,
+              lhs.thoughtSignature == rhs.thoughtSignature
+        else {
+            return false
+        }
+
+        let lhsText = lhs.text ?? ""
+        let rhsText = rhs.text ?? ""
+
+        if lhsText.isEmpty || rhsText.isEmpty {
+            return lhsText == rhsText
+        }
+
+        return lhsText == rhsText ||
+            lhsText.hasPrefix(rhsText) ||
+            rhsText.hasPrefix(lhsText)
+    }
+
+    private func mergeEquivalentGeminiStreamPart(
+        previousPart: GeminiPartPayload,
+        incomingPart: GeminiPartPayload
+    ) -> GeminiPartPayload {
+        let previousTextCount = previousPart.text?.count ?? 0
+        let incomingTextCount = incomingPart.text?.count ?? 0
+
+        return incomingTextCount >= previousTextCount ? incomingPart : previousPart
     }
 
     private func transcriptionCompletionError(

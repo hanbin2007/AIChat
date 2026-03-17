@@ -287,6 +287,64 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertEqual(merged.last?.thoughtSignature, "sig-final")
     }
 
+    func testMergeGeminiStreamModelResponsePartsAccumulatesAllIncomingParts() {
+        let firstChunk = [
+            GeminiPartPayload(text: "第一段思考", thought: true)
+        ]
+        let secondChunk = [
+            GeminiPartPayload(text: "第二段思考", thought: true),
+            GeminiPartPayload(text: "第一段回答")
+        ]
+        let thirdChunk = [
+            GeminiPartPayload(text: "第二段回答"),
+            GeminiPartPayload(text: "", thoughtSignature: "sig-final")
+        ]
+
+        let mergedAfterFirst = mergeGeminiStreamModelResponseParts(
+            previousParts: nil,
+            incomingParts: firstChunk
+        )
+        let mergedAfterSecond = mergeGeminiStreamModelResponseParts(
+            previousParts: mergedAfterFirst,
+            incomingParts: secondChunk
+        )
+        let mergedAfterThird = mergeGeminiStreamModelResponseParts(
+            previousParts: mergedAfterSecond,
+            incomingParts: thirdChunk
+        )
+
+        XCTAssertEqual(
+            mergedAfterThird,
+            [
+                GeminiPartPayload(text: "第一段思考", thought: true),
+                GeminiPartPayload(text: "第二段思考", thought: true),
+                GeminiPartPayload(text: "第一段回答"),
+                GeminiPartPayload(text: "第二段回答"),
+                GeminiPartPayload(text: "", thoughtSignature: "sig-final")
+            ]
+        )
+    }
+
+    func testMergeGeminiStreamModelResponsePartsReplacesOverlappingSnapshotPrefix() {
+        let merged = mergeGeminiStreamModelResponseParts(
+            previousParts: [
+                GeminiPartPayload(text: "正在推导", thought: true)
+            ],
+            incomingParts: [
+                GeminiPartPayload(text: "正在推导更完整版本", thought: true),
+                GeminiPartPayload(text: "最终结论")
+            ]
+        )
+
+        XCTAssertEqual(
+            merged,
+            [
+                GeminiPartPayload(text: "正在推导更完整版本", thought: true),
+                GeminiPartPayload(text: "最终结论")
+            ]
+        )
+    }
+
     func testGemini3RequestUsesThinkingLevel() {
         let conversation = ConversationThread(
             messages: [ChatMessage(role: .user, text: "Explain this image")],
@@ -2984,7 +3042,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 in: messages,
                 budget: 10
             ),
-            1
+            2
         )
     }
 
@@ -3014,6 +3072,39 @@ final class AIChat_Watch_AppTests: XCTestCase {
             count: 1,
             text: String(repeating: "Very long answer ", count: 400)
         )
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: 1
+            ),
+            1
+        )
+    }
+
+    func testConversationHistoryRenderBudgetAlwaysKeepsLatestExchangeVisible() {
+        let messages = [
+            ChatMessage(role: .user, text: "Older question"),
+            ChatMessage(role: .assistant, text: "Older answer"),
+            ChatMessage(role: .user, text: "Latest question"),
+            ChatMessage(role: .assistant, text: String(repeating: "Very long answer ", count: 400))
+        ]
+
+        XCTAssertEqual(
+            ConversationHistoryRenderBudget.visibleMessageCount(
+                in: messages,
+                budget: 1
+            ),
+            2
+        )
+    }
+
+    func testConversationHistoryRenderBudgetKeepsPendingLatestUserMessageVisible() {
+        let messages = [
+            ChatMessage(role: .user, text: "Older question"),
+            ChatMessage(role: .assistant, text: "Older answer"),
+            ChatMessage(role: .user, text: String(repeating: "Latest pending request ", count: 300))
+        ]
 
         XCTAssertEqual(
             ConversationHistoryRenderBudget.visibleMessageCount(
