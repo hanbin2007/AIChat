@@ -86,7 +86,7 @@ nonisolated struct ConversationSyncStoreState: Equatable {
         local localState: ConversationSyncStoreState,
         remote remoteState: ConversationSyncStoreState
     ) -> ConversationSyncStoreState {
-        var mergedTombstones = mergeDeletedConversationTombstones(
+        let mergedTombstones = mergeDeletedConversationTombstones(
             localState.deletedConversationTombstones,
             remoteState.deletedConversationTombstones
         )
@@ -105,15 +105,10 @@ nonisolated struct ConversationSyncStoreState: Equatable {
         }
 
         let survivingConversations = latestConversationByID.values.compactMap { conversation -> ConversationThread? in
-            guard let deletedAt = mergedTombstones[conversation.id] else {
-                return conversation
-            }
-
-            guard conversation.updatedAt > deletedAt else {
+            guard mergedTombstones[conversation.id] == nil else {
                 return nil
             }
 
-            mergedTombstones.removeValue(forKey: conversation.id)
             return conversation
         }
         .sorted(by: ConversationThread.sortsByMostRecentFirst)

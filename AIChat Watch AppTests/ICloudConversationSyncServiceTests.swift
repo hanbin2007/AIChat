@@ -103,7 +103,7 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
                 id: conversationID,
                 title: "Cloud Copy",
                 createdAt: Date(timeIntervalSince1970: 10),
-                updatedAt: Date(timeIntervalSince1970: 20),
+                updatedAt: Date(timeIntervalSince1970: 120),
                 messages: [ChatMessage(role: .assistant, text: "should be deleted")]
             )
         )
@@ -115,7 +115,7 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
                     id: conversationID,
                     title: "Local Copy",
                     createdAt: Date(timeIntervalSince1970: 10),
-                    updatedAt: Date(timeIntervalSince1970: 30),
+                    updatedAt: Date(timeIntervalSince1970: 130),
                     messages: [ChatMessage(role: .assistant, text: "also deleted")]
                 )
             ]

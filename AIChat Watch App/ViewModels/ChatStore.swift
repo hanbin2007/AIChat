@@ -1670,7 +1670,7 @@ final class ChatStore: ObservableObject {
         for conversation: ConversationThread,
         allowResurrectionFromDeletedState: Bool
     ) -> Bool {
-        guard let deletedAt = deletedConversationTombstones[conversation.id] else {
+        guard deletedConversationTombstones[conversation.id] != nil else {
             return true
         }
 
@@ -1678,11 +1678,7 @@ final class ChatStore: ObservableObject {
             return true
         }
 
-        guard allowResurrectionFromDeletedState else {
-            return false
-        }
-
-        return conversation.updatedAt > deletedAt
+        return false
     }
 
     func mergeRemoteConversation(_ conversation: ConversationThread) async {
@@ -1733,12 +1729,6 @@ final class ChatStore: ObservableObject {
         _ incomingTombstones: [CompanionDeletedConversationTombstone]
     ) async {
         for tombstone in mergedDeletedConversationTombstones(incomingTombstones) {
-            if let localConversation = conversation(id: tombstone.id),
-               localConversation.updatedAt > tombstone.deletedAt {
-                syncBridge.pushConversation(localConversation)
-                continue
-            }
-
             await deleteConversation(id: tombstone.id, deletedAt: tombstone.deletedAt, sync: false)
         }
     }
@@ -2633,11 +2623,7 @@ final class ChatStore: ObservableObject {
     }
 
     private func shouldAcceptRemoteConversation(_ conversation: ConversationThread) -> Bool {
-        guard let deletedAt = deletedConversationTombstones[conversation.id] else {
-            return true
-        }
-
-        return conversation.updatedAt > deletedAt
+        deletedConversationTombstones[conversation.id] == nil
     }
 
     private func mergedDeletedConversationTombstones(
@@ -2672,29 +2658,20 @@ final class ChatStore: ObservableObject {
         _ loadedConversations: [ConversationThread],
         with tombstones: [UUID: Date]
     ) -> (conversations: [ConversationThread], tombstones: [UUID: Date], tombstonesChanged: Bool) {
-        var remainingTombstones = tombstones
         var visibleConversations: [ConversationThread] = []
-        var tombstonesChanged = false
 
         for conversation in loadedConversations {
-            guard let deletedAt = remainingTombstones[conversation.id] else {
-                visibleConversations.append(conversation)
+            if tombstones[conversation.id] != nil {
                 continue
             }
 
-            guard conversation.updatedAt > deletedAt else {
-                continue
-            }
-
-            remainingTombstones.removeValue(forKey: conversation.id)
-            tombstonesChanged = true
             visibleConversations.append(conversation)
         }
 
         return (
             visibleConversations.sorted(by: ConversationThread.sortsByMostRecentFirst),
-            remainingTombstones,
-            tombstonesChanged
+            tombstones,
+            false
         )
     }
 
