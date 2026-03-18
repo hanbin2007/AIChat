@@ -35,6 +35,7 @@ private enum ComposerLayout {
 private enum ConversationScrollLayout {
     static let bottomAnchorID = "conversation-bottom-anchor"
     static let coordinateSpaceName = "conversation-messages-scroll"
+    static let interruptionDragMinimumDistance: CGFloat = 12
     static let interruptionThreshold: CGFloat = 28
     static let suppressionDuration: TimeInterval = 0.28
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
@@ -205,6 +206,7 @@ struct ConversationDetailView: View {
     private func messagesView(conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
         let latestAssistantMessageID = latestAssistantMessageID(in: conversation.messages)
+        let latestMessageID = conversation.messages.last?.id
         let autoScrollSessionMessageID = activeAutoScrollSessionMessageID ?? latestAssistantMessageID
         let visibleMessages = visibleMessages(in: conversation)
         let hiddenMessageCount = max(conversation.messages.count - visibleMessages.count, 0)
@@ -231,7 +233,8 @@ struct ConversationDetailView: View {
                             ChatBubbleView(
                                 conversationID: conversationID,
                                 message: message,
-                                suspendStreamingRender: suspendedStreamingRenderMessageID == message.id
+                                suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
+                                forceExpandedContent: latestMessageID == message.id
                             )
                                 .equatable()
                                 .id(message.id)
@@ -287,9 +290,9 @@ struct ConversationDetailView: View {
                 }
             }
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: ConversationScrollLayout.interruptionDragMinimumDistance)
                     .onChanged { value in
-                        guard abs(value.translation.height) > 6,
+                        guard abs(value.translation.height) >= ConversationScrollLayout.interruptionDragMinimumDistance,
                               isPredominantlyVertical(value.translation)
                         else {
                             return

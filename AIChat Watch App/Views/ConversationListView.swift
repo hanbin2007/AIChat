@@ -138,6 +138,7 @@ struct ConversationListView: View {
                 )
                     .frame(maxWidth: .infinity)
             }
+            .accessibilityIdentifier("conversation.empty.primary")
             .buttonStyle(.borderedProminent)
             .tint(chatStore.isReadOnlyMode ? .orange : .cyan)
         }
