@@ -156,6 +156,12 @@ private struct UITestBootstrap {
             return makeDeletePersistenceBootstrap(environment: environment)
         case "conversation_autoscroll_interrupt":
             return makeAutoScrollInterruptBootstrap()
+        case "conversation_touch_scroll":
+            return makeTouchScrollBootstrap()
+        case "conversation_latest_message_expanded":
+            return makeLatestMessageExpandedBootstrap()
+        case "conversation_latest_thought_summary_collapsed":
+            return makeLatestThoughtSummaryCollapsedBootstrap()
         default:
             return nil
         }
@@ -217,6 +223,179 @@ private struct UITestBootstrap {
             initialConversationID: nil,
             launchDestination: .conversationDetail(conversationID)
         )
+    }
+
+    private static func makeTouchScrollBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000402") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_401_000)
+        var messages: [ChatMessage] = []
+
+        let topMarker = "Touch Scroll Top Marker"
+        let bottomMarker = "Touch Scroll Bottom Marker"
+
+        for index in 1...8 {
+            let baseDate = seededDate.addingTimeInterval(Double(index * 60))
+            let userText = index == 1 ?
+                topMarker :
+                "Touch Scroll User \(index)"
+            let assistantText = index == 8 ?
+                bottomMarker :
+                """
+                Touch Scroll Assistant \(index)
+                Line 2 keeps this bubble tall enough for vertical scrolling.
+                Line 3 keeps the transcript stable for the UI test.
+                """
+
+            messages.append(
+                ChatMessage(
+                    role: .user,
+                    text: userText,
+                    createdAt: baseDate
+                )
+            )
+            messages.append(
+                ChatMessage(
+                    role: .assistant,
+                    text: assistantText,
+                    createdAt: baseDate.addingTimeInterval(20)
+                )
+            )
+        }
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Touch Scroll",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(500),
+            isFavorite: false,
+            messages: messages
+        )
+
+        return UITestBootstrap(
+            store: ChatStore.previewStore(conversations: [conversation]),
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
+    private static func makeLatestMessageExpandedBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000403") ?? UUID()
+        let latestAssistantID = UUID(uuidString: "00000000-0000-0000-0000-000000004032") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_401_500)
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Latest Message Expanded",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(240),
+            isFavorite: false,
+            messages: [
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000004021") ?? UUID(),
+                    role: .user,
+                    text: "Earlier prompt that stays short.",
+                    createdAt: seededDate
+                ),
+                ChatMessage(
+                    role: .assistant,
+                    text: "Earlier short reply that should not affect the latest bubble expansion rule.",
+                    createdAt: seededDate.addingTimeInterval(20)
+                ),
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000004022") ?? UUID(),
+                    role: .user,
+                    text: "Latest prompt that should keep the newest reply fully expanded.",
+                    createdAt: seededDate.addingTimeInterval(120)
+                ),
+                ChatMessage(
+                    id: latestAssistantID,
+                    role: .assistant,
+                    text: makeLongCollapsibleUITestReply(
+                        prefix: "Latest long reply",
+                        hiddenTailMarker: "Latest Hidden Tail",
+                        lineCount: 15
+                    ),
+                    createdAt: seededDate.addingTimeInterval(140)
+                )
+            ]
+        )
+
+        return UITestBootstrap(
+            store: ChatStore.previewStore(conversations: [conversation]),
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
+    private static func makeLatestThoughtSummaryCollapsedBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000404") ?? UUID()
+        let latestAssistantID = UUID(uuidString: "00000000-0000-0000-0000-000000004042") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_401_800)
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Latest Thought Summary Collapsed",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(240),
+            isFavorite: false,
+            messages: [
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000004041") ?? UUID(),
+                    role: .user,
+                    text: "Keep the newest thought summary collapsed until I open it.",
+                    createdAt: seededDate
+                ),
+                ChatMessage(
+                    id: latestAssistantID,
+                    role: .assistant,
+                    text: "Short latest reply body that keeps the summary card visible without adding another collapse target.",
+                    thoughtSummary: makeLongUITestThoughtSummary(
+                        prefix: "Latest thought summary",
+                        hiddenTailMarker: "Latest Thought Summary Hidden Tail",
+                        segmentCount: 18
+                    ),
+                    createdAt: seededDate.addingTimeInterval(20)
+                )
+            ]
+        )
+
+        return UITestBootstrap(
+            store: ChatStore.previewStore(conversations: [conversation]),
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
+    private static func makeLongCollapsibleUITestReply(
+        prefix: String,
+        hiddenTailMarker: String,
+        lineCount: Int
+    ) -> String {
+        (1...max(lineCount, 15))
+            .map { index in
+                if index == max(lineCount, 15) {
+                    return "\(prefix) \(index): \(hiddenTailMarker)"
+                }
+
+                return "\(prefix) \(index): keep this line visible only after expansion when collapse is allowed."
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func makeLongUITestThoughtSummary(
+        prefix: String,
+        hiddenTailMarker: String,
+        segmentCount: Int
+    ) -> String {
+        (1...max(segmentCount, 12))
+            .map { index in
+                if index == max(segmentCount, 12) {
+                    return "\(prefix) \(index): \(hiddenTailMarker)"
+                }
+
+                return "\(prefix) \(index): keep this clause available only after the summary expands."
+            }
+            .joined(separator: " ")
     }
 
     private static func makeDeletePersistenceBootstrap(

@@ -16,6 +16,7 @@ struct ChatBubbleView: View, Equatable {
     let conversationID: UUID
     let message: ChatMessage
     let suspendStreamingRender: Bool
+    let forceExpandedContent: Bool
 
     @State private var isShowingMessageActions = false
     @State private var didTriggerStreamingStartHaptics = false
@@ -30,11 +31,13 @@ struct ChatBubbleView: View, Equatable {
     init(
         conversationID: UUID,
         message: ChatMessage,
-        suspendStreamingRender: Bool = false
+        suspendStreamingRender: Bool = false,
+        forceExpandedContent: Bool = false
     ) {
         self.conversationID = conversationID
         self.message = message
         self.suspendStreamingRender = suspendStreamingRender
+        self.forceExpandedContent = forceExpandedContent
         _renderedText = State(initialValue: message.cleanedText)
         _renderedThoughtSummary = State(initialValue: message.cleanedThoughtSummary)
     }
@@ -80,10 +83,27 @@ struct ChatBubbleView: View, Equatable {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
     }
 
+    private var messageBodyAccessibilityIdentifier: String {
+        "conversation.message.body.\(message.id.uuidString.lowercased())"
+    }
+
+    private var messageExpandButtonAccessibilityIdentifier: String {
+        "conversation.message.expand.\(message.id.uuidString.lowercased())"
+    }
+
+    private var thoughtSummaryToggleAccessibilityIdentifier: String {
+        "conversation.message.thought-summary.toggle.\(message.id.uuidString.lowercased())"
+    }
+
+    private var thoughtSummaryStateAccessibilityIdentifier: String {
+        "conversation.message.thought-summary.state.\(message.id.uuidString.lowercased())"
+    }
+
     static func == (lhs: ChatBubbleView, rhs: ChatBubbleView) -> Bool {
         lhs.conversationID == rhs.conversationID &&
         lhs.message.renderSignature == rhs.message.renderSignature &&
-        lhs.suspendStreamingRender == rhs.suspendStreamingRender
+        lhs.suspendStreamingRender == rhs.suspendStreamingRender &&
+        lhs.forceExpandedContent == rhs.forceExpandedContent
     }
 
     var body: some View {
@@ -156,7 +176,9 @@ struct ChatBubbleView: View, Equatable {
             if isUser == false, let thoughtSummary = displayedThoughtSummary {
                 ThoughtSummaryCard(
                     thoughtSummary: thoughtSummary,
-                    isStreaming: message.status == .streaming
+                    isStreaming: message.status == .streaming,
+                    toggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
+                    stateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier
                 )
             }
 
@@ -252,18 +274,33 @@ struct ChatBubbleView: View, Equatable {
     @ViewBuilder
     private var messageTextContent: some View {
         if isUser == false, message.status != .streaming {
+            let compactRenderingMode = displayedText.preferredAssistantMessageTextRenderingMode
             let expandedRenderingMode = AssistantMessageTextRenderingDecider.expandedMode(for: displayedText)
-
-            switch expandedRenderingMode {
-            case .markdown where displayedText.shouldCollapseMessageBody:
-                CollapsibleAssistantMessageMarkdownView(text: displayedText)
-            case .markdown:
+            switch (compactRenderingMode, expandedRenderingMode) {
+            case (.markdown, _):
                 AssistantMessageMarkdownView(text: displayedText)
-            case .plain:
-                MessageBodyTextView(text: displayedText)
+            case (.plain, .markdown):
+                CollapsibleAssistantMessageMarkdownView(
+                    text: displayedText,
+                    forceExpanded: forceExpandedContent,
+                    accessibilityIdentifier: messageBodyAccessibilityIdentifier,
+                    expandButtonAccessibilityIdentifier: messageExpandButtonAccessibilityIdentifier
+                )
+            case (.plain, .plain):
+                MessageBodyTextView(
+                    text: displayedText,
+                    forceExpanded: forceExpandedContent,
+                    accessibilityIdentifier: messageBodyAccessibilityIdentifier,
+                    expandButtonAccessibilityIdentifier: messageExpandButtonAccessibilityIdentifier
+                )
             }
         } else {
-            MessageBodyTextView(text: displayedText)
+            MessageBodyTextView(
+                text: displayedText,
+                forceExpanded: forceExpandedContent,
+                accessibilityIdentifier: messageBodyAccessibilityIdentifier,
+                expandButtonAccessibilityIdentifier: messageExpandButtonAccessibilityIdentifier
+            )
         }
     }
 
@@ -416,10 +453,16 @@ struct ChatBubbleView: View, Equatable {
 private struct ThoughtSummaryCard: View {
     let thoughtSummary: String
     let isStreaming: Bool
+    let toggleAccessibilityIdentifier: String
+    let stateAccessibilityIdentifier: String
     @State private var isExpanded = false
 
     private var normalizedSummary: String {
         thoughtSummary.collapseWhitespace()
+    }
+
+    private var expansionStateAccessibilityValue: String {
+        isExpanded ? "expanded" : "collapsed"
     }
 
     var body: some View {
@@ -446,6 +489,8 @@ private struct ThoughtSummaryCard: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(toggleAccessibilityIdentifier)
+            .accessibilityValue(expansionStateAccessibilityValue)
 
             Text(normalizedSummary)
                 .font(.caption2)
@@ -453,6 +498,13 @@ private struct ThoughtSummaryCard: View {
                 .multilineTextAlignment(.leading)
                 .lineLimit(isExpanded ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier(stateAccessibilityIdentifier)
+                .accessibilityLabel("thought-summary-state")
+                .accessibilityValue(expansionStateAccessibilityValue)
         }
         .padding(8)
         .background(
@@ -487,11 +539,26 @@ private extension String {
 
 private struct MessageBodyTextView: View {
     let text: String
+    let forceExpanded: Bool
+    let accessibilityIdentifier: String
+    let expandButtonAccessibilityIdentifier: String
 
     @State private var isExpanded = false
 
     private var shouldCollapse: Bool {
-        text.shouldCollapseMessageBody
+        forceExpanded == false && text.shouldCollapseMessageBody
+    }
+
+    private var expansionStateAccessibilityValue: String {
+        if forceExpanded {
+            return "forced-expanded"
+        }
+
+        guard text.shouldCollapseMessageBody else {
+            return "full"
+        }
+
+        return isExpanded ? "expanded" : "collapsed"
     }
 
     var body: some View {
@@ -515,19 +582,37 @@ private struct MessageBodyTextView: View {
                         .foregroundStyle(.cyan.opacity(0.92))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("message.body.expand")
+                .accessibilityIdentifier(expandButtonAccessibilityIdentifier)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityValue(expansionStateAccessibilityValue)
     }
 }
 
 private struct CollapsibleAssistantMessageMarkdownView: View {
     let text: String
+    let forceExpanded: Bool
+    let accessibilityIdentifier: String
+    let expandButtonAccessibilityIdentifier: String
 
     @State private var isExpanded = false
 
     private var shouldCollapse: Bool {
-        text.shouldCollapseMessageBody
+        forceExpanded == false && text.shouldCollapseMessageBody
+    }
+
+    private var expansionStateAccessibilityValue: String {
+        if forceExpanded {
+            return "forced-expanded"
+        }
+
+        guard text.shouldCollapseMessageBody else {
+            return "full"
+        }
+
+        return isExpanded ? "expanded" : "collapsed"
     }
 
     var body: some View {
@@ -555,9 +640,12 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
                         .foregroundStyle(.cyan.opacity(0.92))
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("message.body.expand")
+                .accessibilityIdentifier(expandButtonAccessibilityIdentifier)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityValue(expansionStateAccessibilityValue)
     }
 }
 

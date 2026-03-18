@@ -11,6 +11,7 @@ import SwiftUI
 
 private enum CompanionConversationScrollLayout {
     static let coordinateSpaceName = "companion-conversation-scroll"
+    static let interruptionDragMinimumDistance: CGFloat = 12
     static let interruptionThreshold: CGFloat = 32
     static let suppressionDuration: TimeInterval = 0.28
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
@@ -135,6 +136,7 @@ struct CompanionConversationDetailView: View {
     private func conversationContent(_ conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
         let latestAssistantMessageID = latestAssistantMessageID(in: conversation.messages)
+        let latestMessageID = conversation.messages.last?.id
         let autoScrollSessionMessageID = activeAutoScrollSessionMessageID ?? latestAssistantMessageID
         let visibleMessages = visibleMessages(in: conversation)
         let hiddenMessageCount = max(conversation.messages.count - visibleMessages.count, 0)
@@ -164,7 +166,8 @@ struct CompanionConversationDetailView: View {
                             ChatBubbleView(
                                 conversationID: conversationID,
                                 message: message,
-                                suspendStreamingRender: suspendedStreamingRenderMessageID == message.id
+                                suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
+                                forceExpandedContent: latestMessageID == message.id
                             )
                                 .equatable()
                                 .id(message.id)
@@ -216,9 +219,9 @@ struct CompanionConversationDetailView: View {
                     }
             }
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: CompanionConversationScrollLayout.interruptionDragMinimumDistance)
                     .onChanged { value in
-                        guard abs(value.translation.height) > 6,
+                        guard abs(value.translation.height) >= CompanionConversationScrollLayout.interruptionDragMinimumDistance,
                               isPredominantlyVertical(value.translation)
                         else {
                             return

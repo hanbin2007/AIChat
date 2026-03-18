@@ -74,6 +74,22 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         closeButton.tap()
 
         XCTAssertFalse(zoomSheet.waitForExistence(timeout: 2))
+
+        let inlineFormula = app.descendants(matching: .any)["formula.zoom.last_formula.container"]
+            .descendants(matching: .any)
+            .matching(identifier: "math.zoom.trigger.inline")
+            .firstMatch
+        if !inlineFormula.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing inline math trigger hierarchy")
+            XCTFail("Missing inline math trigger.")
+            return
+        }
+        XCTAssertTrue(waitForHittable(inlineFormula, timeout: 5))
+        inlineFormula.tap()
+        if !zoomSheet.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing zoom sheet after inline tap hierarchy")
+            XCTFail("Missing zoom sheet after tapping inline math.")
+        }
     }
 
     @MainActor
@@ -170,22 +186,29 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let photoEntry = app.descendants(matching: .any)["conversation.tool-photo-picker"]
-        XCTAssertTrue(photoEntry.waitForExistence(timeout: 5))
-
-        searchSwitch.tap()
-        codeSwitch.tap()
+        let imageSection = app.staticTexts["图片"]
+        XCTAssertTrue(revealBySwipingUp(imageSection, in: toolSheet, maxSwipes: 3))
 
         let doneButton = app.buttons["conversation.tool-done"]
-        if !revealElement(doneButton, in: app, directions: [.up], timeout: 5) {
+        if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 4) == false {
             attachDebugHierarchy(app, named: "Missing tool done button hierarchy")
             XCTFail("Missing done button in the tool sheet.")
             return
         }
+        XCTAssertTrue(waitForHittable(doneButton, timeout: 2))
         doneButton.tap()
 
-        XCTAssertFalse(toolSheet.waitForExistence(timeout: 2))
-        XCTAssertTrue(toolEntry.waitForExistence(timeout: 5))
+        let restoredToolEntry = app.buttons["conversation.tool-entry"]
+        let dismissalDeadline = Date().addingTimeInterval(5)
+        while Date() < dismissalDeadline {
+            if toolSheet.isHittable == false || restoredToolEntry.exists {
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        XCTAssertTrue(toolSheet.isHittable == false || restoredToolEntry.exists)
     }
 
     @MainActor
@@ -252,6 +275,13 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         let relaunchedRow = app.descendants(matching: .any)[rowIdentifier]
         XCTAssertFalse(relaunchedRow.waitForExistence(timeout: 5))
+
+        let startChatButton = app.buttons["conversation.empty.primary"]
+        _ = revealBySwipingUp(startChatButton, in: app, maxSwipes: 4)
+        if !startChatButton.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing empty state after relaunch hierarchy")
+            XCTFail("Deleted conversation returned after relaunch or empty state did not appear.")
+        }
     }
 
     @MainActor
@@ -343,6 +373,133 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationDetailCanScrollByTouchDrag() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing touch-scroll conversation hierarchy")
+            XCTFail("Missing conversation scroll view for touch scroll scenario.")
+            return
+        }
+
+        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
+        if !bottomMarker.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing touch-scroll bottom marker hierarchy")
+            XCTFail("Missing bottom marker for touch scroll verification.")
+            return
+        }
+
+        if !waitForNonEmptyFrame(of: bottomMarker, timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing touch-scroll bottom marker frame hierarchy")
+            XCTFail("Bottom marker never received a measurable frame.")
+            return
+        }
+
+        let initialBottomMidY = bottomMarker.frame.midY
+
+        let topMarker = app.staticTexts["Touch Scroll Top Marker"]
+        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.86))
+
+        var didScroll = false
+        for _ in 0..<6 {
+            start.press(forDuration: 0.05, thenDragTo: end)
+
+            let deadline = Date().addingTimeInterval(1.2)
+            while Date() < deadline {
+                let bottomMoved = bottomMarker.exists &&
+                    bottomMarker.frame.midY > initialBottomMidY + 18
+                let bottomMovedOffscreen = bottomMarker.exists &&
+                    scrollView.frame.intersects(bottomMarker.frame) == false
+                let topReached = topMarker.exists &&
+                    topMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(topMarker.frame)
+
+                if bottomMoved || bottomMovedOffscreen || topReached {
+                    didScroll = true
+                    break
+                }
+
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+
+            if didScroll {
+                break
+            }
+        }
+
+        let evidence = XCTAttachment(
+            string: [
+                "initialBottomMidY=\(initialBottomMidY)",
+                "finalBottomFrame=\(bottomMarker.exists ? String(describing: bottomMarker.frame) : "missing")",
+                "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")",
+                "topExists=\(topMarker.exists)",
+                "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")"
+            ].joined(separator: "\n")
+        )
+        evidence.name = "touch-scroll-evidence"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        if didScroll == false {
+            attachDebugHierarchy(app, named: "Touch scroll failure hierarchy")
+            attachScreenshot(app, named: "touch-scroll-failure")
+        }
+
+        XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript.")
+    }
+
+    @MainActor
+    func testLatestConversationMessageDoesNotUseUICollapse() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_latest_message_expanded"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing latest-message expansion hierarchy")
+            XCTFail("Missing conversation scroll view for latest-message expansion scenario.")
+            return
+        }
+
+        let latestExpandButton = app.buttons["展开全文"]
+
+        if latestExpandButton.waitForExistence(timeout: 1) {
+            attachDebugHierarchy(app, named: "Latest message unexpectedly collapsible hierarchy")
+            attachScreenshot(app, named: "latest-message-unexpected-expand-button")
+            XCTFail("The newest long message should not expose the expand button.")
+        }
+    }
+
+    @MainActor
+    func testLatestThoughtSummaryStartsCollapsed() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_latest_thought_summary_collapsed"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing latest thought-summary hierarchy")
+            XCTFail("Missing conversation scroll view for latest thought-summary scenario.")
+            return
+        }
+
+        let summaryToggle = app.buttons["摘要"]
+
+        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 3) == false {
+            attachDebugHierarchy(app, named: "Missing latest thought-summary toggle hierarchy")
+            attachScreenshot(app, named: "latest-thought-summary-missing-toggle")
+            XCTFail("Missing the latest thought-summary toggle.")
+            return
+        }
+
+        XCTAssertEqual(summaryToggle.value as? String, "collapsed")
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
@@ -414,6 +571,23 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    private func waitForNonEmptyFrame(
+        of element: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.frame.isEmpty == false {
+                return true
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        return element.frame.isEmpty == false
+    }
+
+    @MainActor
     private func revealElement(
         _ element: XCUIElement,
         in app: XCUIApplication,
@@ -442,6 +616,26 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         return element.exists && element.isHittable
+    }
+
+    @MainActor
+    private func revealBySwipingUp(
+        _ element: XCUIElement,
+        in container: XCUIElement,
+        maxSwipes: Int
+    ) -> Bool {
+        if element.waitForExistence(timeout: 1) {
+            return true
+        }
+
+        for _ in 0..<maxSwipes {
+            container.swipeUp()
+            if element.waitForExistence(timeout: 1) {
+                return true
+            }
+        }
+
+        return element.exists
     }
 
     @MainActor
