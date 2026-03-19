@@ -154,6 +154,27 @@ private struct UITestBootstrap {
             )
         case "conversation_delete_persistence":
             return makeDeletePersistenceBootstrap(environment: environment)
+        case "conversation_delete_read_only":
+            let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000302") ?? UUID()
+            let conversation = ConversationThread(
+                id: conversationID,
+                title: "Read Only Delete",
+                messages: [
+                    ChatMessage(
+                        role: .assistant,
+                        text: "这是一条从已配对设备同步来的只读会话，watch 端也应该允许删除。"
+                    )
+                ]
+            )
+
+            return UITestBootstrap(
+                store: ChatStore.previewStore(
+                    conversations: [conversation],
+                    activationState: nil
+                ),
+                initialConversationID: nil,
+                launchDestination: .root
+            )
         case "conversation_autoscroll_interrupt":
             return makeAutoScrollInterruptBootstrap()
         case "conversation_touch_scroll":

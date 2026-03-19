@@ -77,12 +77,14 @@ struct AIChatRegistrationApp: App {
     }
 }
 
-#if DEBUG && COMPANION_APP
+#if COMPANION_APP
 private enum CompanionUITestLaunchDestination: Equatable {
     case root
     case conversationDetail(UUID)
 }
+#endif
 
+#if DEBUG && COMPANION_APP
 private struct CompanionUITestBootstrap {
     let store: ChatStore
     let initialConversationID: UUID?
@@ -109,6 +111,18 @@ private struct CompanionUITestBootstrap {
             return CompanionUITestBootstrap(
                 store: MainActor.assumeIsolated {
                     ChatStore.previewStore(conversations: [conversation])
+                },
+                initialConversationID: conversation.id,
+                launchDestination: .conversationDetail(conversation.id)
+            )
+        case "companion_delete_read_only":
+            let conversation = readOnlyDeleteConversation()
+            return CompanionUITestBootstrap(
+                store: MainActor.assumeIsolated {
+                    ChatStore.previewStore(
+                        conversations: [conversation],
+                        activationState: nil
+                    )
                 },
                 initialConversationID: conversation.id,
                 launchDestination: .conversationDetail(conversation.id)
@@ -165,6 +179,22 @@ private struct CompanionUITestBootstrap {
                     role: .assistant,
                     text: "这里有一张生成图片，确认 iPhone 侧可以直接显示并点开查看。",
                     attachments: [attachment]
+                )
+            ]
+        )
+    }
+
+    private static func readOnlyDeleteConversation() -> ConversationThread {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000421") ?? UUID()
+
+        return ConversationThread(
+            id: conversationID,
+            title: "Companion Read Only Delete",
+            messages: [
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000422") ?? UUID(),
+                    role: .assistant,
+                    text: "这是一条来自已配对手表的同步会话，未激活的 iPhone 也应该能删除它。"
                 )
             ]
         )

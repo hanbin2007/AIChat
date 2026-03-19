@@ -142,7 +142,6 @@ struct ConversationSettingsView: View {
                         }
                     }
                     .accessibilityIdentifier("conversation.settings.delete")
-                    .disabled(chatStore.isReadOnlyMode)
                 }
             }
             .navigationTitle("Manage Chat")

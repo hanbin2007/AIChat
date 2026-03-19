@@ -133,9 +133,10 @@ struct CompanionConversationSettingsView: View {
                             dismiss()
                         }
                     }
-                    .disabled(chatStore.isReadOnlyMode)
+                    .accessibilityIdentifier("companion.conversation.settings.delete")
                 }
             }
+            .accessibilityIdentifier("companion.conversation.settings")
             .navigationTitle("会话设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

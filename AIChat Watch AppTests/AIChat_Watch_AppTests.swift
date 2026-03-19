@@ -2136,6 +2136,61 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testReadOnlyStoreCanDeleteConversation() async throws {
+        let configuration = AppConfiguration(
+            backendMode: .direct,
+            geminiAPIKey: "test",
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: nil,
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repositoryRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AIChatTests-ReadOnlyDelete-\(UUID().uuidString)", isDirectory: true)
+        let defaultsSuiteName = "AIChatTests-ReadOnlyDelete-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.removePersistentDomain(forName: defaultsSuiteName)
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        let repository = ConversationRepository(configuration: configuration, rootURL: repositoryRootURL)
+        let conversationID = UUID()
+
+        try await repository.save(
+            ConversationThread(
+                id: conversationID,
+                title: "Read Only Delete",
+                messages: [
+                    ChatMessage(role: .assistant, text: "Delete should stay available in read-only mode.")
+                ]
+            )
+        )
+
+        let store = ChatStore(
+            repository: repository,
+            aiService: EchoReplyAIStreamingService(),
+            transcriptionService: nil,
+            configuration: configuration,
+            syncBridge: CompanionSyncBridge(),
+            activationRepository: ActivationRepository(defaults: defaults),
+            defaults: defaults
+        )
+
+        await store.loadConversationsIfNeeded()
+        XCTAssertTrue(store.isReadOnlyMode)
+        XCTAssertEqual(store.conversations.map(\.id), [conversationID])
+
+        await store.deleteConversation(id: conversationID)
+
+        XCTAssertTrue(store.conversations.isEmpty)
+        let loadedTombstones = try await repository.loadDeletedConversationTombstones()
+        XCTAssertNotNil(loadedTombstones[conversationID])
+    }
+
+    @MainActor
     func testRemoteDeletionTombstoneRemovesStaleLocalConversation() async throws {
         let now = Date(timeIntervalSince1970: 1_762_400_260)
         let configuration = AppConfiguration(

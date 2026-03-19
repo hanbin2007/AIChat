@@ -59,44 +59,19 @@ struct ConversationListView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                 } else {
-                    if chatStore.isReadOnlyMode {
-                        ForEach(chatStore.conversations) { conversation in
-                            NavigationLink(value: conversation.id) {
-                                ConversationRowView(
-                                    conversation: conversation,
-                                    aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
-                                )
-                            }
-                            .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
-                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                favoriteSwipeAction(for: conversation)
-                            }
+                    ForEach(chatStore.conversations) { conversation in
+                        NavigationLink(value: conversation.id) {
+                            ConversationRowView(
+                                conversation: conversation,
+                                aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
+                            )
                         }
-                    } else {
-                        ForEach(chatStore.conversations) { conversation in
-                            NavigationLink(value: conversation.id) {
-                                ConversationRowView(
-                                    conversation: conversation,
-                                    aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
-                                )
-                            }
-                            .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
-                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                favoriteSwipeAction(for: conversation)
-
-                                Button(role: .destructive) {
-                                    Task {
-                                        await chatStore.deleteConversation(id: conversation.id)
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                .accessibilityIdentifier("conversation.delete.\(conversation.id.uuidString)")
-                            }
+                        .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            favoriteSwipeAction(for: conversation)
+                            deleteSwipeAction(for: conversation)
                         }
                     }
                 }
@@ -168,6 +143,18 @@ struct ConversationListView: View {
             )
         }
         .tint(conversation.isFavorite ? .orange : .yellow)
+    }
+
+    @ViewBuilder
+    private func deleteSwipeAction(for conversation: ConversationThread) -> some View {
+        Button(role: .destructive) {
+            Task {
+                await chatStore.deleteConversation(id: conversation.id)
+            }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .accessibilityIdentifier("conversation.delete.\(conversation.id.uuidString)")
     }
 }
 #endif

@@ -81,6 +81,7 @@ struct CompanionConversationDetailView: View {
                         .font(.headline)
                 }
                 .padding(24)
+                .accessibilityIdentifier("companion.conversation.not-found")
             }
         }
         .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "对话")
@@ -93,6 +94,7 @@ struct CompanionConversationDetailView: View {
                     Image(systemName: "slider.horizontal.3")
                 }
                 .accessibilityLabel("会话设置")
+                .accessibilityIdentifier("conversation.settings.open")
             }
         }
         .sheet(isPresented: $isShowingSettings) {

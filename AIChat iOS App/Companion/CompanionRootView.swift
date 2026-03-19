@@ -174,6 +174,7 @@ private struct CompanionEmptySelectionView: View {
             )
             .padding(24)
         }
+        .accessibilityIdentifier("companion.empty-selection")
     }
 }
 #endif

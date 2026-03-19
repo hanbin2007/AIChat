@@ -84,6 +84,7 @@ struct CompanionConversationListView: View {
                                 aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
                             )
                             .tag(conversation.id)
+                            .accessibilityIdentifier("companion.conversation.row.\(conversation.id.uuidString)")
                             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
                             .listRowBackground(Color.clear)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -102,15 +103,14 @@ struct CompanionConversationListView: View {
                                 }
                                 .tint(conversation.isFavorite ? .orange : .yellow)
 
-                                if chatStore.isReadOnlyMode == false {
-                                    Button(role: .destructive) {
-                                        Task {
-                                            await chatStore.deleteConversation(id: conversation.id)
-                                        }
-                                    } label: {
-                                        Label("删除", systemImage: "trash")
+                                Button(role: .destructive) {
+                                    Task {
+                                        await chatStore.deleteConversation(id: conversation.id)
                                     }
+                                } label: {
+                                    Label("删除", systemImage: "trash")
                                 }
+                                .accessibilityIdentifier("companion.conversation.delete.\(conversation.id.uuidString)")
                             }
                         }
                     }
@@ -217,6 +217,7 @@ private struct CompanionConversationEmptyState: View {
                 )
         )
         .padding(.vertical, 6)
+        .accessibilityIdentifier("companion.conversation.empty-state")
     }
 }
 

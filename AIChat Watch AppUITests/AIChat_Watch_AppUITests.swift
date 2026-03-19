@@ -285,6 +285,35 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testReadOnlyConversationCanStillBeDeleted() throws {
+        let conversationID = "00000000-0000-0000-0000-000000000302"
+        let rowIdentifier = "conversation.row.\(conversationID)"
+        let deleteIdentifier = "conversation.delete.\(conversationID)"
+        let app = XCUIApplication()
+
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_delete_read_only"
+        app.launch()
+
+        let row = app.descendants(matching: .any)[rowIdentifier]
+        if !revealElement(row, in: app, directions: [.up], timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing read-only conversation row hierarchy")
+            XCTFail("Missing seeded read-only conversation row.")
+            return
+        }
+        row.swipeLeft()
+
+        let deleteButton = app.buttons[deleteIdentifier]
+        if !revealElement(deleteButton, in: app, directions: [.up], timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing read-only delete action hierarchy")
+            XCTFail("Missing delete swipe action for the read-only conversation.")
+            return
+        }
+        deleteButton.tap()
+
+        XCTAssertFalse(row.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testInterruptingReplyStopsAllFurtherAutoScrollInSameBubble() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_autoscroll_interrupt"

@@ -827,18 +827,10 @@ final class ChatStore: ObservableObject {
     }
 
     func deleteConversation(id: UUID) async {
-        guard isReadOnlyMode == false else {
-            return
-        }
-
         await deleteConversation(id: id, sync: true)
     }
 
     func deleteConversations(at offsets: IndexSet) async {
-        guard isReadOnlyMode == false else {
-            return
-        }
-
         let ids = offsets.compactMap { index in
             conversations.indices.contains(index) ? conversations[index].id : nil
         }
@@ -2861,6 +2853,19 @@ extension ChatStore {
         sendingConversationIDs: Set<UUID> = [],
         conversationErrors: [UUID: String] = [:],
         startupError: String? = nil,
+        activationState: OfflineActivationState? = OfflineActivationState(
+            license: OfflineActivationLicense(
+                deviceToken: 0,
+                requestIssuedAt: .now,
+                validFrom: .now,
+                validUntil: nil,
+                messageLimit: nil,
+                modelMask: LicensedModelCatalog.unrestrictedMask
+            ),
+            activationCodeFingerprint: "preview",
+            activatedAt: .now,
+            usedMessageCount: 0
+        ),
         aiService: AIStreamingService = PreviewAIStreamingService(),
         transcriptionService: AITranscriptionService? = PreviewAITranscriptionService(),
         completionFeedbackProvider: (any CompletionFeedbackProviding)? = nil,
@@ -2896,19 +2901,21 @@ extension ChatStore {
         store.transcribingConversationIDs = []
         store.conversationErrors = conversationErrors
         store.startupError = startupError
-        store.activationState = OfflineActivationState(
-            license: OfflineActivationLicense(
-                deviceToken: store.deviceIdentity.deviceToken,
-                requestIssuedAt: .now,
-                validFrom: .now,
-                validUntil: nil,
-                messageLimit: nil,
-                modelMask: LicensedModelCatalog.unrestrictedMask
-            ),
-            activationCodeFingerprint: "preview",
-            activatedAt: .now,
-            usedMessageCount: 0
-        )
+        store.activationState = activationState.map { previewState in
+            OfflineActivationState(
+                license: OfflineActivationLicense(
+                    deviceToken: store.deviceIdentity.deviceToken,
+                    requestIssuedAt: previewState.license.requestIssuedAt,
+                    validFrom: previewState.license.validFrom,
+                    validUntil: previewState.license.validUntil,
+                    messageLimit: previewState.license.messageLimit,
+                    modelMask: previewState.license.modelMask
+                ),
+                activationCodeFingerprint: previewState.activationCodeFingerprint,
+                activatedAt: previewState.activatedAt,
+                usedMessageCount: previewState.usedMessageCount
+            )
+        }
         store.hasLoadedConversations = true
         return store
     }
