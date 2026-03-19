@@ -225,6 +225,34 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertFalse(normalized.text.contains("data:image/"))
     }
 
+    func testAssistantMessageCleanedTextPrefersModelResponsePartsToPreserveMarkdownAcrossSplitParts() {
+        let message = ChatMessage(
+            role: .assistant,
+            text: "**场景\n1：**",
+            modelResponseParts: [
+                GeminiPart(text: "**场景", inlineData: nil),
+                GeminiPart(text: "1：**", inlineData: nil)
+            ]
+        )
+
+        XCTAssertEqual(message.cleanedText, "**场景1：**")
+    }
+
+    func testAssistantMessageCleanedThoughtSummaryPrefersModelResponseParts() {
+        let message = ChatMessage(
+            role: .assistant,
+            text: "Final answer",
+            thoughtSummary: "旧的思考摘要",
+            modelResponseParts: [
+                GeminiPart(text: "推理片段 A", inlineData: nil, thought: true),
+                GeminiPart(text: " + B", inlineData: nil, thought: true),
+                GeminiPart(text: "Final answer", inlineData: nil)
+            ]
+        )
+
+        XCTAssertEqual(message.cleanedThoughtSummary, "推理片段 A + B")
+    }
+
     func testContextWindowReusesStoredAssistantModelParts() {
         let storedParts = [
             GeminiPart(

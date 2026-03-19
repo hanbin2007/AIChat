@@ -322,16 +322,8 @@ function toGeminiMemoryRequest(body, model) {
 function extractChunkParts(chunk) {
   const candidate = chunk?.candidates?.[0];
   const parts = candidate?.content?.parts || [];
-  const answerText = parts
-    .filter((part) => part.thought !== true)
-    .map((part) => part.text || "")
-    .join("\n")
-    .trim();
-  const thoughtText = parts
-    .filter((part) => part.thought === true)
-    .map((part) => part.text || "")
-    .join("\n")
-    .trim();
+  const answerText = mergeChunkText(parts, false);
+  const thoughtText = mergeChunkText(parts, true);
   const attachments = parts
     .filter((part) => String(part?.inlineData?.mimeType || "").toLowerCase().startsWith("image/"))
     .map((part) => ({
@@ -346,6 +338,16 @@ function extractChunkParts(chunk) {
     attachments,
     finishReason: typeof candidate?.finishReason === "string" ? candidate.finishReason.trim() : ""
   };
+}
+
+function mergeChunkText(parts, includeThoughts) {
+  return (parts || []).reduce((merged, part) => {
+    if ((part?.thought === true) !== includeThoughts) {
+      return merged;
+    }
+
+    return merged + String(part?.text || "");
+  }, "");
 }
 
 function normalizedDelta(chunkText, emittedText) {

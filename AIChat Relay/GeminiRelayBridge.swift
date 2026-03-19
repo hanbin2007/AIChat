@@ -630,17 +630,8 @@ struct GeminiRelayBridge {
         let candidate = chunk.candidates?.first
         let parts = candidate?.content?.parts ?? []
 
-        let answerText = parts
-            .filter { $0.thought != true }
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let thoughtText = parts
-            .filter { $0.thought == true }
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let answerText = mergedChunkText(from: parts, includeThoughts: false)
+        let thoughtText = mergedChunkText(from: parts, includeThoughts: true)
 
         let attachments: [RelayAttachment] = parts.compactMap { part in
             guard let inlineData = part.inlineData,
@@ -666,12 +657,25 @@ struct GeminiRelayBridge {
     }
 
     private func extractTranscript(from response: GeminiStreamChunk) -> String {
-        let parts = response.candidates?.first?.content?.parts ?? []
+        mergedChunkText(
+            from: response.candidates?.first?.content?.parts ?? [],
+            includeThoughts: false
+        )
+    }
 
-        return parts
-            .filter { $0.thought != true }
-            .compactMap(\.text)
-            .joined(separator: "\n")
+    private func mergedChunkText(
+        from parts: [GeminiPartPayload],
+        includeThoughts: Bool
+    ) -> String {
+        parts.reduce(into: "") { partialResult, part in
+            guard (part.thought == true) == includeThoughts,
+                  let text = part.text
+            else {
+                return
+            }
+
+            partialResult.append(text)
+        }
     }
 
     private func decodeMemoryExtractionResponse(from text: String) throws -> RelayMemoryExtractionResponse {
