@@ -825,11 +825,11 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     }
 
     var cleanedText: String {
-        text.trimmed
+        recoveredVisibleText.trimmed
     }
 
     var cleanedThoughtSummary: String? {
-        thoughtSummary?.nonEmptyTrimmed
+        recoveredThoughtSummary?.nonEmptyTrimmed
     }
 
     var cleanedModelResponseParts: [GeminiPartPayload]? {
@@ -858,6 +858,28 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
             status: status,
             attachments: attachments.map(\.renderSignature)
         )
+    }
+
+    private var recoveredVisibleText: String {
+        guard role == .assistant,
+              let modelResponseParts,
+              let visibleText = mergedGeminiText(from: modelResponseParts, includeThoughts: false)
+        else {
+            return text
+        }
+
+        return visibleText
+    }
+
+    private var recoveredThoughtSummary: String? {
+        guard role == .assistant,
+              let modelResponseParts,
+              let thoughtText = mergedGeminiText(from: modelResponseParts, includeThoughts: true)
+        else {
+            return thoughtSummary
+        }
+
+        return thoughtText
     }
 }
 

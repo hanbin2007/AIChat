@@ -135,6 +135,9 @@ struct ChatBubbleView: View, Equatable {
         .compatibleOnChange(of: message.thoughtSummary) { _ in
             syncRenderedContentIfNeeded()
         }
+        .compatibleOnChange(of: message.modelResponseParts) { _ in
+            syncRenderedContentIfNeeded()
+        }
         .compatibleOnChange(of: message.status) { _ in
             syncRenderedContent()
         }
