@@ -1516,10 +1516,7 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
             return L10n.tr("conversation.preview.empty")
         }
 
-        if lastMessage.status == .streaming, lastMessage.cleanedText.isEmpty {
-            if let thoughtSummary = lastMessage.cleanedThoughtSummary {
-                return L10n.format("conversation.preview.thinking", thoughtSummary)
-            }
+        if lastMessage.status == .streaming {
             return L10n.tr("conversation.preview.streaming")
         }
 
@@ -1639,13 +1636,19 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         updatedAt = .now
     }
 
-    mutating func upsertMessage(_ message: ChatMessage) {
+    mutating func upsertMessage(
+        _ message: ChatMessage,
+        updatesTimestamp: Bool = true
+    ) {
         if let index = messages.firstIndex(where: { $0.id == message.id }) {
             messages[index] = message
         } else {
             messages.append(message)
         }
-        updatedAt = .now
+
+        if updatesTimestamp {
+            updatedAt = .now
+        }
     }
 
     mutating func removeMessage(id: UUID) {

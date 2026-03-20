@@ -36,6 +36,62 @@ private enum AssistantMessageMarkdownPreparationDecider {
     }
 }
 
+private actor AssistantMessageMarkdownCache {
+    static let shared = AssistantMessageMarkdownCache()
+
+    private let capacity = 12
+    private var cachedContents: [String: MarkdownContent] = [:]
+    private var cacheOrder: [String] = []
+    private var inFlightTasks: [String: Task<MarkdownContent, Never>] = [:]
+
+    func cachedContent(for text: String) -> MarkdownContent? {
+        guard let content = cachedContents[text] else {
+            return nil
+        }
+
+        touch(text)
+        return content
+    }
+
+    func preparedContent(for text: String) async -> MarkdownContent {
+        if let cached = cachedContents[text] {
+            touch(text)
+            return cached
+        }
+
+        if let inFlightTask = inFlightTasks[text] {
+            return await inFlightTask.value
+        }
+
+        let task = Task.detached(priority: .userInitiated) {
+            let content = MarkdownContent(text)
+            content.prewarm(renderMath: true, parseBlockDirectives: true)
+            return content
+        }
+        inFlightTasks[text] = task
+
+        let content = await task.value
+        inFlightTasks[text] = nil
+        insert(content, for: text)
+        return content
+    }
+
+    private func touch(_ text: String) {
+        cacheOrder.removeAll { $0 == text }
+        cacheOrder.append(text)
+    }
+
+    private func insert(_ content: MarkdownContent, for text: String) {
+        cachedContents[text] = content
+        touch(text)
+
+        while cacheOrder.count > capacity {
+            let evictedKey = cacheOrder.removeFirst()
+            cachedContents[evictedKey] = nil
+        }
+    }
+}
+
 struct AssistantMessageMarkdownView: View {
     let text: String
 
@@ -52,6 +108,14 @@ struct AssistantMessageMarkdownView: View {
 
     private var shouldPrepareOffMainThread: Bool {
         AssistantMessageMarkdownPreparationDecider.shouldPrepareOffMainThread(text)
+    }
+
+    static func prewarmIfNeeded(for text: String) async {
+        guard AssistantMessageMarkdownPreparationDecider.shouldPrepareOffMainThread(text) else {
+            return
+        }
+
+        _ = await AssistantMessageMarkdownCache.shared.preparedContent(for: text)
     }
 
     var body: some View {
@@ -117,11 +181,17 @@ struct AssistantMessageMarkdownView: View {
         preparedContent = nil
         preparedText = ""
 
-        let content = await Task.detached(priority: .userInitiated) {
-            let content = MarkdownContent(currentText)
-            content.prewarm(renderMath: true, parseBlockDirectives: true)
-            return content
-        }.value
+        if let cachedContent = await AssistantMessageMarkdownCache.shared.cachedContent(for: currentText) {
+            guard Task.isCancelled == false, currentText == text else {
+                return
+            }
+
+            preparedContent = cachedContent
+            preparedText = currentText
+            return
+        }
+
+        let content = await AssistantMessageMarkdownCache.shared.preparedContent(for: currentText)
 
         guard Task.isCancelled == false, currentText == text else {
             return

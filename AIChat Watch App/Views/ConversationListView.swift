@@ -65,6 +65,7 @@ struct ConversationListView: View {
                                 conversation: conversation,
                                 aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
                             )
+                            .equatable()
                         }
                         .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
@@ -76,6 +77,7 @@ struct ConversationListView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("conversation.list")
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
@@ -159,9 +161,27 @@ struct ConversationListView: View {
 }
 #endif
 
-struct ConversationRowView: View {
+struct ConversationRowView: View, Equatable {
     let conversation: ConversationThread
     let aiConfiguration: ConversationAIConfiguration
+
+    static func == (lhs: ConversationRowView, rhs: ConversationRowView) -> Bool {
+        lhs.rowSignature == rhs.rowSignature
+    }
+
+    private var rowSignature: WatchConversationRowSignature {
+        WatchConversationRowSignature(
+            id: conversation.id,
+            title: conversation.title,
+            updatedAt: conversation.updatedAt,
+            isFavorite: conversation.isFavorite,
+            previewText: conversation.previewText,
+            messageCount: conversation.messageCount,
+            containsAudioAttachments: conversation.containsAudioAttachments,
+            containsImageAttachments: conversation.containsImageAttachments,
+            aiConfiguration: aiConfiguration
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -241,6 +261,18 @@ struct ConversationRowView: View {
         .lineLimit(1)
         .minimumScaleFactor(0.9)
     }
+}
+
+private struct WatchConversationRowSignature: Equatable {
+    let id: UUID
+    let title: String
+    let updatedAt: Date
+    let isFavorite: Bool
+    let previewText: String
+    let messageCount: Int
+    let containsAudioAttachments: Bool
+    let containsImageAttachments: Bool
+    let aiConfiguration: ConversationAIConfiguration
 }
 
 private struct WatchConversationMetaItem: View {

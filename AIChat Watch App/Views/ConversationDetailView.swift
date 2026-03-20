@@ -35,8 +35,10 @@ private enum ComposerLayout {
 private enum ConversationScrollLayout {
     static let bottomAnchorID = "conversation-bottom-anchor"
     static let coordinateSpaceName = "conversation-messages-scroll"
-    static let interruptionDragMinimumDistance: CGFloat = 12
-    static let interruptionThreshold: CGFloat = 28
+    static let latestReplyStartAnchorID = "conversation-latest-reply-start-anchor"
+    static let interruptionDragMinimumDistance: CGFloat = 6
+    static let interruptionThreshold: CGFloat = 20
+    static let composerCollapseDragThreshold: CGFloat = 14
     static let suppressionDuration: TimeInterval = 0.28
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
 }
@@ -76,6 +78,7 @@ struct ConversationDetailView: View {
     @State private var activeAutoScrollSessionMessageID: UUID?
     @State private var interruptedAutoScrollSessionMessageID: UUID?
     @State private var suspendedStreamingRenderMessageID: UUID?
+    @State private var completedAutoScrollReplyMessageID: UUID?
     @State private var pendingHistoryAnchorMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
     @State private var messagesViewportHeight: CGFloat = 0
@@ -240,7 +243,8 @@ struct ConversationDetailView: View {
                                 conversationID: conversationID,
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
-                                forceExpandedContent: latestMessageID == message.id
+                                forceExpandedContent: latestMessageID == message.id,
+                                isLatestReplyAnchorTarget: latestMessageID == message.id && message.role == .assistant
                             )
                                 .equatable()
                                 .id(message.id)
@@ -304,6 +308,10 @@ struct ConversationDetailView: View {
                             return
                         }
 
+                        if abs(value.translation.height) >= ConversationScrollLayout.composerCollapseDragThreshold {
+                            collapseComposer()
+                        }
+
                         pauseStreamingRefresh(
                             for: streamingMessageID,
                             autoScrollSessionMessageID: autoScrollSessionMessageID
@@ -320,29 +328,37 @@ struct ConversationDetailView: View {
                 )
             }
             .onAppear {
+                isComposerExpanded = preferredComposerExpansion(for: conversation)
                 activeAutoScrollSessionMessageID = latestAssistantMessageID
                 isAutoScrollInterrupted = false
                 interruptedAutoScrollSessionMessageID = nil
                 suspendedStreamingRenderMessageID = nil
+                completedAutoScrollReplyMessageID = nil
                 pendingHistoryAnchorMessageID = nil
                 currentDistanceFromBottom = 0
                 autoScrollInvocationCount = 0
                 streamingRenderResumeTask?.cancel()
                 streamingRenderResumeTask = nil
                 prepareInitialHistoryIfNeeded(messages: conversation.messages)
-                scrollToBottomIfNeeded(
+                scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
                     animated: false,
                     autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID,
                     force: true
                 )
             }
             .onChange(of: conversation.messages.count) { _, _ in
                 reconcileRenderedHistory(with: conversation.messages)
-                scrollToBottomIfNeeded(
+                if conversation.messages.last?.role == .user {
+                    completedAutoScrollReplyMessageID = nil
+                }
+
+                scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
                     animated: true,
-                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID
                 )
             }
             .onChange(of: renderedMessageBudget) { _, newBudget in
@@ -360,24 +376,31 @@ struct ConversationDetailView: View {
                     return
                 }
 
-                scrollToBottomIfNeeded(
+                scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
                     animated: false,
-                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID
                 )
             }
             .onChange(of: conversation.updatedAt) { _, _ in
-                scrollToBottomIfNeeded(
+                scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
                     animated: false,
-                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID
                 )
             }
-            .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, _ in
-                scrollToBottomIfNeeded(
+            .onChange(of: chatStore.isSending(conversationID: conversationID)) { _, isSending in
+                if isSending {
+                    completedAutoScrollReplyMessageID = nil
+                }
+
+                scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
                     animated: false,
-                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestAssistantMessageID: latestAssistantMessageID
                 )
             }
             .onChange(of: streamingMessageID) { _, newMessageID in
@@ -385,6 +408,7 @@ struct ConversationDetailView: View {
                     newMessageID,
                     latestAssistantMessageID: latestAssistantMessageID,
                     autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    latestMessageID: latestMessageID,
                     with: proxy
                 )
             }
@@ -933,6 +957,19 @@ struct ConversationDetailView: View {
         }
     }
 
+    private func scrollToReplyStart(with proxy: ScrollViewProxy) {
+        isAutoScrollInterrupted = false
+        autoScrollInvocationCount += 1
+        scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
+
+        var transaction = Transaction()
+        transaction.animation = nil
+
+        withTransaction(transaction) {
+            proxy.scrollTo(ConversationScrollLayout.latestReplyStartAnchorID, anchor: .top)
+        }
+    }
+
     private func scrollToMessage(
         _ messageID: UUID,
         with proxy: ScrollViewProxy,
@@ -950,13 +987,20 @@ struct ConversationDetailView: View {
         conversation.messages.last(where: { $0.role == .assistant && $0.status == .streaming })?.id
     }
 
-    private func scrollToBottomIfNeeded(
+    private func scrollToAutoScrollTargetIfNeeded(
         with proxy: ScrollViewProxy,
         animated: Bool,
         autoScrollSessionMessageID: UUID?,
+        latestAssistantMessageID: UUID?,
         force: Bool = false
     ) {
         guard force || shouldAutoScroll(for: autoScrollSessionMessageID) else {
+            return
+        }
+
+        if let completedAutoScrollReplyMessageID,
+           completedAutoScrollReplyMessageID == latestAssistantMessageID {
+            scrollToReplyStart(with: proxy)
             return
         }
 
@@ -976,10 +1020,12 @@ struct ConversationDetailView: View {
         _ streamingMessageID: UUID?,
         latestAssistantMessageID: UUID?,
         autoScrollSessionMessageID: UUID?,
+        latestMessageID: UUID?,
         with proxy: ScrollViewProxy
     ) {
         if let streamingMessageID {
             activeAutoScrollSessionMessageID = streamingMessageID
+            completedAutoScrollReplyMessageID = nil
 
             if interruptedAutoScrollSessionMessageID != nil,
                interruptedAutoScrollSessionMessageID != streamingMessageID {
@@ -990,10 +1036,11 @@ struct ConversationDetailView: View {
             suspendedStreamingRenderMessageID = nil
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
-            scrollToBottomIfNeeded(
+            scrollToAutoScrollTargetIfNeeded(
                 with: proxy,
                 animated: false,
-                autoScrollSessionMessageID: autoScrollSessionMessageID
+                autoScrollSessionMessageID: autoScrollSessionMessageID,
+                latestAssistantMessageID: latestAssistantMessageID
             )
             return
         }
@@ -1002,13 +1049,20 @@ struct ConversationDetailView: View {
             activeAutoScrollSessionMessageID = latestAssistantMessageID
         }
 
+        if latestAssistantMessageID == latestMessageID {
+            completedAutoScrollReplyMessageID = latestAssistantMessageID
+        } else {
+            completedAutoScrollReplyMessageID = nil
+        }
+
         suspendedStreamingRenderMessageID = nil
         streamingRenderResumeTask?.cancel()
         streamingRenderResumeTask = nil
-        scrollToBottomIfNeeded(
+        scrollToAutoScrollTargetIfNeeded(
             with: proxy,
             animated: false,
-            autoScrollSessionMessageID: autoScrollSessionMessageID
+            autoScrollSessionMessageID: autoScrollSessionMessageID,
+            latestAssistantMessageID: latestAssistantMessageID
         )
     }
 
@@ -1077,6 +1131,12 @@ struct ConversationDetailView: View {
 
         let distanceFromBottom = maxY - messagesViewportHeight
         currentDistanceFromBottom = max(distanceFromBottom, 0)
+
+        if completedAutoScrollReplyMessageID == autoScrollSessionMessageID,
+           completedAutoScrollReplyMessageID != nil {
+            return
+        }
+
         guard distanceFromBottom > ConversationScrollLayout.interruptionThreshold else {
             guard interruptedAutoScrollSessionMessageID != autoScrollSessionMessageID else {
                 return
@@ -1209,6 +1269,21 @@ struct ConversationDetailView: View {
             ),
             preferredIncrement: ConversationRendering.olderRenderBudget
         )
+    }
+
+    private func preferredComposerExpansion(for conversation: ConversationThread) -> Bool {
+        let hasDraftContent =
+            chatStore.draftText(for: conversationID).nonEmptyTrimmed != nil ||
+            chatStore.draftAttachments(for: conversationID).isEmpty == false
+        let isBusy =
+            chatStore.isSending(conversationID: conversationID) ||
+            chatStore.isTranscribing(conversationID: conversationID)
+
+        if hasDraftContent || isBusy || conversation.messages.isEmpty {
+            return true
+        }
+
+        return conversation.messages.count < 6
     }
 
     private func sendCurrentDraft() {

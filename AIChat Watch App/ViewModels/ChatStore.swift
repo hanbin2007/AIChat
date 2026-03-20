@@ -1768,7 +1768,8 @@ final class ChatStore: ObservableObject {
                     createdAt: conversation.messages.first(where: { $0.id == id })?.createdAt ?? fallbackCreatedAt,
                     attachments: normalizedMessage.attachments,
                     status: normalizedMessage.status
-                )
+                ),
+                updatesTimestamp: status != .streaming
             )
         }
     }

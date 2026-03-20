@@ -17,6 +17,7 @@ struct ChatBubbleView: View, Equatable {
     let message: ChatMessage
     let suspendStreamingRender: Bool
     let forceExpandedContent: Bool
+    let isLatestReplyAnchorTarget: Bool
 
     @State private var isShowingMessageActions = false
     @State private var didTriggerStreamingStartHaptics = false
@@ -32,12 +33,14 @@ struct ChatBubbleView: View, Equatable {
         conversationID: UUID,
         message: ChatMessage,
         suspendStreamingRender: Bool = false,
-        forceExpandedContent: Bool = false
+        forceExpandedContent: Bool = false,
+        isLatestReplyAnchorTarget: Bool = false
     ) {
         self.conversationID = conversationID
         self.message = message
         self.suspendStreamingRender = suspendStreamingRender
         self.forceExpandedContent = forceExpandedContent
+        self.isLatestReplyAnchorTarget = isLatestReplyAnchorTarget
         _renderedText = State(initialValue: message.cleanedText)
         _renderedThoughtSummary = State(initialValue: message.cleanedThoughtSummary)
     }
@@ -99,11 +102,20 @@ struct ChatBubbleView: View, Equatable {
         "conversation.message.thought-summary.state.\(message.id.uuidString.lowercased())"
     }
 
+    private var latestReplyStartAnchorID: String {
+        "conversation-latest-reply-start-anchor"
+    }
+
+    private var latestReplyStartAccessibilityIdentifier: String {
+        "conversation.latest.reply.start"
+    }
+
     static func == (lhs: ChatBubbleView, rhs: ChatBubbleView) -> Bool {
         lhs.conversationID == rhs.conversationID &&
         lhs.message.renderSignature == rhs.message.renderSignature &&
         lhs.suspendStreamingRender == rhs.suspendStreamingRender &&
-        lhs.forceExpandedContent == rhs.forceExpandedContent
+        lhs.forceExpandedContent == rhs.forceExpandedContent &&
+        lhs.isLatestReplyAnchorTarget == rhs.isLatestReplyAnchorTarget
     }
 
     var body: some View {
@@ -199,6 +211,13 @@ struct ChatBubbleView: View, Equatable {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.8))
             } else if displayedText.isEmpty == false {
+                if isUser == false, isLatestReplyAnchorTarget {
+                    MessageAnchorMarker(
+                        anchorID: latestReplyStartAnchorID,
+                        accessibilityIdentifier: latestReplyStartAccessibilityIdentifier
+                    )
+                }
+
                 messageTextContent
             }
 
@@ -453,6 +472,21 @@ struct ChatBubbleView: View, Equatable {
     }
 }
 
+private struct MessageAnchorMarker: View {
+    let anchorID: String
+    let accessibilityIdentifier: String
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: 1)
+            .id(anchorID)
+            .accessibilityElement()
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .accessibilityLabel(accessibilityIdentifier)
+    }
+}
+
 private struct ThoughtSummaryCard: View {
     let thoughtSummary: String
     let isStreaming: Bool
@@ -628,6 +662,9 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(MessageBodyLayout.collapsedLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
+                    .task(id: text) {
+                        await AssistantMessageMarkdownView.prewarmIfNeeded(for: text)
+                    }
             } else {
                 AssistantMessageMarkdownView(text: text)
             }

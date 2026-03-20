@@ -414,24 +414,25 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
-        if !bottomMarker.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing touch-scroll bottom marker hierarchy")
-            XCTFail("Missing bottom marker for touch scroll verification.")
-            return
-        }
-
-        if !waitForNonEmptyFrame(of: bottomMarker, timeout: 5) {
-            attachDebugHierarchy(app, named: "Missing touch-scroll bottom marker frame hierarchy")
-            XCTFail("Bottom marker never received a measurable frame.")
-            return
-        }
-
-        let initialBottomMidY = bottomMarker.frame.midY
-
         let topMarker = app.staticTexts["Touch Scroll Top Marker"]
-        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
-        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.86))
+        if !topMarker.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing touch-scroll top marker hierarchy")
+            XCTFail("Missing top marker for touch scroll verification.")
+            return
+        }
+
+        if !waitForNonEmptyFrame(of: topMarker, timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing touch-scroll top marker frame hierarchy")
+            XCTFail("Top marker never received a measurable frame.")
+            return
+        }
+
+        attachScreenshot(app, named: "touch-scroll-start")
+
+        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
+        let initialTopMidY = topMarker.frame.midY
+        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.74))
+        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
 
         var didScroll = false
         for _ in 0..<6 {
@@ -439,15 +440,15 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
             let deadline = Date().addingTimeInterval(1.2)
             while Date() < deadline {
-                let bottomMoved = bottomMarker.exists &&
-                    bottomMarker.frame.midY > initialBottomMidY + 18
-                let bottomMovedOffscreen = bottomMarker.exists &&
-                    scrollView.frame.intersects(bottomMarker.frame) == false
-                let topReached = topMarker.exists &&
-                    topMarker.frame.isEmpty == false &&
-                    scrollView.frame.intersects(topMarker.frame)
+                let topMoved = topMarker.exists &&
+                    topMarker.frame.midY < initialTopMidY - 18
+                let topMovedOffscreen = topMarker.exists &&
+                    scrollView.frame.intersects(topMarker.frame) == false
+                let bottomReached = bottomMarker.exists &&
+                    bottomMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(bottomMarker.frame)
 
-                if bottomMoved || bottomMovedOffscreen || topReached {
+                if topMoved || topMovedOffscreen || bottomReached {
                     didScroll = true
                     break
                 }
@@ -462,11 +463,11 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         let evidence = XCTAttachment(
             string: [
-                "initialBottomMidY=\(initialBottomMidY)",
-                "finalBottomFrame=\(bottomMarker.exists ? String(describing: bottomMarker.frame) : "missing")",
-                "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")",
-                "topExists=\(topMarker.exists)",
-                "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")"
+                "initialTopMidY=\(initialTopMidY)",
+                "finalTopFrame=\(topMarker.exists ? String(describing: topMarker.frame) : "missing")",
+                "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")",
+                "bottomExists=\(bottomMarker.exists)",
+                "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")"
             ].joined(separator: "\n")
         )
         evidence.name = "touch-scroll-evidence"
@@ -478,7 +479,149 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             attachScreenshot(app, named: "touch-scroll-failure")
         }
 
+        attachScreenshot(app, named: "touch-scroll-finish")
         XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript.")
+    }
+
+    @MainActor
+    func testConversationListCanScrollWhileBackgroundReplyStreams() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
+        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
+        app.launch()
+
+        let list = app.collectionViews["conversation.list"].firstMatch
+        if !list.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing conversation list hierarchy")
+            XCTFail("Missing conversation list for history-scroll verification.")
+            return
+        }
+
+        attachScreenshot(app, named: "history-list-scroll-start")
+
+        let bottomRow = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000548"]
+        if !revealElement(bottomRow, in: app, directions: [.up], timeout: 12, maxSwipesPerDirection: 10) {
+            attachDebugHierarchy(app, named: "History list never reached bottom marker hierarchy")
+            attachScreenshot(app, named: "history-list-scroll-failure")
+            XCTFail("The history conversation list did not scroll to the bottom marker.")
+            return
+        }
+
+        attachScreenshot(app, named: "history-list-scroll-finish")
+        assertZeroDetectedHangs(in: app, context: "history-list-scroll")
+        XCTAssertTrue(bottomRow.exists)
+    }
+
+    @MainActor
+    func testConversationListScrollPerformance() throws {
+        let app = XCUIApplication()
+        measure(metrics: conversationListScrollMetrics(for: app)) {
+            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
+            app.launch()
+
+            let list = app.collectionViews["conversation.list"].firstMatch
+            XCTAssertTrue(list.waitForExistence(timeout: 10))
+
+            for _ in 0..<4 {
+                list.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+                list.swipeDown()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+            }
+
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testHeavyMarkdownConversationRendersWithoutBlockingInitialLoad() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_heavy_markdown"
+        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing heavy-markdown conversation hierarchy")
+            XCTFail("Missing conversation scroll view for heavy markdown.")
+            return
+        }
+
+        attachScreenshot(app, named: "heavy-markdown-loading")
+
+        let heading = app.staticTexts["推导步骤"].firstMatch
+        if !heading.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Heavy markdown heading missing hierarchy")
+            attachScreenshot(app, named: "heavy-markdown-load-failure")
+            XCTFail("The heavy markdown reply did not finish its initial render.")
+            return
+        }
+
+        assertZeroDetectedHangs(in: app, context: "heavy-markdown-initial-load")
+        attachScreenshot(app, named: "heavy-markdown-loaded")
+    }
+
+    @MainActor
+    func testHeavyMarkdownInitialRenderPerformance() throws {
+        let app = XCUIApplication()
+        measure(metrics: heavyMarkdownInitialRenderMetrics(for: app)) {
+            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_heavy_markdown"
+            app.launch()
+
+            let heading = app.staticTexts["推导步骤"].firstMatch
+            XCTAssertTrue(heading.waitForExistence(timeout: 10))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testReplyCompletionScrollsToStartOfLatestReply() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_reply_completion_anchor"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing reply-completion conversation hierarchy")
+            XCTFail("Missing conversation scroll view for reply-completion anchor verification.")
+            return
+        }
+
+        attachScreenshot(app, named: "reply-completion-anchor-start")
+
+        let startMarker = app.descendants(matching: .any)["conversation.latest.reply.start"].firstMatch
+        let endMarker = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS %@", "Reply End Marker")
+        ).firstMatch
+
+        if !endMarker.waitForExistence(timeout: 12) {
+            attachDebugHierarchy(app, named: "Reply completion end marker missing hierarchy")
+            XCTFail("The reply never completed in the completion-anchor scenario.")
+            return
+        }
+
+        XCTAssertTrue(waitForNonEmptyFrame(of: startMarker, timeout: 5))
+
+        let isStartVisible = scrollView.frame.intersects(startMarker.frame)
+        let evidence = XCTAttachment(
+            string: [
+                "startFrame=\(startMarker.frame)",
+                "endFrame=\(endMarker.frame)",
+                "scrollFrame=\(scrollView.frame)",
+                "startVisible=\(isStartVisible)"
+            ].joined(separator: "\n")
+        )
+        evidence.name = "reply-completion-anchor-evidence"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        if isStartVisible == false {
+            attachDebugHierarchy(app, named: "Reply completion anchor failure hierarchy")
+            attachScreenshot(app, named: "reply-completion-anchor-failure")
+        }
+
+        attachScreenshot(app, named: "reply-completion-anchor-success")
+        XCTAssertTrue(isStartVisible, "The latest reply should settle with its start visible after completion.")
     }
 
     @MainActor
@@ -730,6 +873,60 @@ final class AIChat_Watch_AppUITests: XCTestCase {
                     return (String(parts[0]), String(parts[1]))
                 }
         )
+    }
+
+    @MainActor
+    private func conversationListScrollMetrics(for app: XCUIApplication) -> [any XCTMetric] {
+        if #available(watchOS 26.0, *) {
+            return [
+                XCTClockMetric(),
+                XCTHitchMetric(application: app),
+                XCTOSSignpostMetric.scrollingAndDecelerationMetric
+            ]
+        }
+
+        return [
+            XCTClockMetric(),
+            XCTOSSignpostMetric.scrollingAndDecelerationMetric
+        ]
+    }
+
+    @MainActor
+    private func heavyMarkdownInitialRenderMetrics(for app: XCUIApplication) -> [any XCTMetric] {
+        if #available(watchOS 26.0, *) {
+            return [XCTClockMetric(), XCTHitchMetric(application: app)]
+        }
+
+        return [XCTClockMetric()]
+    }
+
+    @MainActor
+    private func assertZeroDetectedHangs(in app: XCUIApplication, context: String) {
+        let telemetry = app.staticTexts["ui-test-hang-monitor"].firstMatch
+        XCTAssertTrue(telemetry.waitForExistence(timeout: 10), "Missing hang monitor telemetry for \(context).")
+
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        let values = debugTelemetry(from: telemetry.label)
+        let count = Int(values["count"] ?? "")
+        let maxMilliseconds = values["maxMs"] ?? "missing"
+
+        let evidence = XCTAttachment(
+            string: [
+                "context=\(context)",
+                "label=\(telemetry.label)",
+                "count=\(count.map(String.init) ?? "missing")",
+                "maxMs=\(maxMilliseconds)"
+            ].joined(separator: "\n")
+        )
+        evidence.name = "\(context)-hang-monitor"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        XCTAssertEqual(count, 0, "Detected non-zero hang events for \(context). maxMs=\(maxMilliseconds)")
     }
 
     @MainActor
