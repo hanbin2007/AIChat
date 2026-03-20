@@ -67,6 +67,7 @@ nonisolated enum CompanionSyncEvent {
     case promptPresets([PromptPreset])
     case activationRequestCode(String)
     case activationCodeImport(code: String, transferID: String?)
+    case relayPairingToken(token: String, expiresAt: Date?)
 }
 
 nonisolated struct CompanionIncomingAttachmentBlob {
@@ -322,6 +323,25 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         session.transferUserInfo(payload)
     }
 
+    func pushRelayPairingToken(_ pairingToken: String, expiresAt: Date) {
+        guard syncEnabled, WCSession.isSupported() else {
+            return
+        }
+
+        let payload: [String: Any] = [
+            "type": "relay_pairing_token",
+            "pairingToken": pairingToken,
+            "expiresAt": expiresAt.timeIntervalSince1970
+        ]
+        let session = WCSession.default
+
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+        }
+
+        session.transferUserInfo(payload)
+    }
+
     #if os(iOS)
     func sessionDidBecomeInactive(_ session: WCSession) {
         refreshStatus(for: session)
@@ -542,6 +562,17 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                     code: code,
                     transferID: payload["transferID"] as? String
                 ))
+            }
+        case "relay_pairing_token":
+            guard let pairingToken = payload["pairingToken"] as? String else {
+                return
+            }
+
+            let expiresAt = (payload["expiresAt"] as? TimeInterval)
+                .map(Date.init(timeIntervalSince1970:))
+
+            Task { @MainActor in
+                eventHandler?(.relayPairingToken(token: pairingToken, expiresAt: expiresAt))
             }
         default:
             break

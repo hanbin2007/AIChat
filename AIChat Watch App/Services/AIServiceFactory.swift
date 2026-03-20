@@ -69,9 +69,7 @@ enum AIServiceFactory {
 
             return GeminiTranscriptionService(configuration: configuration)
         case .relay:
-            guard configuration.relayBaseURL != nil,
-                  configuration.relayBearerToken != nil
-            else {
+            guard configuration.relayBaseURL != nil else {
                 return nil
             }
 
@@ -91,9 +89,7 @@ enum AIServiceFactory {
                 defaultModel: configuration.geminiModel
             )
         case .relay:
-            guard configuration.relayMemoryExtractURL != nil,
-                  configuration.relayBearerToken != nil
-            else {
+            guard configuration.relayMemoryExtractURL != nil else {
                 return HeuristicMemoryMaintenanceService()
             }
 

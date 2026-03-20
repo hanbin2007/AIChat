@@ -691,6 +691,10 @@ private struct UITestBootstrap {
             configuration: configuration,
             rootURL: storageRootURL
         )
+        let activationRepository = ActivationRepository(
+            configuration: configuration,
+            rootURL: storageRootURL
+        )
         let rawDeviceIdentifier = "UI-TEST-WATCH-DELETE-PERSISTENCE"
         let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
         let deviceIdentity = WatchDeviceIdentity(
@@ -700,7 +704,7 @@ private struct UITestBootstrap {
         )
 
         seedUITestActivationStateIfNeeded(
-            defaults: defaults,
+            activationRepository: activationRepository,
             deviceToken: deviceToken
         )
 
@@ -717,7 +721,7 @@ private struct UITestBootstrap {
             transcriptionService: AIServiceFactory.makeTranscriptionService(configuration: configuration),
             configuration: configuration,
             syncBridge: CompanionSyncBridge(isEnabled: false),
-            activationRepository: ActivationRepository(defaults: defaults),
+            activationRepository: activationRepository,
             deviceIdentity: deviceIdentity,
             defaults: defaults
         )
@@ -730,11 +734,10 @@ private struct UITestBootstrap {
     }
 
     private static func seedUITestActivationStateIfNeeded(
-        defaults: UserDefaults,
+        activationRepository: ActivationRepository,
         deviceToken: UInt64
     ) {
-        let storageKey = "offline_activation_state_v1"
-        guard defaults.data(forKey: storageKey) == nil else {
+        guard activationRepository.loadState() == nil else {
             return
         }
 
@@ -752,9 +755,7 @@ private struct UITestBootstrap {
             usedMessageCount: 0
         )
 
-        if let data = try? JSONEncoder().encode(activeState) {
-            defaults.set(data, forKey: storageKey)
-        }
+        try? activationRepository.saveState(activeState)
     }
 
     private static func seedDeletePersistenceConversationIfNeeded(

@@ -23,6 +23,13 @@ final class RelayServerController: ObservableObject {
     @Published private(set) var lastFailureMessage: String?
     @Published private(set) var startedAt: Date?
     @Published private(set) var feedback: RelayActionFeedback?
+    @Published private(set) var billingAccounts: [RelayAccountSummary] = []
+    @Published private(set) var billingDevices: [RelayDeviceSummary] = []
+    @Published private(set) var billingKeys: [RelayKeySummary] = []
+    @Published private(set) var billingGrants: [RelayGrantSummary] = []
+    @Published private(set) var billingUsage: [RelayUsageSummary] = []
+    @Published private(set) var billingPlans: [RelayPlanCatalogItem] = []
+    @Published private(set) var billingPolicy: RelayMeteringPolicySnapshot = RelayBillingStore.defaultPolicy
 
     let settings: RelaySettingsStore
 
@@ -31,16 +38,20 @@ final class RelayServerController: ObservableObject {
     private var feedbackDismissTask: Task<Void, Never>?
     private let eventSink: RelayServerEventSink
     private let server: LocalRelayServer
+    private let billingStore: RelayBillingStore
 
     init(settings: RelaySettingsStore? = nil) {
         let resolvedSettings = settings ?? RelaySettingsStore()
         let eventSink = RelayServerEventSink()
+        let billingStore = RelayBillingStore()
 
         self.settings = resolvedSettings
         self.eventSink = eventSink
+        self.billingStore = billingStore
         self.server = LocalRelayServer(
             configurationProvider: Self.makeConfigurationProvider(settings: resolvedSettings),
-            eventHandler: Self.makeEventHandler(sink: eventSink)
+            eventHandler: Self.makeEventHandler(sink: eventSink),
+            billingStore: billingStore
         )
 
         self.eventSink.controller = self
@@ -50,6 +61,10 @@ final class RelayServerController: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+
+        Task {
+            await refreshBillingSnapshot()
+        }
     }
 
     var configurationIssue: String? {
@@ -185,6 +200,20 @@ final class RelayServerController: ObservableObject {
 
     var completedSetupStepCount: Int {
         setupSteps.filter { $0.status == .complete }.count
+    }
+
+    var billingAccountCount: Int {
+        billingAccounts.count
+    }
+
+    var activeKeyCount: Int {
+        billingKeys.filter { $0.state == .active }.count
+    }
+
+    var totalManagedCredits: Int {
+        billingAccounts.reduce(into: 0) { partialResult, account in
+            partialResult += account.creditBalance
+        }
     }
 
     var clientConfigurationSnippet: String {
@@ -328,6 +357,124 @@ final class RelayServerController: ObservableObject {
         feedback = nil
     }
 
+    func refreshBillingSnapshot() async {
+        let snapshot = await billingStore.snapshot()
+        billingAccounts = snapshot.accounts
+        billingDevices = snapshot.devices
+        billingKeys = snapshot.keys
+        billingGrants = snapshot.grants
+        billingUsage = snapshot.usage
+        billingPlans = snapshot.plans
+        billingPolicy = snapshot.meteringPolicy
+    }
+
+    func updateAccount(
+        accountID: UUID,
+        displayName: String?,
+        adminNote: String?,
+        state: RelayAccountState?,
+        planID: String?
+    ) {
+        Task {
+            do {
+                try await billingStore.modifyAccount(
+                    accountID: accountID,
+                    displayName: displayName,
+                    adminNote: adminNote,
+                    state: state,
+                    planID: planID
+                )
+                await refreshBillingSnapshot()
+            } catch {
+                showFeedback(title: "Account Update Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
+    func updateDevice(
+        deviceID: String,
+        alias: String?,
+        note: String?
+    ) {
+        Task {
+            do {
+                try await billingStore.modifyDevice(deviceID: deviceID, alias: alias, note: note)
+                await refreshBillingSnapshot()
+            } catch {
+                showFeedback(title: "Device Update Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
+    func updateKey(
+        keyID: UUID,
+        state: RelayKeyState?,
+        note: String?
+    ) {
+        Task {
+            do {
+                try await billingStore.modifyKey(keyID: keyID, state: state, note: note)
+                await refreshBillingSnapshot()
+            } catch {
+                showFeedback(title: "Key Update Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
+    func updateGrant(
+        grantID: UUID,
+        remainingCredits: Int?,
+        note: String?
+    ) {
+        Task {
+            do {
+                try await billingStore.modifyGrant(
+                    grantID: grantID,
+                    remainingCredits: remainingCredits,
+                    note: note
+                )
+                await refreshBillingSnapshot()
+            } catch {
+                showFeedback(title: "Grant Update Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
+    func grantCredits(
+        accountID: UUID,
+        credits: Int,
+        source: RelayAccessSource = .subscription,
+        expiresAt: Date?,
+        note: String?
+    ) {
+        Task {
+            do {
+                try await billingStore.grantCredits(
+                    accountID: accountID,
+                    credits: credits,
+                    source: source,
+                    expiresAt: expiresAt,
+                    note: note
+                )
+                await refreshBillingSnapshot()
+            } catch {
+                showFeedback(title: "Credit Grant Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
+    func saveBillingPolicy(_ policy: RelayMeteringPolicySnapshot, plans: [RelayPlanCatalogItem]) {
+        Task {
+            do {
+                try await billingStore.updateMeteringPolicy(policy, plans: plans)
+                await refreshBillingSnapshot()
+                showFeedback(title: "Policy Saved", message: "Updated billing plans and metering policy.", style: .success)
+            } catch {
+                showFeedback(title: "Policy Save Failed", message: error.localizedDescription, style: .error)
+            }
+        }
+    }
+
     private func handleServerEvent(_ event: RelayServerEvent) {
         switch event {
         case .didStart(let port):
@@ -351,9 +498,15 @@ final class RelayServerController: ObservableObject {
             requestCount += 1
             lastRequestAt = .now
             appendLog(level: .info, message: requestLogMessage(prefix: "Received", path: path, remoteAddress: remoteAddress))
+            Task {
+                await refreshBillingSnapshot()
+            }
         case .didCompleteRequest(let path, let remoteAddress):
             completedRequestCount += 1
             appendLog(level: .success, message: requestLogMessage(prefix: "Completed", path: path, remoteAddress: remoteAddress))
+            Task {
+                await refreshBillingSnapshot()
+            }
         case .didFailRequest(let path, let remoteAddress, let statusCode, let message):
             let level: RelayLogLevel = statusCode >= 500 ? .error : .warning
             failedRequestCount += 1
@@ -368,6 +521,9 @@ final class RelayServerController: ObservableObject {
                     suffix: message
                 )
             )
+            Task {
+                await refreshBillingSnapshot()
+            }
         case .debug(let event):
             appendDebug(event)
         case .log(let level, let message):
@@ -463,7 +619,7 @@ final class RelayServerController: ObservableObject {
         value.replacingOccurrences(of: "//", with: "/$()/")
     }
 
-    private func showFeedback(
+    func showFeedback(
         title: String,
         message: String,
         style: RelayFeedbackStyle

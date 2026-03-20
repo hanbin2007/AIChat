@@ -19,11 +19,16 @@ nonisolated struct CompanionDeviceIdentity: Equatable, Sendable {
 }
 
 nonisolated enum CompanionDeviceIdentityProvider {
-    private static let fallbackIdentifierKey = "device_activation_fallback_identifier"
-
     @MainActor
-    static func current(defaults: UserDefaults = .standard) -> CompanionDeviceIdentity {
-        let rawIdentifier = currentVendorIdentifier() ?? storedFallbackIdentifier(defaults: defaults)
+    static func current(
+        activationRepository: ActivationRepository? = nil,
+        configuration: AppConfiguration? = nil,
+        rootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> CompanionDeviceIdentity {
+        let repository = activationRepository ??
+            ActivationRepository(configuration: configuration, rootURL: rootURL, fileManager: fileManager)
+        let rawIdentifier = currentVendorIdentifier() ?? repository.loadOrCreateFallbackIdentifier()
         let deviceToken = OfflineActivation.deviceToken(for: rawIdentifier)
 
         return CompanionDeviceIdentity(
@@ -39,20 +44,9 @@ nonisolated enum CompanionDeviceIdentityProvider {
         return WKInterfaceDevice.current().identifierForVendor?.uuidString
         #elseif os(iOS)
         return UIDevice.current.identifierForVendor?.uuidString
-        #else
+    #else
         return nil
         #endif
-    }
-
-    private static func storedFallbackIdentifier(defaults: UserDefaults) -> String {
-        if let existing = defaults.string(forKey: fallbackIdentifierKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           existing.isEmpty == false {
-            return existing
-        }
-
-        let generated = UUID().uuidString.uppercased()
-        defaults.set(generated, forKey: fallbackIdentifierKey)
-        return generated
     }
 }
 

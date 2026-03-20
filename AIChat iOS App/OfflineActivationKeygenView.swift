@@ -13,8 +13,9 @@ struct OfflineActivationKeygenView: View {
     @State private var validFrom = Date.now
     @State private var hasExpiry = true
     @State private var validUntil = Calendar.current.date(byAdding: .day, value: 30, to: .now) ?? .now
-    @State private var hasMessageLimit = true
-    @State private var messageLimit = 200
+    @State private var hasCreditLimit = true
+    @State private var creditLimit = 200
+    @State private var note = ""
     @State private var useAllModels = true
     @State private var selectedModelIDs = Set(LicensedModelCatalog.supportedModels.map(\.id))
     @State private var generatedCode = ""
@@ -38,8 +39,9 @@ struct OfflineActivationKeygenView: View {
             .onChange(of: validFrom) { _ in clearGeneratedState() }
             .onChange(of: validUntil) { _ in clearGeneratedState() }
             .onChange(of: hasExpiry) { _ in clearGeneratedState() }
-            .onChange(of: hasMessageLimit) { _ in clearGeneratedState() }
-            .onChange(of: messageLimit) { _ in clearGeneratedState() }
+            .onChange(of: hasCreditLimit) { _ in clearGeneratedState() }
+            .onChange(of: creditLimit) { _ in clearGeneratedState() }
+            .onChange(of: note) { _ in clearGeneratedState() }
             .onChange(of: selectedModelIDs) { _ in clearGeneratedState() }
             .onChange(of: useAllModels) { _ in clearGeneratedState() }
         }
@@ -76,11 +78,19 @@ struct OfflineActivationKeygenView: View {
                 DatePicker("到期时间", selection: $validUntil, in: validFrom...)
             }
 
-            Toggle("限制发送次数", isOn: $hasMessageLimit)
-            if hasMessageLimit {
-                Stepper(value: $messageLimit, in: 1...Int(UInt16.max), step: 10) {
-                    LabeledContent("消息次数", value: "\(messageLimit)")
+            Toggle("限制 Credit", isOn: $hasCreditLimit)
+            if hasCreditLimit {
+                Stepper(value: $creditLimit, in: 1...Int(UInt16.max), step: 10) {
+                    LabeledContent("Credit 数", value: "\(creditLimit)")
                 }
+            }
+
+            TextField("备注（仅运营侧记录，不写入激活码）", text: $note, axis: .vertical)
+                .lineLimit(3, reservesSpace: true)
+
+            if hasCreditLimit {
+                LabeledContent("Gemini 成本上限", value: usdText(estimatedGeminiCostUSD))
+                LabeledContent("建议售价", value: usdText(suggestedRetailPriceUSD))
             }
         }
     }
@@ -195,7 +205,7 @@ struct OfflineActivationKeygenView: View {
             return false
         }
 
-        guard hasMessageLimit == false || messageLimit > 0 else {
+        guard hasCreditLimit == false || creditLimit > 0 else {
             return false
         }
 
@@ -228,7 +238,7 @@ struct OfflineActivationKeygenView: View {
             let policy = OfflineActivationPolicy(
                 validFrom: validFrom,
                 validUntil: hasExpiry ? validUntil : nil,
-                messageLimit: hasMessageLimit ? messageLimit : nil,
+                messageLimit: hasCreditLimit ? creditLimit : nil,
                 allowedModelIDs: useAllModels ? nil : selectedModelIDs
             )
             generatedCode = try OfflineActivation.makeActivationCode(
@@ -254,5 +264,28 @@ struct OfflineActivationKeygenView: View {
         ]
 
         return components.url
+    }
+
+    private var estimatedGeminiCostUSD: Decimal {
+        Decimal(hasCreditLimit ? creditLimit : 0) / 1000
+    }
+
+    private var suggestedRetailPriceUSD: Decimal {
+        roundUpToPricePoint(estimatedGeminiCostUSD / Decimal(string: "0.55")!)
+    }
+
+    private func roundUpToPricePoint(_ value: Decimal) -> Decimal {
+        guard value > 0 else {
+            return 0
+        }
+
+        let number = NSDecimalNumber(decimal: value).doubleValue
+        let rounded = ceil(number - 0.99)
+        let candidate = max(0.99, rounded + 0.99)
+        return Decimal(candidate)
+    }
+
+    private func usdText(_ value: Decimal) -> String {
+        String(format: "$%.2f", NSDecimalNumber(decimal: value).doubleValue)
     }
 }

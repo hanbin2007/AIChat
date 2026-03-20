@@ -791,7 +791,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 in: conversation.messages,
                 budget: 10
             ),
-            1
+            2
         )
 
         measure(metrics: [XCTClockMetric()], options: options) {
@@ -2104,7 +2104,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
 
-        let activationRepository = ActivationRepository(defaults: defaults)
+        let activationRepository = ActivationRepository(configuration: configuration, rootURL: repositoryRootURL)
         let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
         let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
         let deviceIdentity = WatchDeviceIdentity(
@@ -2203,7 +2203,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             transcriptionService: nil,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
-            activationRepository: ActivationRepository(defaults: defaults),
+            activationRepository: ActivationRepository(configuration: configuration, rootURL: repositoryRootURL),
             defaults: defaults
         )
 
@@ -2242,7 +2242,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
 
-        let activationRepository = ActivationRepository(defaults: defaults)
+        let activationRepository = ActivationRepository(configuration: configuration, rootURL: watchRepositoryRootURL)
         let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
         let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
         let deviceIdentity = WatchDeviceIdentity(
@@ -2274,7 +2274,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         try await watchStore.applyActivationCode(activationCode, now: now)
 
         let conversationID = await watchStore.createConversation()
-        let sharedConversation = try XCTUnwrap(watchStore.conversation(id: conversationID))
+        let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
+        let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
         let iphoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)
         let iphoneStore = ChatStore(
@@ -2335,7 +2336,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
 
-        let activationRepository = ActivationRepository(defaults: defaults)
+        let activationRepository = ActivationRepository(configuration: configuration, rootURL: watchRepositoryRootURL)
         let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
         let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
         let deviceIdentity = WatchDeviceIdentity(
@@ -2367,7 +2368,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         try await watchStore.applyActivationCode(activationCode, now: now)
 
         let conversationID = await watchStore.createConversation()
-        let sharedConversation = try XCTUnwrap(watchStore.conversation(id: conversationID))
+        let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
+        let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
         let iphoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)
         let iphoneStore = ChatStore(
@@ -2490,7 +2492,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
 
-        let activationRepository = ActivationRepository(defaults: defaults)
+        let activationRepository = ActivationRepository(configuration: configuration, rootURL: repositoryRootURL)
         let rawDeviceIdentifier = "TEST-DEVICE-\(UUID().uuidString)"
         let deviceToken = OfflineActivation.deviceToken(for: rawDeviceIdentifier)
         let deviceIdentity = WatchDeviceIdentity(
