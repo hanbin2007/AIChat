@@ -31,6 +31,12 @@ struct ActivationCenterView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                 .listRowBackground(Color.clear)
 
+                if chatStore.configuration.backendMode == .relay {
+                    onlineAccountSection
+                    onlinePlansSection
+                    recentUsageSection
+                }
+
                 Section("当前设备") {
                     LabeledContent("设备码", value: chatStore.deviceIdentity.displayToken)
                     LabeledContent("请求有效", value: L10n.tr("common.duration.30m"))
@@ -110,7 +116,7 @@ struct ActivationCenterView: View {
                         LabeledContent("生效时间", value: licenseState.license.validFrom.formatted(date: .abbreviated, time: .shortened))
                         LabeledContent("到期时间", value: licenseState.license.validUntil?.formatted(date: .abbreviated, time: .shortened) ?? "长期")
                         LabeledContent("可用模型", value: allowedModelsText(for: licenseState.license.allowedModelIDs))
-                        LabeledContent("次数限制", value: limitText(for: licenseState))
+                        LabeledContent("Credit 限额", value: limitText(for: licenseState))
                     }
                 }
 
@@ -126,7 +132,7 @@ struct ActivationCenterView: View {
                     }
                 }
             }
-            .navigationTitle("离线激活")
+            .navigationTitle("激活与订阅")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -140,6 +146,114 @@ struct ActivationCenterView: View {
             }
             .onAppear {
                 refreshRequestCode()
+                if chatStore.configuration.backendMode == .relay {
+                    Task {
+                        await chatStore.refreshRelayCatalog()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var onlineAccountSection: some View {
+        Section("在线账户") {
+            if let account = chatStore.relayAccountStatus?.account {
+                LabeledContent("来源", value: sourceText(chatStore.relayAccountStatus?.key?.source))
+                LabeledContent("状态", value: accountStateText(account.state))
+                LabeledContent("余额", value: "\(account.creditBalance) credits")
+                LabeledContent("套餐", value: planTitle(account.planID))
+
+                if let expiresAt = account.creditExpiresAt {
+                    LabeledContent("最近到期", value: expiresAt.formatted(date: .abbreviated, time: .shortened))
+                }
+
+                if let note = account.adminNote?.nonEmptyTrimmed {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("尚未绑定在线账户；首次启动会自动申请试用额度。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("刷新状态") {
+                Task {
+                    await chatStore.refreshActivationState()
+                }
+            }
+            .disabled(isSubmitting || chatStore.relayBillingBusy)
+
+            Button("恢复购买") {
+                Task {
+                    await restoreRelayPurchases()
+                }
+            }
+            .disabled(isSubmitting || chatStore.relayBillingBusy)
+        }
+    }
+
+    @ViewBuilder
+    private var onlinePlansSection: some View {
+        Section("在线购买") {
+            if let plans = chatStore.relayCatalog?.plans, plans.isEmpty == false {
+                ForEach(plans) { plan in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(plan.title)
+                                    .font(.headline)
+                                Text("\(plan.monthlyCredits) credits / 月")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Button(priceText(for: plan)) {
+                                Task {
+                                    await purchase(planID: plan.id)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isSubmitting || chatStore.relayBillingBusy)
+                        }
+                    }
+                }
+
+                Text("购买成功后会自动同步到已配对设备，各设备使用独立 relay key，共享同一 credit 池。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("套餐列表暂未加载。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Button("加载套餐") {
+                    Task {
+                        await chatStore.refreshRelayCatalog()
+                    }
+                }
+                .disabled(isSubmitting || chatStore.relayBillingBusy)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recentUsageSection: some View {
+        if let usage = chatStore.relayAccountStatus?.recentUsage, usage.isEmpty == false {
+            Section("最近用量") {
+                ForEach(usage.prefix(3), id: \.requestID) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(entry.endpoint) • \(entry.modelID)")
+                            .font(.caption)
+                        Text("in \(entry.inputTokens) • out \(entry.outputTokens) • \(entry.settledCredits) credits")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -219,12 +333,81 @@ struct ActivationCenterView: View {
     }
 
     private func limitText(for state: OfflineActivationState) -> String {
-        guard let messageLimit = state.license.messageLimit else {
+        guard let creditLimit = state.license.creditLimit else {
             return L10n.tr("common.unlimited")
         }
 
-        let remaining = state.remainingMessageCount ?? 0
-        return L10n.format("activation.limit.remaining", messageLimit, remaining)
+        let remaining = state.remainingCredits ?? 0
+        return L10n.format("activation.limit.remaining", creditLimit, remaining)
+    }
+
+    private func purchase(planID: String) async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        do {
+            switch try await chatStore.purchaseRelayPlan(id: planID) {
+            case .completed:
+                feedbackMessage = "购买成功，在线额度已更新。"
+            case .pending:
+                feedbackMessage = "购买已提交，等待 App Store 确认。"
+            case .cancelled:
+                feedbackMessage = "已取消购买。"
+            }
+        } catch {
+            feedbackMessage = error.localizedDescription
+        }
+    }
+
+    private func restoreRelayPurchases() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        do {
+            _ = try await chatStore.restoreRelayPurchases()
+            feedbackMessage = "恢复完成，账户状态已刷新。"
+        } catch {
+            feedbackMessage = error.localizedDescription
+        }
+    }
+
+    private func priceText(for plan: RelayPlanCatalogItem) -> String {
+        let amount = NSDecimalNumber(decimal: plan.priceUSD).doubleValue
+        return String(format: "$%.2f", amount)
+    }
+
+    private func sourceText(_ source: RelayAccessSource?) -> String {
+        switch source {
+        case .trial:
+            return "试用"
+        case .subscription:
+            return "订阅"
+        case .offlineManual:
+            return "离线导入"
+        case nil:
+            return "unknown"
+        }
+    }
+
+    private func accountStateText(_ state: RelayAccountState) -> String {
+        switch state {
+        case .active:
+            return "可用"
+        case .paused:
+            return "已暂停"
+        case .expired:
+            return "已过期"
+        case .inactive:
+            return "未激活"
+        }
+    }
+
+    private func planTitle(_ planID: String?) -> String {
+        guard let planID else {
+            return "未订阅"
+        }
+
+        return chatStore.relayCatalog?.plans.first(where: { $0.id == planID })?.title ?? planID
     }
 }
 

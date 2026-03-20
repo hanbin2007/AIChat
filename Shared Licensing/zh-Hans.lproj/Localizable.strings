@@ -93,11 +93,11 @@
 "activation.error.request_expired" = "请求码已超过 30 分钟，请刷新后重新生成。";
 "activation.error.request_from_future" = "请求时间异常，请检查设备系统时间。";
 "activation.error.license_expired" = "当前授权已过期。";
-"activation.error.message_limit_reached" = "当前授权的可发送次数已用完。";
+"activation.error.message_limit_reached" = "当前授权的可用 credit 已用完。";
 "activation.error.model_not_allowed" = "当前授权不允许使用这个模型。";
 "activation.error.not_activated" = "请先在当前设备上完成激活。";
 "activation.error.not_yet_active" = "授权将在 %@ 生效。";
-"activation.error.invalid_message_limit" = "消息次数限制超出可编码范围。";
+"activation.error.invalid_message_limit" = "credit 限额超出可编码范围。";
 "activation.error.license_for_other_device" = "当前授权不属于这台设备。";
 "activation.status.inactive" = "未激活";
 "activation.status.pending" = "授权未生效";
@@ -108,12 +108,12 @@
 "activation.message.inactive" = "当前可查看历史消息；激活后才能继续发送。";
 "activation.message.active.valid_until" = "有效期至 %@";
 "activation.message.active.forever" = "长期有效";
-"activation.message.active.remaining" = "剩余 %d 次";
+"activation.message.active.remaining" = "剩余 %d credits";
 "activation.message.active.unlimited" = "次数不限";
 "activation.message.active.models" = "模型：%@";
 "activation.message.expired.with_date" = "授权已于 %@ 过期，请重新激活。";
 "activation.message.expired.no_date" = "当前授权不可用，请重新激活。";
-"activation.message.exhausted" = "当前授权的 %d 次发送额度已用完，请重新生成激活码。";
+"activation.message.exhausted" = "当前授权的 %d credits 已用完，请重新生成激活码。";
 "error.retry.failure_with_operation" = "%@ 已自动重试 %d 次后仍失败：%@";
 "error.retry.failure" = "已自动重试 %d 次后仍失败：%@";
 "common.all" = "全部";
@@ -130,7 +130,7 @@
 "activation.feedback.no_watch_channel" = "当前没有可用的 Apple Watch 同步通道。";
 "activation.feedback.sent_to_watch" = "已发送到 Apple Watch，手表会自动应用激活码。";
 "activation.feedback.no_code_in_clipboard" = "剪贴板里没有可用激活码。";
-"activation.limit.remaining" = "%d 次，总剩余 %d 次";
+"activation.limit.remaining" = "%d credits，总剩余 %d credits";
 "system_prompt.hint.none" = "留空时当前会话不会发送系统提示词；输入内容后会改为使用自定义系统提示词。";
 "system_prompt.hint.builtin" = "留空时继续使用内置系统提示词。";
 "prompt_preset.kind.conversation" = "正常对话";

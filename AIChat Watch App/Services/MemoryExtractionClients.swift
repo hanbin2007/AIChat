@@ -155,7 +155,7 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
     ) async throws -> ConversationMemoryExtractionResponse {
         guard let url = configuration.relayMemoryExtractURL,
               let relayBaseURL = configuration.relayBaseURL,
-              let bearerToken = configuration.relayBearerToken
+              let bearerToken = configuration.resolvedRelayBearerToken
         else {
             throw RelayAPIError.missingConfiguration
         }

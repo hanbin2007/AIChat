@@ -580,6 +580,11 @@ nonisolated struct OfflineActivationPolicy: Equatable, Hashable, Sendable {
     var validUntil: Date?
     var messageLimit: Int?
     var allowedModelIDs: Set<String>?
+
+    var creditLimit: Int? {
+        get { messageLimit }
+        set { messageLimit = newValue }
+    }
 }
 
 nonisolated struct OfflineActivationLicense: Codable, Equatable, Hashable, Sendable {
@@ -597,6 +602,10 @@ nonisolated struct OfflineActivationLicense: Codable, Equatable, Hashable, Senda
     func allows(modelID: String) -> Bool {
         LicensedModelCatalog.isAllowed(modelID: modelID, mask: modelMask)
     }
+
+    var creditLimit: Int? {
+        messageLimit
+    }
 }
 
 nonisolated struct OfflineActivationState: Codable, Equatable, Hashable, Sendable {
@@ -611,6 +620,14 @@ nonisolated struct OfflineActivationState: Codable, Equatable, Hashable, Sendabl
         }
 
         return max(0, messageLimit - usedMessageCount)
+    }
+
+    var usedCredits: Int {
+        usedMessageCount
+    }
+
+    var remainingCredits: Int? {
+        remainingMessageCount
     }
 }
 

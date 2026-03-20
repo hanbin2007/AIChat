@@ -44,7 +44,7 @@ struct RelayAIClient: AIStreamingService {
         AsyncThrowingStream { continuation in
             do {
                 guard let url = configuration.relayStreamURL,
-                      let bearerToken = configuration.relayBearerToken
+                      let bearerToken = configuration.resolvedRelayBearerToken
                 else {
                     throw RelayAPIError.missingConfiguration
                 }
@@ -144,7 +144,7 @@ struct RelayTranscriptionService: AITranscriptionService {
         }
 
         guard let url = configuration.relayTranscriptionURL,
-              let bearerToken = configuration.relayBearerToken
+              let bearerToken = configuration.resolvedRelayBearerToken
         else {
             throw RelayAPIError.missingConfiguration
         }
@@ -379,7 +379,7 @@ func relayCompletionError(
     }
 }
 
-private func relayClientError(from data: Data) -> Error {
+func relayClientError(from data: Data) -> Error {
     if let envelope = try? JSONDecoder().decode(RelayErrorEnvelope.self, from: data) {
         return RelayAPIError.remote(message: envelope.message)
     }

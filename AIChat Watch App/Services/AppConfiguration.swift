@@ -62,7 +62,7 @@ nonisolated struct AppConfiguration: Equatable {
 
         let backendMode = AIBackendMode(
             rawValue: value(for: "AI_BACKEND_MODE", bundle: bundle, environment: environment)?.lowercased() ?? ""
-        ) ?? .direct
+        ) ?? .relay
 
         let geminiAPIKey = value(for: "GEMINI_API_KEY", bundle: bundle, environment: environment)
         let geminiModel = value(for: "GEMINI_MODEL", bundle: bundle, environment: environment) ?? "gemini-3-flash-preview"
@@ -174,6 +174,78 @@ nonisolated struct AppConfiguration: Equatable {
         return relayBaseURL.appending(path: relayStreamPath)
     }
 
+    var relayBootstrapURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/activation/bootstrap")
+    }
+
+    var relayCatalogURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/billing/catalog")
+    }
+
+    var relayAccountStatusURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/account/status")
+    }
+
+    var relayPurchasePrepareURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/billing/purchase/prepare")
+    }
+
+    var relayPurchaseSubmitURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/billing/purchase/submit")
+    }
+
+    var relayPurchaseRestoreURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/billing/restore")
+    }
+
+    var relayPairingTokenURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/account/pairing-token")
+    }
+
+    var relayJoinPairedURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/account/join-paired")
+    }
+
+    var relayOfflineExchangeURL: URL? {
+        guard hasValidRelayBaseURL, let relayBaseURL else {
+            return nil
+        }
+
+        return relayBaseURL.appending(path: "v1/offline/exchange")
+    }
+
     var relayTranscriptionURL: URL? {
         guard hasValidRelayBaseURL, let relayBaseURL else {
             return nil
@@ -188,6 +260,10 @@ nonisolated struct AppConfiguration: Equatable {
         }
 
         return relayBaseURL.appending(path: "v1/memory/extract")
+    }
+
+    var resolvedRelayBearerToken: String? {
+        relayBearerToken ?? RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier)
     }
 
     private var hasValidRelayBaseURL: Bool {
@@ -205,10 +281,6 @@ nonisolated struct AppConfiguration: Equatable {
 
         guard hasValidRelayBaseURL else {
             return L10n.tr("configuration.relay.invalid_base_url")
-        }
-
-        guard relayBearerToken != nil else {
-            return L10n.tr("configuration.relay.missing_bearer")
         }
 
         return nil

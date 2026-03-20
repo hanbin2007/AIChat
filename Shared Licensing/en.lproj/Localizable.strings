@@ -93,11 +93,11 @@
 "activation.error.request_expired" = "The request code expired after 30 minutes. Refresh and generate a new one.";
 "activation.error.request_from_future" = "The request time looks wrong. Check the device clock.";
 "activation.error.license_expired" = "The current license has expired.";
-"activation.error.message_limit_reached" = "The current license has no sends left.";
+"activation.error.message_limit_reached" = "The current license has no credits left.";
 "activation.error.model_not_allowed" = "This license doesn't allow that model.";
 "activation.error.not_activated" = "Activate this device first.";
 "activation.error.not_yet_active" = "License starts at %@.";
-"activation.error.invalid_message_limit" = "The message limit is outside the encodable range.";
+"activation.error.invalid_message_limit" = "The credit limit is outside the encodable range.";
 "activation.error.license_for_other_device" = "The current license belongs to another device.";
 "activation.status.inactive" = "Inactive";
 "activation.status.pending" = "Pending";
@@ -108,12 +108,12 @@
 "activation.message.inactive" = "History is available, but sending is locked until this device is activated.";
 "activation.message.active.valid_until" = "Valid until %@";
 "activation.message.active.forever" = "No expiration";
-"activation.message.active.remaining" = "%d sends left";
+"activation.message.active.remaining" = "%d credits left";
 "activation.message.active.unlimited" = "Unlimited sends";
 "activation.message.active.models" = "Models: %@";
 "activation.message.expired.with_date" = "License expired at %@. Activate again.";
 "activation.message.expired.no_date" = "This license is no longer valid. Activate again.";
-"activation.message.exhausted" = "All %d sends in this license are used. Generate a new code.";
+"activation.message.exhausted" = "All %d credits in this license are used. Generate a new code.";
 "error.retry.failure_with_operation" = "%@ failed after %d retries: %@";
 "error.retry.failure" = "Still failed after %d retries: %@";
 "common.all" = "All";
@@ -130,7 +130,7 @@
 "activation.feedback.no_watch_channel" = "No Apple Watch sync channel is available right now.";
 "activation.feedback.sent_to_watch" = "Sent to Apple Watch. The watch will apply the code automatically.";
 "activation.feedback.no_code_in_clipboard" = "No valid activation code found in the clipboard.";
-"activation.limit.remaining" = "%d sends total, %d left";
+"activation.limit.remaining" = "%d credits total, %d left";
 "system_prompt.hint.none" = "Leave this empty to send no system prompt. Enter text to use a custom one.";
 "system_prompt.hint.builtin" = "Leave this empty to keep using the built-in system prompt.";
 "prompt_preset.kind.conversation" = "Chat";

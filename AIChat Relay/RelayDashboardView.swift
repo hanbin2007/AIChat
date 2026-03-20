@@ -43,6 +43,11 @@ struct RelayDashboardView: View {
                         .padding(.horizontal, 32)
                         .padding(.bottom, 32)
                     }
+                } else if page == .billing {
+                    RelayBillingWorkspaceView(controller: controller)
+                        .padding(.horizontal, 32)
+                        .padding(.bottom, 32)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     RelayConsoleWorkspaceView(controller: controller)
                         .padding(.horizontal, 32)
@@ -249,6 +254,24 @@ struct RelayDashboardView: View {
                             .lineLimit(2)
                             .minimumScaleFactor(0.84)
                         Text("Prefer this for AIChat client configuration.")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    RelayMetricTile(title: "Managed Accounts", accent: Color(red: 0.14, green: 0.42, blue: 0.62)) {
+                        Text("\(controller.billingAccountCount)")
+                            .font(.system(size: 27, weight: .bold, design: .rounded))
+                        Text("\(controller.activeKeyCount) active keys")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    RelayMetricTile(title: "Available Credits", accent: Color(red: 0.61, green: 0.31, blue: 0.18)) {
+                        Text("\(controller.totalManagedCredits)")
+                            .font(.system(size: 27, weight: .bold, design: .rounded))
+                        Text("Across all managed accounts")
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -971,6 +994,7 @@ private enum RelayConsoleTab: String, CaseIterable, Identifiable {
 
 private enum RelayWorkspacePage: String, CaseIterable, Identifiable {
     case overview = "Overview"
+    case billing = "Billing"
     case console = "Console"
 
     var id: String { rawValue }

@@ -12,6 +12,7 @@ actor LocalRelayServer {
     private let configurationProvider: @Sendable () async -> RelayRuntimeConfiguration
     private let eventHandler: @Sendable (RelayServerEvent) async -> Void
     private let relayBridge: GeminiRelayBridge
+    private let billingStore: RelayBillingStore
     private let queue = DispatchQueue(label: "hanbin.aichat.relay.server")
 
     private var listener: NWListener?
@@ -19,11 +20,13 @@ actor LocalRelayServer {
     init(
         configurationProvider: @escaping @Sendable () async -> RelayRuntimeConfiguration,
         eventHandler: @escaping @Sendable (RelayServerEvent) async -> Void,
-        relayBridge: GeminiRelayBridge = GeminiRelayBridge()
+        relayBridge: GeminiRelayBridge = GeminiRelayBridge(),
+        billingStore: RelayBillingStore = RelayBillingStore()
     ) {
         self.configurationProvider = configurationProvider
         self.eventHandler = eventHandler
         self.relayBridge = relayBridge
+        self.billingStore = billingStore
     }
 
     func start() async throws {
@@ -138,10 +141,63 @@ actor LocalRelayServer {
                 return
             }
 
+            if request.method == "GET", path == "/v1/billing/catalog" {
+                try await sendJSON(
+                    statusCode: 200,
+                    payload: await billingStore.catalogResponse(),
+                    on: connection
+                )
+                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                return
+            }
+
+            if request.method == "GET", path == "/v1/account/status" {
+                try await sendJSON(
+                    statusCode: 200,
+                    payload: await billingStore.accountStatus(
+                        clientKey: bearerToken(from: request.headers),
+                        deviceID: request.headers["x-aichat-device-id"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ),
+                    on: connection
+                )
+                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                return
+            }
+
             guard request.method == "POST" else {
                 try await sendFailureResponse(
                     statusCode: 404,
                     message: "Not found.",
+                    path: path,
+                    remoteAddress: remoteAddress,
+                    on: connection
+                )
+                return
+            }
+
+            do {
+                if try await handleBillingRouteIfNeeded(
+                    request: request,
+                    path: path,
+                    remoteAddress: remoteAddress,
+                    on: connection
+                ) {
+                    return
+                }
+            } catch let error as RelayHTTPError {
+                try await sendFailureResponse(
+                    statusCode: error.statusCode,
+                    message: error.message,
+                    path: path,
+                    remoteAddress: remoteAddress,
+                    on: connection
+                )
+                return
+            } catch {
+                let relayError = RelayHTTPError.internalError(error.localizedDescription)
+                try await sendFailureResponse(
+                    statusCode: relayError.statusCode,
+                    message: relayError.message,
                     path: path,
                     remoteAddress: remoteAddress,
                     on: connection
@@ -183,7 +239,13 @@ actor LocalRelayServer {
             }
 
             let authorization = request.headers["authorization"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard authorization == "Bearer \(configuration.relayBearerToken)" else {
+            let adminAuthorized = authorization == "Bearer \(configuration.relayBearerToken)"
+            let clientAuthorized: RelayAuthorizedKeyContext? = if let clientKey = bearerToken(from: request.headers) {
+                await billingStore.authorize(clientKey: clientKey)
+            } else {
+                nil
+            }
+            guard adminAuthorized || clientAuthorized != nil else {
                 try await sendFailureResponse(
                     statusCode: RelayHTTPError.unauthorized.statusCode,
                     message: RelayHTTPError.unauthorized.message,
@@ -214,8 +276,42 @@ actor LocalRelayServer {
                 }
 
                 let streamState = StreamOpenState()
+                let resolvedModelID = relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? relayRequest.model!
+                    : "gemini-3-flash-preview"
+                let usageBox = UsageSnapshotBox()
 
                 do {
+                    let reservationEstimate: RelayUsageReservationEstimate?
+                    if let clientAuthorized {
+                        let estimatedInputTokens = try await relayBridge.estimateChatInputTokens(
+                            relayRequest: relayRequest,
+                            apiKey: configuration.geminiAPIKey,
+                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                        )
+                        let reservedOutputTokens = relayRequest.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil }
+                            ?? defaultMaxOutputTokens(for: resolvedModelID)
+                        let reservedCredits = await billingStore.creditsForUsage(
+                            modelID: resolvedModelID,
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: reservedOutputTokens,
+                            searchCount: relayRequest.usesGoogleSearch == true ? 1 : 0,
+                            inputTokensOver200k: estimatedInputTokens > 200_000,
+                            usesAudioInput: false
+                        )
+                        try await billingStore.ensureCreditAllowance(
+                            accountID: clientAuthorized.accountID,
+                            requiredCredits: reservedCredits
+                        )
+                        reservationEstimate = RelayUsageReservationEstimate(
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: reservedOutputTokens,
+                            reservedCredits: reservedCredits
+                        )
+                    } else {
+                        reservationEstimate = nil
+                    }
+
                     try await relayBridge.streamChat(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
@@ -226,9 +322,21 @@ actor LocalRelayServer {
                         },
                         onEvent: { event in
                             try await self.send(event.data(), on: connection)
+                        },
+                        onUsage: { usage in
+                            usageBox.value = usage
                         }
                     )
                     try? await finishResponse(on: connection)
+                    await recordUsageIfNeeded(
+                        clientContext: clientAuthorized,
+                        reservation: reservationEstimate,
+                        endpoint: path,
+                        modelID: resolvedModelID,
+                        usage: usageBox.value,
+                        searchCount: relayRequest.usesGoogleSearch == true ? 1 : 0,
+                        usesAudioInput: false
+                    )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
                     await markFailedRequest(
@@ -282,7 +390,37 @@ actor LocalRelayServer {
                 }
 
                 do {
-                    let relayResponse = try await relayBridge.transcribeAudio(
+                    let reservationEstimate: RelayUsageReservationEstimate?
+                    if let clientAuthorized {
+                        let estimatedInputTokens = try await relayBridge.estimateTranscriptionInputTokens(
+                            relayRequest: relayRequest,
+                            apiKey: configuration.geminiAPIKey,
+                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                        )
+                        let reservedCredits = await billingStore.creditsForUsage(
+                            modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                ? relayRequest.model!
+                                : "gemini-3-flash-preview",
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: 5_120,
+                            searchCount: 0,
+                            inputTokensOver200k: estimatedInputTokens > 200_000,
+                            usesAudioInput: true
+                        )
+                        try await billingStore.ensureCreditAllowance(
+                            accountID: clientAuthorized.accountID,
+                            requiredCredits: reservedCredits
+                        )
+                        reservationEstimate = RelayUsageReservationEstimate(
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: 5_120,
+                            reservedCredits: reservedCredits
+                        )
+                    } else {
+                        reservationEstimate = nil
+                    }
+
+                    let (relayResponse, upstreamUsage) = try await relayBridge.transcribeAudio(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
                         debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
@@ -299,6 +437,17 @@ actor LocalRelayServer {
                         statusCode: 200,
                         remoteAddress: remoteAddress,
                         enabled: configuration.debugLoggingEnabled
+                    )
+                    await recordUsageIfNeeded(
+                        clientContext: clientAuthorized,
+                        reservation: reservationEstimate,
+                        endpoint: path,
+                        modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                            ? relayRequest.model!
+                            : "gemini-3-flash-preview",
+                        usage: upstreamUsage,
+                        searchCount: 0,
+                        usesAudioInput: true
                     )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
@@ -335,7 +484,37 @@ actor LocalRelayServer {
                 }
 
                 do {
-                    let relayResponse = try await relayBridge.extractMemory(
+                    let reservationEstimate: RelayUsageReservationEstimate?
+                    if let clientAuthorized {
+                        let estimatedInputTokens = try await relayBridge.estimateMemoryInputTokens(
+                            relayRequest: relayRequest,
+                            apiKey: configuration.geminiAPIKey,
+                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                        )
+                        let reservedCredits = await billingStore.creditsForUsage(
+                            modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                ? relayRequest.model!
+                                : "gemini-3-flash-preview",
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: 4_096,
+                            searchCount: 0,
+                            inputTokensOver200k: estimatedInputTokens > 200_000,
+                            usesAudioInput: false
+                        )
+                        try await billingStore.ensureCreditAllowance(
+                            accountID: clientAuthorized.accountID,
+                            requiredCredits: reservedCredits
+                        )
+                        reservationEstimate = RelayUsageReservationEstimate(
+                            inputTokens: estimatedInputTokens,
+                            outputTokens: 4_096,
+                            reservedCredits: reservedCredits
+                        )
+                    } else {
+                        reservationEstimate = nil
+                    }
+
+                    let (relayResponse, upstreamUsage) = try await relayBridge.extractMemory(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
                         debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
@@ -352,6 +531,17 @@ actor LocalRelayServer {
                         statusCode: 200,
                         remoteAddress: remoteAddress,
                         enabled: configuration.debugLoggingEnabled
+                    )
+                    await recordUsageIfNeeded(
+                        clientContext: clientAuthorized,
+                        reservation: reservationEstimate,
+                        endpoint: path,
+                        modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                            ? relayRequest.model!
+                            : "gemini-3-flash-preview",
+                        usage: upstreamUsage,
+                        searchCount: 0,
+                        usesAudioInput: false
                     )
                     await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
                 } catch let error as RelayHTTPError {
@@ -385,6 +575,57 @@ actor LocalRelayServer {
             await eventHandler(.log(level: .warning, message: "Connection closed: \(error.localizedDescription)"))
             connection.cancel()
         }
+    }
+
+    private func handleBillingRouteIfNeeded(
+        request: HTTPRequest,
+        path: String,
+        remoteAddress: String?,
+        on connection: NWConnection
+    ) async throws -> Bool {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        switch path {
+        case "/v1/activation/bootstrap":
+            let payload = try decoder.decode(RelayActivationBootstrapRequest.self, from: request.body)
+            let response = try await billingStore.bootstrap(request: payload)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/billing/purchase/prepare":
+            let payload = try decoder.decode(RelayPurchasePrepareRequest.self, from: request.body)
+            let response = try await billingStore.purchasePrepare(
+                request: payload,
+                currentKey: bearerToken(from: request.headers)
+            )
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/billing/purchase/submit":
+            let payload = try decoder.decode(RelayPurchaseSubmitRequest.self, from: request.body)
+            let response = try await billingStore.submitPurchase(payload)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/billing/restore":
+            let payload = try decoder.decode(RelayRestorePurchasesRequest.self, from: request.body)
+            let response = try await billingStore.restorePurchases(payload)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/account/pairing-token":
+            guard let key = bearerToken(from: request.headers) else {
+                throw RelayHTTPError.unauthorized
+            }
+            let response = try await billingStore.pairingToken(forClientKey: key)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/account/join-paired":
+            let payload = try decoder.decode(RelayJoinPairedRequest.self, from: request.body)
+            let response = try await billingStore.joinPaired(payload)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        case "/v1/offline/exchange":
+            let payload = try decoder.decode(RelayOfflineExchangeRequest.self, from: request.body)
+            let response = try await billingStore.exchangeOffline(payload)
+            try await sendJSON(statusCode: 200, payload: response, on: connection)
+        default:
+            return false
+        }
+
+        await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+        return true
     }
 
     private func prepare(_ connection: NWConnection) async throws {
@@ -592,6 +833,8 @@ actor LocalRelayServer {
             return "Bad Request"
         case 401:
             return "Unauthorized"
+        case 402:
+            return "Payment Required"
         case 404:
             return "Not Found"
         case 502:
@@ -715,6 +958,72 @@ actor LocalRelayServer {
             )
         )
     }
+
+    private func recordUsageIfNeeded(
+        clientContext: RelayAuthorizedKeyContext?,
+        reservation: RelayUsageReservationEstimate?,
+        endpoint: String,
+        modelID: String,
+        usage: RelayUpstreamUsage?,
+        searchCount: Int,
+        usesAudioInput: Bool
+    ) async {
+        guard let clientContext else {
+            return
+        }
+
+        let effectiveUsage: RelayUpstreamUsage
+        if let usage {
+            effectiveUsage = usage
+        } else if let reservation {
+            effectiveUsage = RelayUpstreamUsage(
+                inputTokens: reservation.inputTokens,
+                outputTokens: reservation.outputTokens,
+                totalTokens: reservation.inputTokens + reservation.outputTokens,
+                thoughtTokens: 0
+            )
+        } else {
+            return
+        }
+
+        let settledCredits = await billingStore.creditsForUsage(
+            modelID: modelID,
+            inputTokens: effectiveUsage.inputTokens,
+            outputTokens: effectiveUsage.outputTokens,
+            searchCount: searchCount,
+            inputTokensOver200k: effectiveUsage.inputTokensOver200k,
+            usesAudioInput: usesAudioInput
+        )
+        let reservedCredits = reservation?.reservedCredits ?? settledCredits
+
+        do {
+            try await billingStore.recordUsage(
+                accountID: clientContext.accountID,
+                deviceID: clientContext.deviceID,
+                keyID: clientContext.keyID,
+                endpoint: endpoint,
+                modelID: modelID,
+                inputTokens: effectiveUsage.inputTokens,
+                outputTokens: effectiveUsage.outputTokens,
+                searchCount: searchCount,
+                reservedCredits: reservedCredits,
+                settledCredits: settledCredits
+            )
+        } catch {
+            await eventHandler(
+                .log(
+                    level: .warning,
+                    message: "Usage settlement failed for \(endpoint): \(error.localizedDescription)"
+                )
+            )
+        }
+    }
+}
+
+private struct RelayUsageReservationEstimate: Sendable {
+    var inputTokens: Int
+    var outputTokens: Int
+    var reservedCredits: Int
 }
 
 private struct HTTPRequest: Sendable {
@@ -724,10 +1033,32 @@ private struct HTTPRequest: Sendable {
     var body: Data
 }
 
+private func bearerToken(from headers: [String: String]) -> String? {
+    let authorization = headers["authorization"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard authorization.hasPrefix("Bearer ") else {
+        return nil
+    }
+
+    let value = String(authorization.dropFirst("Bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
+}
+
+private func defaultMaxOutputTokens(for modelID: String) -> Int {
+    if modelID.hasPrefix("gemini-3") || modelID.hasPrefix("gemini-2.5") {
+        return 65_536
+    }
+
+    return 8_192
+}
+
 private final class ContinuationState: @unchecked Sendable {
     var didResolve = false
 }
 
 private final class StreamOpenState: @unchecked Sendable {
     var didOpen = false
+}
+
+private final class UsageSnapshotBox: @unchecked Sendable {
+    var value: RelayUpstreamUsage?
 }

@@ -23,7 +23,8 @@ struct GeminiRelayBridge {
         apiKey: String,
         debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil,
         onOpen: @escaping @Sendable () async throws -> Void,
-        onEvent: @escaping @Sendable (RelayOutboundEvent) async throws -> Void
+        onEvent: @escaping @Sendable (RelayOutboundEvent) async throws -> Void,
+        onUsage: (@Sendable (RelayUpstreamUsage) async -> Void)? = nil
     ) async throws {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
@@ -98,6 +99,7 @@ struct GeminiRelayBridge {
         var emittedThoughtText = ""
         var emittedAttachmentKeys: Set<String> = []
         var latestModelResponseParts: [GeminiPartPayload]?
+        var latestUsage: RelayUpstreamUsage?
         var finishReason: String?
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -117,6 +119,10 @@ struct GeminiRelayBridge {
                   let chunk = try? decoder.decode(GeminiStreamChunk.self, from: data)
             else {
                 continue
+            }
+
+            if let usage = RelayUpstreamUsage.from(chunk.usageMetadata) {
+                latestUsage = usage
             }
 
             let parts = extractChunkParts(from: chunk)
@@ -181,14 +187,33 @@ struct GeminiRelayBridge {
             try await onEvent(.modelResponseParts(latestModelResponseParts))
         }
 
+        if let latestUsage, let onUsage {
+            await onUsage(latestUsage)
+        }
+
         try await onEvent(.done(finishReason))
+    }
+
+    func estimateChatInputTokens(
+        relayRequest: RelayChatRequest,
+        apiKey: String,
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
+    ) async throws -> Int {
+        let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
+        return try await countTokens(
+            for: makeGeminiRequest(from: relayRequest, model: model),
+            model: model,
+            apiKey: apiKey,
+            debugLog: debugLog,
+            summary: "Chat countTokens request"
+        )
     }
 
     func transcribeAudio(
         relayRequest: RelayTranscriptionRequest,
         apiKey: String,
         debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
-    ) async throws -> RelayTranscriptionResponse {
+    ) async throws -> (RelayTranscriptionResponse, RelayUpstreamUsage?) {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
         var request = URLRequest(
@@ -292,9 +317,25 @@ struct GeminiRelayBridge {
             )
         }
 
-        return RelayTranscriptionResponse(
+        let relayResponse = RelayTranscriptionResponse(
             text: transcript,
             model: model
+        )
+        return (relayResponse, RelayUpstreamUsage.from(responseEnvelope.usageMetadata))
+    }
+
+    func estimateTranscriptionInputTokens(
+        relayRequest: RelayTranscriptionRequest,
+        apiKey: String,
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
+    ) async throws -> Int {
+        let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
+        return try await countTokens(
+            for: makeGeminiTranscriptionRequest(from: relayRequest, model: model),
+            model: model,
+            apiKey: apiKey,
+            debugLog: debugLog,
+            summary: "Transcription countTokens request"
         )
     }
 
@@ -302,7 +343,7 @@ struct GeminiRelayBridge {
         relayRequest: RelayMemoryExtractionRequest,
         apiKey: String,
         debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
-    ) async throws -> RelayMemoryExtractionResponse {
+    ) async throws -> (RelayMemoryExtractionResponse, RelayUpstreamUsage?) {
         let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
 
         var request = URLRequest(
@@ -399,7 +440,100 @@ struct GeminiRelayBridge {
             )
         }
 
-        return extractionResponse
+        return (extractionResponse, RelayUpstreamUsage.from(responseEnvelope.usageMetadata))
+    }
+
+    func estimateMemoryInputTokens(
+        relayRequest: RelayMemoryExtractionRequest,
+        apiKey: String,
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)? = nil
+    ) async throws -> Int {
+        let model = relayRequest.model?.trimmedNonEmpty ?? "gemini-3-flash-preview"
+        return try await countTokens(
+            for: makeGeminiMemoryRequest(from: relayRequest, model: model),
+            model: model,
+            apiKey: apiKey,
+            debugLog: debugLog,
+            summary: "Memory countTokens request"
+        )
+    }
+
+    private func countTokens(
+        for generateContentRequest: GeminiGenerateContentRequest,
+        model: String,
+        apiKey: String,
+        debugLog: (@Sendable (RelayDebugEvent) async -> Void)?,
+        summary: String
+    ) async throws -> Int {
+        var request = URLRequest(
+            url: URL(
+                string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):countTokens"
+            )!
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let requestBody = try encoder.encode(
+            GeminiCountTokensRequest(generateContentRequest: generateContentRequest)
+        )
+        request.httpBody = requestBody
+
+        if let debugLog {
+            await debugLog(
+                RelayDebugEvent(
+                    source: .upstream,
+                    kind: .request,
+                    title: "Gemini Request",
+                    summary: summary,
+                    method: request.httpMethod ?? "POST",
+                    path: request.url?.path,
+                    address: request.url?.host,
+                    statusCode: nil,
+                    body: RelayDebugFormatter.httpRequest(
+                        method: request.httpMethod ?? "POST",
+                        url: request.url?.absoluteString ?? "",
+                        headers: request.allHTTPHeaderFields ?? [:],
+                        body: requestBody
+                    )
+                )
+            )
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RelayHTTPError.invalidUpstreamResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if let debugLog {
+                await debugLog(
+                    RelayDebugEvent(
+                        source: .upstream,
+                        kind: .response,
+                        title: "Gemini Response",
+                        summary: "\(summary) failed",
+                        method: request.httpMethod ?? "POST",
+                        path: request.url?.path,
+                        address: request.url?.host,
+                        statusCode: httpResponse.statusCode,
+                        body: RelayDebugFormatter.httpResponse(
+                            statusCode: httpResponse.statusCode,
+                            headers: httpHeaders(from: httpResponse),
+                            body: data
+                        )
+                    )
+                )
+            }
+            throw upstreamError(statusCode: httpResponse.statusCode, data: data)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let tokenResponse = try decoder.decode(GeminiCountTokensResponse.self, from: data)
+        return max(0, tokenResponse.totalTokens ?? 0)
     }
 
     private func makeGeminiRequest(from request: RelayChatRequest, model: String) -> GeminiGenerateContentRequest {

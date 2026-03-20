@@ -200,6 +200,7 @@ struct RelayMemoryExtractionResponse: Codable, Sendable {
 enum RelayHTTPError: LocalizedError, Sendable {
     case badRequest(String)
     case unauthorized
+    case paymentRequired(String)
     case missingConfiguration(String)
     case upstream(statusCode: Int, message: String)
     case invalidUpstreamResponse
@@ -215,6 +216,8 @@ enum RelayHTTPError: LocalizedError, Sendable {
             return 400
         case .unauthorized:
             return 401
+        case .paymentRequired:
+            return 402
         case .missingConfiguration:
             return 503
         case .upstream(let statusCode, _):
@@ -227,6 +230,7 @@ enum RelayHTTPError: LocalizedError, Sendable {
     var message: String {
         switch self {
         case .badRequest(let message),
+             .paymentRequired(let message),
              .missingConfiguration(let message),
              .upstream(_, let message),
              .internalError(let message):
@@ -437,6 +441,14 @@ struct GeminiGenerateContentRequest: Encodable, Sendable {
     }
 }
 
+struct GeminiCountTokensRequest: Encodable, Sendable {
+    var generateContentRequest: GeminiGenerateContentRequest
+}
+
+struct GeminiCountTokensResponse: Decodable, Sendable {
+    var totalTokens: Int?
+}
+
 struct GeminiContent: Encodable, Sendable {
     var role: String?
     var parts: [GeminiPartPayload]
@@ -578,6 +590,7 @@ struct GeminiSafetySetting: Encodable, Sendable {
 
 struct GeminiStreamChunk: Decodable, Sendable {
     var candidates: [GeminiCandidate]?
+    var usageMetadata: GeminiUsageMetadata?
 }
 
 struct GeminiCandidate: Decodable, Sendable {
@@ -595,4 +608,49 @@ struct GeminiAPIErrorEnvelope: Decodable, Sendable {
 
 struct GeminiAPIError: Decodable, Sendable {
     var message: String
+}
+
+struct GeminiUsageMetadata: Decodable, Sendable {
+    var promptTokenCount: Int?
+    var candidatesTokenCount: Int?
+    var thoughtsTokenCount: Int?
+    var totalTokenCount: Int?
+}
+
+struct RelayUpstreamUsage: Sendable {
+    var inputTokens: Int
+    var outputTokens: Int
+    var totalTokens: Int
+    var thoughtTokens: Int
+
+    var inputTokensOver200k: Bool {
+        inputTokens > 200_000
+    }
+
+    static func from(_ usageMetadata: GeminiUsageMetadata?) -> RelayUpstreamUsage? {
+        guard let usageMetadata else {
+            return nil
+        }
+
+        let inputTokens = max(0, usageMetadata.promptTokenCount ?? 0)
+        let thoughtTokens = max(0, usageMetadata.thoughtsTokenCount ?? 0)
+        let explicitOutputTokens = usageMetadata.candidatesTokenCount.map { max(0, $0) }
+        let inferredOutputTokens = max(
+            0,
+            (usageMetadata.totalTokenCount ?? 0) - inputTokens
+        )
+        let outputTokens = explicitOutputTokens ?? inferredOutputTokens
+        let totalTokens = max(0, usageMetadata.totalTokenCount ?? (inputTokens + outputTokens))
+
+        guard inputTokens > 0 || outputTokens > 0 || totalTokens > 0 else {
+            return nil
+        }
+
+        return RelayUpstreamUsage(
+            inputTokens: inputTokens,
+            outputTokens: max(outputTokens, inferredOutputTokens),
+            totalTokens: max(totalTokens, inputTokens + outputTokens),
+            thoughtTokens: thoughtTokens
+        )
+    }
 }

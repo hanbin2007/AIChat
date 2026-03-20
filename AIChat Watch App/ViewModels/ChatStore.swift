@@ -7,6 +7,9 @@
 
 import Combine
 import Foundation
+#if canImport(StoreKit)
+import StoreKit
+#endif
 
 #if os(iOS)
 import UIKit
@@ -99,6 +102,12 @@ nonisolated enum DraftTextComposer {
             return false
         }
     }
+}
+
+nonisolated enum RelayStorePurchaseOutcome: Equatable, Sendable {
+    case completed
+    case pending
+    case cancelled
 }
 
 protocol ReplyPersistenceControlling: AnyObject {
@@ -277,6 +286,9 @@ final class ChatStore: ObservableObject {
     @Published private(set) var syncStatus: CompanionSyncStatus
     @Published private(set) var syncStatusDescription: String
     @Published private(set) var activationState: OfflineActivationState?
+    @Published private(set) var relayAccountStatus: RelayAccountStatusResponse?
+    @Published private(set) var relayCatalog: RelayCatalogResponse?
+    @Published private(set) var relayBillingBusy = false
     @Published private(set) var pairedWatchActivationRequestCode: String?
     @Published private(set) var companionActivationFeedbackMessage: String?
     @Published private(set) var sendFailureRetryLimit: Int
@@ -300,6 +312,8 @@ final class ChatStore: ObservableObject {
     private let replyPersistenceController: any ReplyPersistenceControlling
     private let cloudSyncService: ICloudConversationSyncService?
     private let activationRepository: ActivationRepository
+    private let relayAccessRepository: RelayAccessRepository
+    private let relayAccountService: RelayAccountService
     private let defaults: UserDefaults
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
@@ -339,6 +353,12 @@ final class ChatStore: ObservableObject {
         self.cloudSyncService = cloudSyncService
         self.activationRepository = activationRepository
         self.deviceIdentity = deviceIdentity ?? WatchDeviceIdentityProvider.current()
+        self.relayAccessRepository = RelayAccessRepository(defaults: resolvedDefaults)
+        self.relayAccountService = RelayAccountService(
+            configuration: configuration,
+            deviceIdentity: self.deviceIdentity,
+            repository: self.relayAccessRepository
+        )
         self.defaults = resolvedDefaults
         self.sendRetryDelayNanoseconds = sendRetryDelayNanoseconds
         self.storageDescription = repository.storageDescription
@@ -407,7 +427,75 @@ final class ChatStore: ObservableObject {
         OfflineActivation.status(for: activationState, deviceToken: deviceIdentity.deviceToken)
     }
 
+    var relayAccessStatusTitle: String? {
+        guard configuration.backendMode == .relay,
+              let account = relayAccountStatus?.account
+        else {
+            return nil
+        }
+
+        switch account.state {
+        case .active:
+            if account.creditBalance > 0 {
+                return "在线可用"
+            }
+            return "额度用尽"
+        case .paused:
+            return "已暂停"
+        case .expired:
+            return "已过期"
+        case .inactive:
+            return "未激活"
+        }
+    }
+
+    var relayAccessStatusMessage: String? {
+        guard configuration.backendMode == .relay,
+              let account = relayAccountStatus?.account
+        else {
+            return nil
+        }
+
+        var parts: [String] = []
+        if let source = relayAccountStatus?.key?.source {
+            parts.append(relaySourceLabel(for: source))
+        }
+        parts.append("\(account.creditBalance) credits")
+
+        if let expiration = account.creditExpiresAt {
+            parts.append("到期 \(expiration.formatted(date: .abbreviated, time: .shortened))")
+        }
+
+        if let note = account.adminNote?.nonEmptyTrimmed {
+            parts.append(note)
+        }
+
+        return parts.joined(separator: " • ")
+    }
+
+    var hasManagedRelayAccess: Bool {
+        guard configuration.backendMode == .relay else {
+            return false
+        }
+
+        if configuration.relayBearerToken != nil {
+            return true
+        }
+
+        guard let account = relayAccountStatus?.account,
+              let key = relayAccountStatus?.key
+        else {
+            return false
+        }
+
+        return account.state == .active && key.state == .active && account.creditBalance > 0
+    }
+
     var isReadOnlyMode: Bool {
+        if hasManagedRelayAccess {
+            return false
+        }
+
         switch activationStatus {
         case .active:
             return false
@@ -417,6 +505,10 @@ final class ChatStore: ObservableObject {
     }
 
     var activationStatusTitle: String {
+        if let relayAccessStatusTitle {
+            return relayAccessStatusTitle
+        }
+
         switch activationStatus {
         case .inactive:
             return L10n.tr("activation.status.inactive")
@@ -434,6 +526,10 @@ final class ChatStore: ObservableObject {
     }
 
     var activationStatusMessage: String {
+        if let relayAccessStatusMessage {
+            return relayAccessStatusMessage
+        }
+
         switch activationStatus {
         case .inactive:
             return L10n.tr("activation.message.inactive")
@@ -476,7 +572,7 @@ final class ChatStore: ObservableObject {
         case .exhausted(let state):
             return L10n.format(
                 "activation.message.exhausted",
-                state.license.messageLimit ?? 0
+                state.license.creditLimit ?? 0
             )
         case .invalid(let message):
             return message
@@ -484,7 +580,11 @@ final class ChatStore: ObservableObject {
     }
 
     var activationAllowedModelIDs: Set<String>? {
-        OfflineActivation.allowedModelIDs(
+        if hasManagedRelayAccess {
+            return nil
+        }
+
+        return OfflineActivation.allowedModelIDs(
             for: activationState,
             deviceToken: deviceIdentity.deviceToken
         )
@@ -532,6 +632,20 @@ final class ChatStore: ObservableObject {
 
     func refreshActivationState() async {
         activationState = await activationRepository.loadState()
+        relayAccountStatus = await relayAccessRepository.loadState()?.status
+
+        guard configuration.backendMode == .relay else {
+            return
+        }
+
+        do {
+            let status = try await relayAccountService.refreshOrBootstrapStatus()
+            await updateRelayAccountStatus(status, shareToCompanion: true)
+        } catch {
+            if relayAccountStatus == nil {
+                startupError = error.localizedDescription
+            }
+        }
     }
 
     func activationRequestCode(now: Date = .now) -> String {
@@ -551,6 +665,14 @@ final class ChatStore: ObservableObject {
         )
         try await activationRepository.saveState(nextState)
         activationState = nextState
+
+        if configuration.backendMode == .relay {
+            let status = try await relayAccountService.exchangeOfflineActivation(
+                code: rawCode,
+                state: nextState
+            )
+            await updateRelayAccountStatus(status, shareToCompanion: true)
+        }
     }
 
     func clearActivation() async {
@@ -573,6 +695,105 @@ final class ChatStore: ObservableObject {
 
     func clearCompanionActivationFeedbackMessage() {
         companionActivationFeedbackMessage = nil
+    }
+
+    func refreshRelayCatalog() async {
+        guard configuration.backendMode == .relay else {
+            return
+        }
+
+        do {
+            relayCatalog = try await relayAccountService.fetchCatalog()
+        } catch {
+            if relayCatalog == nil {
+                startupError = error.localizedDescription
+            }
+        }
+    }
+
+    @discardableResult
+    func purchaseRelayPlan(id planID: String) async throws -> RelayStorePurchaseOutcome {
+        guard configuration.backendMode == .relay else {
+            throw RelayAPIError.missingConfiguration
+        }
+
+        relayBillingBusy = true
+        defer { relayBillingBusy = false }
+
+        if relayCatalog == nil {
+            relayCatalog = try await relayAccountService.fetchCatalog()
+        }
+
+        guard let plan = relayCatalog?.plans.first(where: { $0.id == planID }) else {
+            throw RelayAPIError.invalidResponse
+        }
+
+        #if canImport(StoreKit)
+        let purchasePreparation = try await relayAccountService.preparePurchase()
+        let products = try await Product.products(for: [plan.productID])
+        guard let product = products.first(where: { $0.id == plan.productID }) else {
+            throw RelayAPIError.invalidResponse
+        }
+
+        let result = try await product.purchase(
+            options: Set([Product.PurchaseOption.appAccountToken(purchasePreparation.appAccountToken)])
+        )
+
+        switch result {
+        case .success(let verificationResult):
+            let transaction = try verifiedStoreTransaction(from: verificationResult)
+            let status = try await relayAccountService.submitPurchase(
+                transaction: submittedTransaction(
+                    from: transaction,
+                    signedTransactionInfo: verificationResult.jwsRepresentation
+                )
+            )
+            await updateRelayAccountStatus(status, shareToCompanion: true)
+            await transaction.finish()
+            return .completed
+        case .pending:
+            return .pending
+        case .userCancelled:
+            return .cancelled
+        @unknown default:
+            return .cancelled
+        }
+        #else
+        throw RelayAPIError.missingConfiguration
+        #endif
+    }
+
+    @discardableResult
+    func restoreRelayPurchases() async throws -> RelayAccountStatusResponse? {
+        guard configuration.backendMode == .relay else {
+            return nil
+        }
+
+        relayBillingBusy = true
+        defer { relayBillingBusy = false }
+
+        #if canImport(StoreKit)
+        try await AppStore.sync()
+
+        var submittedTransactions: [RelaySubmittedTransaction] = []
+        for await entitlement in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = entitlement else {
+                continue
+            }
+            submittedTransactions.append(
+                submittedTransaction(
+                    from: transaction,
+                    signedTransactionInfo: entitlement.jwsRepresentation
+                )
+            )
+        }
+
+        let status = try await relayAccountService.restorePurchases(transactions: submittedTransactions)
+        await updateRelayAccountStatus(status, shareToCompanion: true)
+        return status
+        #else
+        throw RelayAPIError.missingConfiguration
+        #endif
     }
 
     func createConversation() async -> UUID {
@@ -1831,6 +2052,10 @@ final class ChatStore: ObservableObject {
     }
 
     private func licensedConfiguration(from configuration: ConversationAIConfiguration) -> ConversationAIConfiguration {
+        if hasManagedRelayAccess {
+            return configuration
+        }
+
         var resolvedConfiguration = configuration
         resolvedConfiguration.model = OfflineActivation.recommendedModel(
             preferredModelID: configuration.model,
@@ -1854,6 +2079,25 @@ final class ChatStore: ObservableObject {
     }
 
     private func activationFailureMessage(for modelID: String) -> String? {
+        if configuration.backendMode == .relay {
+            if hasManagedRelayAccess {
+                return nil
+            }
+
+            if let account = relayAccountStatus?.account {
+                switch account.state {
+                case .active:
+                    return account.creditBalance > 0 ? nil : "在线额度已用尽。"
+                case .paused:
+                    return "当前 relay key 已在服务端暂停。"
+                case .expired:
+                    return "订阅或 credit 已过期。"
+                case .inactive:
+                    return "当前设备尚未完成在线激活。"
+                }
+            }
+        }
+
         switch activationStatus {
         case .inactive:
             return OfflineActivationError.notActivated.localizedDescription
@@ -2198,6 +2442,10 @@ final class ChatStore: ObservableObject {
     }
 
     private func consumeActivationMessage(for modelID: String) async throws {
+        guard hasManagedRelayAccess == false else {
+            return
+        }
+
         let nextActivationState = try OfflineActivation.consumeMessage(
             from: activationState,
             deviceToken: deviceIdentity.deviceToken,
@@ -2502,6 +2750,36 @@ final class ChatStore: ObservableObject {
         return "\(localizedDescription) \(debugSuffix)"
     }
 
+    #if canImport(StoreKit)
+    private func verifiedStoreTransaction(
+        from verificationResult: VerificationResult<Transaction>
+    ) throws -> Transaction {
+        switch verificationResult {
+        case .verified(let transaction):
+            return transaction
+        case .unverified(_, let error):
+            throw error
+        }
+    }
+
+    private func submittedTransaction(
+        from transaction: Transaction,
+        signedTransactionInfo: String?
+    ) -> RelaySubmittedTransaction {
+        RelaySubmittedTransaction(
+            transactionID: String(transaction.id),
+            originalTransactionID: String(transaction.originalID),
+            productID: transaction.productID,
+            environment: nil,
+            signedTransactionInfo: signedTransactionInfo,
+            signedRenewalInfo: nil,
+            purchaseDate: transaction.purchaseDate,
+            expirationDate: transaction.expirationDate,
+            revokedDate: transaction.revocationDate
+        )
+    }
+    #endif
+
     private func appendedDraftText(existing: String, addition: String) -> String {
         DraftTextComposer.appended(existing: existing, addition: addition)
     }
@@ -2516,6 +2794,17 @@ final class ChatStore: ObservableObject {
             .map(\.title)
 
         return titles.isEmpty ? L10n.tr("common.all") : titles.joined(separator: L10n.tr("list.separator"))
+    }
+
+    private func relaySourceLabel(for source: RelayAccessSource) -> String {
+        switch source {
+        case .trial:
+            return "试用"
+        case .subscription:
+            return "订阅"
+        case .offlineManual:
+            return "离线导入"
+        }
     }
 
     private func handleSyncEvent(_ event: CompanionSyncEvent) async {
@@ -2561,6 +2850,83 @@ final class ChatStore: ObservableObject {
                 )
             }
             #endif
+        case .relayPairingToken(let token, let expiresAt):
+            await consumeRelayPairingToken(token, expiresAt: expiresAt)
+        }
+    }
+
+    private func updateRelayAccountStatus(
+        _ status: RelayAccountStatusResponse?,
+        shareToCompanion: Bool
+    ) async {
+        let previousStatus = relayAccountStatus
+        relayAccountStatus = status
+
+        guard shareToCompanion else {
+            return
+        }
+
+        let previouslyActive = isManagedRelayAccessActive(for: previousStatus)
+        let nowActive = isManagedRelayAccessActive(for: status)
+        let keyChanged = previousStatus?.key?.keyValue != status?.key?.keyValue
+
+        guard nowActive, previouslyActive == false || keyChanged else {
+            return
+        }
+
+        await shareManagedRelayAccessToCompanionIfPossible()
+    }
+
+    private func isManagedRelayAccessActive(for status: RelayAccountStatusResponse?) -> Bool {
+        guard configuration.backendMode == .relay else {
+            return false
+        }
+
+        if configuration.relayBearerToken != nil {
+            return true
+        }
+
+        guard let account = status?.account,
+              let key = status?.key
+        else {
+            return false
+        }
+
+        return account.state == .active && key.state == .active && account.creditBalance > 0
+    }
+
+    private func shareManagedRelayAccessToCompanionIfPossible() async {
+        guard configuration.backendMode == .relay,
+              configuration.relayBearerToken == nil,
+              canTransferActivationCodeToPairedWatch,
+              isManagedRelayAccessActive(for: relayAccountStatus)
+        else {
+            return
+        }
+
+        do {
+            let pairingToken = try await relayAccountService.requestPairingToken()
+            syncBridge.pushRelayPairingToken(pairingToken.pairingToken, expiresAt: pairingToken.expiresAt)
+        } catch {
+            companionActivationFeedbackMessage = "在线激活同步失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func consumeRelayPairingToken(_ token: String, expiresAt: Date?) async {
+        guard configuration.backendMode == .relay else {
+            return
+        }
+
+        if let expiresAt, expiresAt <= .now {
+            return
+        }
+
+        do {
+            let status = try await relayAccountService.joinPaired(pairingToken: token)
+            await updateRelayAccountStatus(status, shareToCompanion: false)
+            companionActivationFeedbackMessage = "已同步配对设备的在线激活。"
+        } catch {
+            companionActivationFeedbackMessage = "同步在线激活失败：\(error.localizedDescription)"
         }
     }
 
