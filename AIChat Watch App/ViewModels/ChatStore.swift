@@ -335,12 +335,14 @@ final class ChatStore: ObservableObject {
         syncBridge: CompanionSyncBridge,
         replyPersistenceController: (any ReplyPersistenceControlling)? = nil,
         cloudSyncService: ICloudConversationSyncService? = nil,
-        activationRepository: ActivationRepository = ActivationRepository(),
+        activationRepository: ActivationRepository? = nil,
         deviceIdentity: WatchDeviceIdentity? = nil,
         defaults: UserDefaults? = nil,
         sendRetryDelayNanoseconds: @escaping @Sendable (Int) -> UInt64 = ChatStore.defaultSendRetryDelayNanoseconds
     ) {
         let resolvedDefaults = defaults ?? Self.makeDefaults(configuration: configuration)
+        let resolvedActivationRepository = activationRepository ??
+            ActivationRepository(configuration: configuration, rootURL: repository.resolvedRootURL)
         self.repository = repository
         self.aiService = aiService
         self.transcriptionService = transcriptionService
@@ -351,9 +353,13 @@ final class ChatStore: ObservableObject {
         self.syncBridge = syncBridge
         self.replyPersistenceController = replyPersistenceController ?? DeviceReplyPersistenceController()
         self.cloudSyncService = cloudSyncService
-        self.activationRepository = activationRepository
-        self.deviceIdentity = deviceIdentity ?? WatchDeviceIdentityProvider.current()
-        self.relayAccessRepository = RelayAccessRepository(defaults: resolvedDefaults)
+        self.activationRepository = resolvedActivationRepository
+        self.deviceIdentity = deviceIdentity ??
+            WatchDeviceIdentityProvider.current(activationRepository: resolvedActivationRepository)
+        self.relayAccessRepository = RelayAccessRepository(
+            configuration: configuration,
+            rootURL: repository.resolvedRootURL
+        )
         self.relayAccountService = RelayAccountService(
             configuration: configuration,
             deviceIdentity: self.deviceIdentity,
@@ -631,7 +637,7 @@ final class ChatStore: ObservableObject {
     }
 
     func refreshActivationState() async {
-        activationState = await activationRepository.loadState()
+        activationState = activationRepository.loadState()
         relayAccountStatus = await relayAccessRepository.loadState()?.status
 
         guard configuration.backendMode == .relay else {
@@ -663,7 +669,7 @@ final class ChatStore: ObservableObject {
             now: now,
             currentState: activationState
         )
-        try await activationRepository.saveState(nextState)
+        try activationRepository.saveState(nextState)
         activationState = nextState
 
         if configuration.backendMode == .relay {
@@ -676,8 +682,12 @@ final class ChatStore: ObservableObject {
     }
 
     func clearActivation() async {
-        await activationRepository.clearState()
-        activationState = nil
+        do {
+            try activationRepository.clearState()
+            activationState = nil
+        } catch {
+            startupError = error.localizedDescription
+        }
     }
 
     var canTransferActivationCodeToPairedWatch: Bool {
@@ -2453,7 +2463,7 @@ final class ChatStore: ObservableObject {
         )
 
         if nextActivationState != activationState {
-            try await activationRepository.saveState(nextActivationState)
+            try activationRepository.saveState(nextActivationState)
             activationState = nextActivationState
         }
     }

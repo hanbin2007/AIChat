@@ -13,9 +13,8 @@ final class ConversationRepositoryTests: XCTestCase {
     private let onePixelPNGBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
 
-    func testSaveLoadAndDeleteConversation() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    func testSaveLoadAndDeleteConversationPersistsAcrossRestart() async throws {
+        let rootURL = makeRootURL()
         let repository = ConversationRepository(rootURL: rootURL)
         let conversationID = UUID()
         let conversation = ConversationThread(
@@ -29,7 +28,7 @@ final class ConversationRepositoryTests: XCTestCase {
             ]
         )
 
-        try await repository.save(conversation)
+        _ = try await repository.save(conversation)
 
         let loaded = try await repository.loadConversations()
         XCTAssertEqual(loaded.count, 1)
@@ -38,14 +37,14 @@ final class ConversationRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded.first?.isFavorite, true)
 
         try await repository.deleteConversation(id: conversationID)
-        let afterDelete = try await repository.loadConversations()
+
+        let restartedRepository = ConversationRepository(rootURL: rootURL)
+        let afterDelete = try await restartedRepository.loadConversations()
         XCTAssertTrue(afterDelete.isEmpty)
     }
 
     func testSaveAndLoadPromptPresets() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let repository = ConversationRepository(rootURL: rootURL)
+        let repository = ConversationRepository(rootURL: makeRootURL())
         let preset = PromptPreset(
             kind: .conversation,
             title: "Meeting Summary",
@@ -62,9 +61,7 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testSaveAndLoadDeletedConversationTombstones() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let repository = ConversationRepository(rootURL: rootURL)
+        let repository = ConversationRepository(rootURL: makeRootURL())
         let deletedConversationID = UUID()
         let deletedAt = Date(timeIntervalSince1970: 1_763_000_000)
 
@@ -77,10 +74,8 @@ final class ConversationRepositoryTests: XCTestCase {
         XCTAssertEqual(loadedTombstones[deletedConversationID], deletedAt)
     }
 
-    func testSaveReturnsBlobBackedConversationAndHydratesOnLoad() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let repository = ConversationRepository(rootURL: rootURL)
+    func testSaveHydratesAttachmentsAndMaterializesExportCache() async throws {
+        let repository = ConversationRepository(rootURL: makeRootURL())
         let attachment = try makeImageAttachment(suggestedFilename: "persisted")
         let conversation = ConversationThread(
             title: "Image Chat",
@@ -91,9 +86,12 @@ final class ConversationRepositoryTests: XCTestCase {
 
         let storedConversation = try await repository.save(conversation)
         let storedAttachment = try XCTUnwrap(storedConversation.messages.first?.attachments.first)
+        let blobFilename = try XCTUnwrap(storedAttachment.blobFilename)
+        let blobURL = repository.attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false)
 
-        XCTAssertTrue(storedAttachment.data.isEmpty)
-        XCTAssertNotNil(storedAttachment.blobFilename)
+        XCTAssertEqual(storedAttachment.data, attachment.data)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: blobURL.path))
+        XCTAssertEqual(try Data(contentsOf: blobURL), attachment.data)
 
         let loadedConversations = try await repository.loadConversations()
         let loadedConversation = try XCTUnwrap(loadedConversations.first)
@@ -103,76 +101,42 @@ final class ConversationRepositoryTests: XCTestCase {
         XCTAssertEqual(loadedAttachment.data, attachment.data)
     }
 
-    func testSaveRemovesObsoleteAttachmentBlob() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let repository = ConversationRepository(rootURL: rootURL)
+    func testDeletingConversationCascadesAndRemovesOnlyItsExportedAttachmentBlobs() async throws {
+        let repository = ConversationRepository(rootURL: makeRootURL())
         let firstAttachment = try makeImageAttachment(suggestedFilename: "first")
-        let replacementAttachment = try makeImageAttachment(suggestedFilename: "replacement")
-        let conversationID = UUID()
-        let originalConversation = ConversationThread(
-            id: conversationID,
-            title: "Blob Cleanup",
-            messages: [
-                ChatMessage(role: .assistant, text: "First", attachments: [firstAttachment])
-            ]
+        let secondAttachment = try makeImageAttachment(suggestedFilename: "second")
+        let firstConversation = ConversationThread(
+            title: "Delete First",
+            messages: [ChatMessage(role: .assistant, text: "First", attachments: [firstAttachment])]
+        )
+        let secondConversation = ConversationThread(
+            title: "Keep Second",
+            messages: [ChatMessage(role: .assistant, text: "Second", attachments: [secondAttachment])]
         )
 
-        let storedOriginalConversation = try await repository.save(originalConversation)
-        let removedBlobFilename = try XCTUnwrap(storedOriginalConversation.messages.first?.attachments.first?.blobFilename)
-        let removedBlobURL = repository.attachmentsDirectoryURL
-            .appendingPathComponent(removedBlobFilename, isDirectory: false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: removedBlobURL.path))
+        let storedFirstConversation = try await repository.save(firstConversation)
+        let storedSecondConversation = try await repository.save(secondConversation)
 
-        let replacementConversation = ConversationThread(
-            id: conversationID,
-            title: "Blob Cleanup",
-            messages: [
-                ChatMessage(role: .assistant, text: "Replacement", attachments: [replacementAttachment])
-            ]
-        )
+        let firstBlobFilename = try XCTUnwrap(storedFirstConversation.messages.first?.attachments.first?.blobFilename)
+        let secondBlobFilename = try XCTUnwrap(storedSecondConversation.messages.first?.attachments.first?.blobFilename)
+        let firstBlobURL = repository.attachmentsDirectoryURL.appendingPathComponent(firstBlobFilename, isDirectory: false)
+        let secondBlobURL = repository.attachmentsDirectoryURL.appendingPathComponent(secondBlobFilename, isDirectory: false)
 
-        let storedReplacementConversation = try await repository.save(replacementConversation)
-        let replacementBlobFilename = try XCTUnwrap(
-            storedReplacementConversation.messages.first?.attachments.first?.blobFilename
-        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstBlobURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondBlobURL.path))
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: removedBlobURL.path))
-        XCTAssertNotEqual(replacementBlobFilename, removedBlobFilename)
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: repository.attachmentsDirectoryURL
-                    .appendingPathComponent(replacementBlobFilename, isDirectory: false)
-                    .path
-            )
-        )
+        try await repository.deleteConversation(id: firstConversation.id)
+
+        let restartedRepository = ConversationRepository(rootURL: repository.resolvedRootURL)
+        let remainingConversations = try await restartedRepository.loadConversations()
+
+        XCTAssertEqual(remainingConversations.map(\.id), [secondConversation.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstBlobURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondBlobURL.path))
     }
 
-    func testDeleteConversationRemovesPersistedAttachmentBlobs() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let repository = ConversationRepository(rootURL: rootURL)
-        let attachment = try makeImageAttachment(suggestedFilename: "delete")
-        let conversation = ConversationThread(
-            title: "Delete With Attachment",
-            messages: [
-                ChatMessage(role: .assistant, text: "Image", attachments: [attachment])
-            ]
-        )
-
-        let storedConversation = try await repository.save(conversation)
-        let blobFilename = try XCTUnwrap(storedConversation.messages.first?.attachments.first?.blobFilename)
-        let blobURL = repository.attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: blobURL.path))
-
-        try await repository.deleteConversation(id: conversation.id)
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: blobURL.path))
-    }
-
-    func testImportAttachmentBlobHydratesConversation() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    func testImportAttachmentBlobHydratesConversationBeforePersist() async throws {
+        let rootURL = makeRootURL()
         let repository = ConversationRepository(rootURL: rootURL)
         let attachment = try makeImageAttachment(suggestedFilename: "remote")
         let blobFilename = "remote-attachment.png"
@@ -212,6 +176,96 @@ final class ConversationRepositoryTests: XCTestCase {
         )
     }
 
+    func testLegacyJSONStoreImportsIntoSwiftDataOnFirstLoad() async throws {
+        let rootURL = makeRootURL()
+        let attachment = try makeImageAttachment(suggestedFilename: "legacy")
+        let blobFilename = "legacy-\(attachment.id.uuidString).png"
+        let attachmentsDirectoryURL = rootURL.appendingPathComponent("attachments", isDirectory: true)
+        try FileManager.default.createDirectory(at: attachmentsDirectoryURL, withIntermediateDirectories: true)
+        try attachment.data.write(
+            to: attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false),
+            options: [.atomic]
+        )
+
+        let legacyConversation = ConversationThread(
+            title: "Legacy",
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "Legacy payload",
+                    attachments: [
+                        ChatAttachment(
+                            id: attachment.id,
+                            kind: .image,
+                            filename: attachment.filename,
+                            mimeType: attachment.mimeType,
+                            data: Data(),
+                            blobFilename: blobFilename,
+                            pixelWidth: attachment.pixelWidth,
+                            pixelHeight: attachment.pixelHeight
+                        )
+                    ]
+                )
+            ]
+        )
+        let globalPinnedMemory = PinnedMemoryItem(
+            text: "请始终使用中文。",
+            keywords: ["中文"],
+            scope: .global
+        )
+        let preset = PromptPreset(
+            kind: .conversation,
+            title: "Legacy Preset",
+            content: "Be concise."
+        )
+        let tombstoneID = UUID()
+        let tombstoneDate = Date(timeIntervalSince1970: 1_763_000_123)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        try encoder.encode(legacyConversation).write(
+            to: rootURL.appendingPathComponent("\(legacyConversation.id.uuidString).json", isDirectory: false),
+            options: [.atomic]
+        )
+        try encoder.encode([globalPinnedMemory]).write(
+            to: rootURL.appendingPathComponent("_global_pinned_memories.json", isDirectory: false),
+            options: [.atomic]
+        )
+        try encoder.encode([preset]).write(
+            to: rootURL.appendingPathComponent("_prompt_presets.json", isDirectory: false),
+            options: [.atomic]
+        )
+        try encoder.encode([
+            LegacyDeletedConversationTombstone(id: tombstoneID, deletedAt: tombstoneDate)
+        ]).write(
+            to: rootURL.appendingPathComponent("_deleted_conversation_tombstones.json", isDirectory: false),
+            options: [.atomic]
+        )
+
+        let repository = ConversationRepository(rootURL: rootURL)
+
+        let conversations = try await repository.loadConversations()
+        let globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
+        let promptPresets = try await repository.loadPromptPresets()
+        let tombstones = try await repository.loadDeletedConversationTombstones()
+
+        XCTAssertEqual(conversations.map(\.id), [legacyConversation.id])
+        XCTAssertEqual(conversations.first?.messages.first?.attachments.first?.data, attachment.data)
+        XCTAssertEqual(globalPinnedMemories.map(\.id), [globalPinnedMemory.id])
+        XCTAssertTrue(promptPresets.contains(where: { $0.id == preset.id }))
+        XCTAssertEqual(tombstones[tombstoneID], tombstoneDate)
+
+        try await repository.deleteConversation(id: legacyConversation.id)
+        let restartedRepository = ConversationRepository(rootURL: rootURL)
+        let restartedConversations = try await restartedRepository.loadConversations()
+        XCTAssertTrue(restartedConversations.isEmpty)
+    }
+
+    private func makeRootURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
     private func makeImageAttachment(suggestedFilename: String) throws -> ChatAttachment {
         let data = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
         return try ChatAttachment.makeModelGeneratedImage(
@@ -220,4 +274,9 @@ final class ConversationRepositoryTests: XCTestCase {
             suggestedFilename: suggestedFilename
         )
     }
+}
+
+private struct LegacyDeletedConversationTombstone: Codable {
+    let id: UUID
+    let deletedAt: Date
 }

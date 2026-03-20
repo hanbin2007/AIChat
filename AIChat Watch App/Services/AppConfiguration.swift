@@ -283,6 +283,10 @@ nonisolated struct AppConfiguration: Equatable {
             return L10n.tr("configuration.relay.invalid_base_url")
         }
 
+        guard resolvedRelayBearerToken != nil else {
+            return L10n.tr("configuration.relay.missing_bearer")
+        }
+
         return nil
     }
 
