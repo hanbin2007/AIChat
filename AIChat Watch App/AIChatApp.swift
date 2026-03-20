@@ -6,6 +6,10 @@
 //
 
 import SwiftUI
+import Combine
+#if os(watchOS)
+import WatchKit
+#endif
 
 #if os(watchOS)
 @main
@@ -179,6 +183,8 @@ private struct UITestBootstrap {
             return makeAutoScrollInterruptBootstrap()
         case "conversation_touch_scroll":
             return makeTouchScrollBootstrap()
+        case "conversation_background_reply_notification":
+            return makeBackgroundReplyNotificationBootstrap()
         case "conversation_latest_message_expanded":
             return makeLatestMessageExpandedBootstrap()
         case "conversation_latest_thought_summary_collapsed":
@@ -294,6 +300,45 @@ private struct UITestBootstrap {
 
         return UITestBootstrap(
             store: ChatStore.previewStore(conversations: [conversation]),
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
+    private static func makeBackgroundReplyNotificationBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000405") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_402_000)
+
+        UITestBackgroundReplyDebugProbe.shared.reset()
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Background Reply Notification",
+            createdAt: seededDate,
+            updatedAt: seededDate,
+            isFavorite: false,
+            messages: [
+                ChatMessage(
+                    role: .user,
+                    text: "Stream a delayed answer, then confirm the watch can finish it and notify me after I leave the app.",
+                    createdAt: seededDate
+                )
+            ]
+        )
+
+        let store = ChatStore.previewStore(
+            conversations: [conversation],
+            aiService: UITestBackgroundReplyStreamingService(),
+            completionFeedbackProvider: UITestBackgroundReplyCompletionFeedbackProvider()
+        )
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            await store.retryLatestReply(in: conversationID)
+        }
+
+        return UITestBootstrap(
+            store: store,
             initialConversationID: nil,
             launchDestination: .conversationDetail(conversationID)
         )
@@ -586,6 +631,84 @@ private struct UITestAutoScrollStreamingService: AIStreamingService {
                 continuation.finish()
             }
         }
+    }
+}
+
+@MainActor
+final class UITestBackgroundReplyDebugProbe: ObservableObject {
+    static let shared = UITestBackgroundReplyDebugProbe()
+
+    @Published private(set) var completedEventCount = 0
+    @Published private(set) var completedInBackgroundCount = 0
+    @Published private(set) var lastEventIdentifier = "nil"
+
+    func reset() {
+        completedEventCount = 0
+        completedInBackgroundCount = 0
+        lastEventIdentifier = "nil"
+    }
+
+    func record(event: CompletionFeedbackEvent, deliveredInBackground: Bool) {
+        completedEventCount += 1
+        if deliveredInBackground {
+            completedInBackgroundCount += 1
+        }
+        lastEventIdentifier = event.notificationIdentifier
+    }
+}
+
+private struct UITestBackgroundReplyStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached(priority: .userInitiated) {
+                continuation.yield(.thoughtDelta("Keeping this reply alive long enough to verify background completion."))
+
+                let chunks = [
+                    "Chunk 1: The watch app should keep consuming reply deltas after you leave the foreground.\n\n",
+                    "Chunk 2: Once the assistant finishes, the completion feedback path should still run.\n\n",
+                    "Chunk 3: The UI test reopens the app and inspects a hidden debug probe for the final state.\n\n",
+                    "Chunk 4: If streaming stalls in the background, this scenario never reaches the terminal notification callback."
+                ]
+
+                for chunk in chunks {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    continuation.yield(.answerDelta(chunk))
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+}
+
+@MainActor
+private final class UITestBackgroundReplyCompletionFeedbackProvider: CompletionFeedbackProviding {
+    func prepareForPossibleBackgroundFeedback() async {}
+
+    func notifyCompletion(of event: CompletionFeedbackEvent) async {
+        let deliveredInBackground: Bool
+
+        #if os(watchOS)
+        deliveredInBackground =
+            WKExtension.shared().applicationState != .active ||
+            WatchDisplayStateMonitor.shared.isLuminanceReduced
+        #else
+        deliveredInBackground = false
+        #endif
+
+        UITestBackgroundReplyDebugProbe.shared.record(
+            event: event,
+            deliveredInBackground: deliveredInBackground
+        )
     }
 }
 #endif

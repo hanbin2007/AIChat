@@ -124,18 +124,22 @@ final class NoopReplyPersistenceController: ReplyPersistenceControlling {
 }
 
 final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControlling {
+    private let stateLock = NSCondition()
     private var activeTokens: Set<UUID> = []
 
     #if os(iOS)
     private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
     #elseif os(watchOS)
     private var extendedRuntimeSession: WKExtendedRuntimeSession?
+    private var expiringActivityIsRunning = false
     #endif
 
     func beginStreamingReplyPersistence() -> UUID {
         let token = UUID()
+        stateLock.lock()
         let shouldActivate = activeTokens.isEmpty
         activeTokens.insert(token)
+        stateLock.unlock()
 
         if shouldActivate {
             activateIfPossible()
@@ -145,11 +149,17 @@ final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControll
     }
 
     func endStreamingReplyPersistence(_ token: UUID) {
+        stateLock.lock()
         guard activeTokens.remove(token) != nil else {
+            stateLock.unlock()
             return
         }
 
-        if activeTokens.isEmpty {
+        let shouldDeactivate = activeTokens.isEmpty
+        stateLock.broadcast()
+        stateLock.unlock()
+
+        if shouldDeactivate {
             deactivate()
         }
     }
@@ -172,16 +182,8 @@ final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControll
             }
         }
         #elseif os(watchOS)
-        guard extendedRuntimeSession == nil,
-              WKExtension.shared().applicationState == .active
-        else {
-            return
-        }
-
-        let session = WKExtendedRuntimeSession()
-        session.delegate = self
-        extendedRuntimeSession = session
-        session.start()
+        activateExpiringActivityIfPossible()
+        activateExtendedRuntimeSessionIfPossible()
         #endif
     }
 
@@ -197,6 +199,9 @@ final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControll
         #elseif os(watchOS)
         extendedRuntimeSession?.invalidate()
         extendedRuntimeSession = nil
+        stateLock.lock()
+        stateLock.broadcast()
+        stateLock.unlock()
         #endif
     }
 
@@ -209,6 +214,51 @@ final class DeviceReplyPersistenceController: NSObject, ReplyPersistenceControll
     private static var isRunningUnitTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
+
+    #if os(watchOS)
+    private func activateExtendedRuntimeSessionIfPossible() {
+        guard extendedRuntimeSession == nil,
+              WKExtension.shared().applicationState == .active
+        else {
+            return
+        }
+
+        let session = WKExtendedRuntimeSession()
+        session.delegate = self
+        extendedRuntimeSession = session
+        session.start()
+    }
+
+    private func activateExpiringActivityIfPossible() {
+        stateLock.lock()
+        guard expiringActivityIsRunning == false else {
+            stateLock.unlock()
+            return
+        }
+
+        expiringActivityIsRunning = true
+        stateLock.unlock()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            ProcessInfo.processInfo.performExpiringActivity(withReason: "AIChatAssistantReply") { expired in
+                guard let self else {
+                    return
+                }
+
+                self.stateLock.lock()
+                defer {
+                    self.expiringActivityIsRunning = false
+                    self.stateLock.broadcast()
+                    self.stateLock.unlock()
+                }
+
+                while self.activeTokens.isEmpty == false, expired == false {
+                    self.stateLock.wait(until: Date(timeIntervalSinceNow: 0.25))
+                }
+            }
+        }
+    }
+    #endif
 }
 
 #if os(watchOS)
@@ -269,6 +319,81 @@ nonisolated enum RecoveredStreamingMessageNormalizer {
         normalizedConversation.messages = normalizedMessages
         return (normalizedConversation, true)
     }
+}
+
+private struct AssistantReplyStreamingSnapshot: Sendable {
+    var text = ""
+    var thoughtSummary = ""
+    var modelResponseParts: [GeminiPartPayload]?
+    var attachments: [ChatAttachment] = []
+}
+
+private nonisolated func collectAssistantReplyStream(
+    from stream: AsyncThrowingStream<AIStreamEvent, Error>,
+    flushInterval: TimeInterval,
+    persistenceInterval: TimeInterval,
+    onFlush: @escaping @MainActor (_ snapshot: AssistantReplyStreamingSnapshot, _ shouldPersist: Bool) async -> Void
+) async throws -> AssistantReplyStreamingSnapshot {
+    var snapshot = AssistantReplyStreamingSnapshot()
+    var lastFlushAt = Date.distantPast
+    var lastPersistAt = Date.distantPast
+    var hasFlushedVisibleContent = false
+    var hasPersistedStreamingProgress = false
+
+    func flushIfNeeded(force: Bool = false) async {
+        let now = Date.now
+        let shouldFlushVisibleContent =
+            force ||
+            hasFlushedVisibleContent == false ||
+            now.timeIntervalSince(lastFlushAt) >= flushInterval
+        let shouldPersistStreamingProgress =
+            force ||
+            hasPersistedStreamingProgress == false ||
+            now.timeIntervalSince(lastPersistAt) >= persistenceInterval
+
+        guard shouldFlushVisibleContent || shouldPersistStreamingProgress else {
+            return
+        }
+
+        await onFlush(snapshot, shouldPersistStreamingProgress)
+
+        if shouldFlushVisibleContent {
+            lastFlushAt = now
+            hasFlushedVisibleContent = true
+        }
+
+        if shouldPersistStreamingProgress {
+            lastPersistAt = now
+            hasPersistedStreamingProgress = true
+        }
+    }
+
+    for try await event in stream {
+        try Task.checkCancellation()
+
+        switch event {
+        case .answerDelta(let delta):
+            snapshot.text.append(delta)
+        case .thoughtDelta(let delta):
+            snapshot.thoughtSummary.append(delta)
+        case .modelResponseParts(let modelResponseParts):
+            snapshot.modelResponseParts = modelResponseParts
+        case .attachment(let attachment):
+            guard snapshot.attachments.contains(where: {
+                $0.mimeType == attachment.mimeType && $0.data == attachment.data
+            }) == false else {
+                continue
+            }
+
+            snapshot.attachments.append(attachment)
+        }
+
+        await flushIfNeeded(force: hasFlushedVisibleContent == false)
+    }
+
+    await flushIfNeeded(force: true)
+
+    return snapshot
 }
 
 @MainActor
@@ -2538,90 +2663,26 @@ final class ChatStore: ObservableObject {
 
                 try Task.checkCancellation()
 
-                let streamTask = Task { @MainActor () throws -> (String, String, [GeminiPartPayload]?, [ChatAttachment]) in
-                    var streamedText = ""
-                    var streamedThoughtSummary = ""
-                    var streamedModelResponseParts: [GeminiPartPayload]?
-                    var streamedAttachments: [ChatAttachment] = []
-                    let flushInterval: TimeInterval = 0.05
-                    let persistenceInterval = Self.streamingProgressPersistenceInterval
-                    var lastFlushAt = Date.distantPast
-                    var lastPersistAt = Date.distantPast
-                    var hasFlushedVisibleContent = false
-                    var hasPersistedStreamingProgress = false
+                let streamedSnapshot = try await collectAssistantReplyStream(
+                    from: aiService.streamReply(for: requestConversation),
+                    flushInterval: 0.05,
+                    persistenceInterval: Self.streamingProgressPersistenceInterval
+                ) { snapshot, shouldPersist in
+                    self.upsertAssistantMessage(
+                        id: assistantMessageID,
+                        in: conversationID,
+                        text: snapshot.text,
+                        thoughtSummary: snapshot.thoughtSummary,
+                        modelResponseParts: snapshot.modelResponseParts,
+                        attachments: snapshot.attachments,
+                        status: .streaming,
+                        fallbackCreatedAt: assistantMessageCreatedAt
+                    )
 
-                    @MainActor
-                    func flushIfNeeded(force: Bool = false) async {
-                        let now = Date.now
-                        let shouldFlushVisibleContent =
-                            force ||
-                            hasFlushedVisibleContent == false ||
-                            now.timeIntervalSince(lastFlushAt) >= flushInterval
-                        let shouldPersistStreamingProgress =
-                            force ||
-                            hasPersistedStreamingProgress == false ||
-                            now.timeIntervalSince(lastPersistAt) >= persistenceInterval
-
-                        guard shouldFlushVisibleContent || shouldPersistStreamingProgress else {
-                            return
-                        }
-
-                        upsertAssistantMessage(
-                            id: assistantMessageID,
-                            in: conversationID,
-                            text: streamedText,
-                            thoughtSummary: streamedThoughtSummary,
-                            modelResponseParts: streamedModelResponseParts,
-                            attachments: streamedAttachments,
-                            status: .streaming,
-                            fallbackCreatedAt: assistantMessageCreatedAt
-                        )
-
-                        if shouldFlushVisibleContent {
-                            lastFlushAt = now
-                            hasFlushedVisibleContent = true
-                        }
-
-                        if shouldPersistStreamingProgress,
-                           let streamingConversation = conversation(id: conversationID) {
-                            await persist(streamingConversation, sync: false)
-                            lastPersistAt = now
-                            hasPersistedStreamingProgress = true
-                        }
+                    if shouldPersist,
+                       let streamingConversation = self.conversation(id: conversationID) {
+                        await self.persist(streamingConversation, sync: false)
                     }
-
-                    for try await event in aiService.streamReply(for: requestConversation) {
-                        try Task.checkCancellation()
-
-                        switch event {
-                        case .answerDelta(let delta):
-                            streamedText.append(delta)
-                        case .thoughtDelta(let delta):
-                            streamedThoughtSummary.append(delta)
-                        case .modelResponseParts(let modelResponseParts):
-                            streamedModelResponseParts = modelResponseParts
-                        case .attachment(let attachment):
-                            guard streamedAttachments.contains(where: {
-                                $0.mimeType == attachment.mimeType && $0.data == attachment.data
-                            }) == false else {
-                                continue
-                            }
-
-                            streamedAttachments.append(attachment)
-                        }
-
-                        await flushIfNeeded(force: hasFlushedVisibleContent == false)
-                    }
-
-                    await flushIfNeeded(force: true)
-
-                    return (streamedText, streamedThoughtSummary, streamedModelResponseParts, streamedAttachments)
-                }
-
-                let (streamedText, streamedThoughtSummary, streamedModelResponseParts, streamedAttachments) = try await withTaskCancellationHandler {
-                    try await streamTask.value
-                } onCancel: {
-                    streamTask.cancel()
                 }
 
                 try Task.checkCancellation()
@@ -2629,10 +2690,10 @@ final class ChatStore: ObservableObject {
                 upsertAssistantMessage(
                     id: assistantMessageID,
                     in: conversationID,
-                    text: streamedText,
-                    thoughtSummary: streamedThoughtSummary,
-                    modelResponseParts: streamedModelResponseParts,
-                    attachments: streamedAttachments,
+                    text: streamedSnapshot.text,
+                    thoughtSummary: streamedSnapshot.thoughtSummary,
+                    modelResponseParts: streamedSnapshot.modelResponseParts,
+                    attachments: streamedSnapshot.attachments,
                     status: .sent,
                     fallbackCreatedAt: assistantMessageCreatedAt
                 )

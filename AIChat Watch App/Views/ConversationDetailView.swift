@@ -91,6 +91,9 @@ struct ConversationDetailView: View {
     @State private var toolSettingsDraft: ToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
+    #if DEBUG
+    @ObservedObject private var backgroundReplyDebugProbe = UITestBackgroundReplyDebugProbe.shared
+    #endif
 
     var body: some View {
         ZStack {
@@ -287,6 +290,13 @@ struct ConversationDetailView: View {
                         streamingMessageID: streamingMessageID
                     )
                 }
+            }
+            .overlay(alignment: .topTrailing) {
+                #if DEBUG
+                if isBackgroundReplyUITestDiagnosticsEnabled {
+                    backgroundReplyDebugView(conversation: conversation)
+                }
+                #endif
             }
             .overlay(alignment: .bottomTrailing) {
                 if chatStore.canRetryLatestReply(in: conversationID) {
@@ -1297,6 +1307,12 @@ struct ConversationDetailView: View {
         ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_autoscroll_interrupt"
     }
 
+    #if DEBUG
+    private var isBackgroundReplyUITestDiagnosticsEnabled: Bool {
+        ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_background_reply_notification"
+    }
+    #endif
+
     private func latestAssistantMessageID(in messages: [ChatMessage]) -> UUID? {
         messages.last(where: { $0.role == .assistant })?.id
     }
@@ -1332,6 +1348,33 @@ struct ConversationDetailView: View {
         .allowsHitTesting(false)
         .accessibilityIdentifier("conversation.scroll.debug")
     }
+
+    #if DEBUG
+    private func backgroundReplyDebugLabel(conversation: ConversationThread) -> String {
+        let latestAssistantMessage = conversation.messages.last(where: { $0.role == .assistant })
+        let isStreaming = latestAssistantMessage?.status == .streaming
+        let hasVisibleReply = latestAssistantMessage?.hasVisibleContent ?? false
+
+        return [
+            "completed=\(backgroundReplyDebugProbe.completedEventCount)",
+            "background=\(backgroundReplyDebugProbe.completedInBackgroundCount)",
+            "event=\(backgroundReplyDebugProbe.lastEventIdentifier)",
+            "streaming=\(isStreaming ? 1 : 0)",
+            "status=\(latestAssistantMessage?.status.rawValue ?? "nil")",
+            "visible=\(hasVisibleReply ? 1 : 0)"
+        ].joined(separator: ";")
+    }
+
+    private func backgroundReplyDebugView(conversation: ConversationThread) -> some View {
+        Text(backgroundReplyDebugLabel(conversation: conversation))
+            .font(.system(size: 1))
+            .foregroundStyle(.clear)
+            .frame(width: 1, height: 1)
+            .clipped()
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("conversation.background_reply.debug")
+    }
+    #endif
 
     private func recordingStatusTitle() -> String {
         let duration = L10n.format("conversation.recording", voiceRecorder.elapsedTimeText)
