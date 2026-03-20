@@ -625,6 +625,75 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testBackgroundedReplyFinishesAndTriggersCompletionFeedback() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_background_reply_notification"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing background-reply conversation hierarchy")
+            XCTFail("Missing conversation scroll view for background reply scenario.")
+            return
+        }
+
+        let telemetry = app.staticTexts["conversation.background_reply.debug"]
+        if !telemetry.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing background reply telemetry hierarchy")
+            XCTFail("Missing background reply telemetry for UI verification.")
+            return
+        }
+
+        let streamingDeadline = Date().addingTimeInterval(10)
+        var initialTelemetry: [String: String] = [:]
+        while Date() < streamingDeadline {
+            initialTelemetry = debugTelemetry(from: telemetry.label)
+            if initialTelemetry["streaming"] == "1" {
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        XCTAssertEqual(initialTelemetry["streaming"], "1")
+
+        XCUIDevice.shared.press(.home)
+        RunLoop.current.run(until: Date().addingTimeInterval(5))
+        app.activate()
+
+        let completionDeadline = Date().addingTimeInterval(10)
+        var finalTelemetry: [String: String] = [:]
+        while Date() < completionDeadline {
+            finalTelemetry = debugTelemetry(from: telemetry.label)
+            if finalTelemetry["completed"] == "1",
+               finalTelemetry["background"] == "1",
+               finalTelemetry["streaming"] == "0",
+               finalTelemetry["status"] == "sent" {
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        let attachment = XCTAttachment(
+            string: [
+                "initial: \(initialTelemetry)",
+                "final: \(finalTelemetry)"
+            ].joined(separator: "\n")
+        )
+        attachment.name = "background-reply-telemetry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        XCTAssertEqual(finalTelemetry["completed"], "1")
+        XCTAssertEqual(finalTelemetry["background"], "1")
+        XCTAssertEqual(finalTelemetry["event"], "assistant-reply-complete-feedback")
+        XCTAssertEqual(finalTelemetry["streaming"], "0")
+        XCTAssertEqual(finalTelemetry["status"], "sent")
+        XCTAssertEqual(finalTelemetry["visible"], "1")
+    }
+
+    @MainActor
     func testLatestConversationMessageDoesNotUseUICollapse() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_latest_message_expanded"
