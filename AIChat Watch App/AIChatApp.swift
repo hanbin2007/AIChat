@@ -260,7 +260,7 @@ private struct UITestBootstrap {
         case "conversation_touch_scroll":
             return makeTouchScrollBootstrap()
         case "conversation_touch_scroll_after_collapse":
-            return makeTouchScrollBootstrap(startExpanded: true)
+            return makeTouchScrollBootstrap()
         case "conversation_list_scroll_performance":
             return makeListScrollPerformanceBootstrap()
         case "conversation_heavy_markdown":
@@ -336,7 +336,7 @@ private struct UITestBootstrap {
         )
     }
 
-    private static func makeTouchScrollBootstrap(startExpanded: Bool = false) -> UITestBootstrap {
+    private static func makeTouchScrollBootstrap() -> UITestBootstrap {
         let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000402") ?? UUID()
         let seededDate = Date(timeIntervalSince1970: 1_762_401_000)
         var messages: [ChatMessage] = []
@@ -381,15 +381,9 @@ private struct UITestBootstrap {
             isFavorite: false,
             messages: messages
         )
-        let drafts =
-            startExpanded ?
-            [conversationID: ConversationDraft(text: "Keep the composer expanded for touch-scroll regression coverage.")] :
-            [:]
-
         return UITestBootstrap(
             store: ChatStore.previewStore(
-                conversations: [conversation],
-                drafts: drafts
+                conversations: [conversation]
             ),
             initialConversationID: nil,
             launchDestination: .conversationDetail(conversationID)

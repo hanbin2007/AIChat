@@ -263,7 +263,9 @@ struct ConversationDetailView: View {
                         .id("error")
                     }
 
-                    Color.white.opacity(0.001)
+                    Rectangle()
+                        .fill(Color.white.opacity(0.001))
+                        .frame(maxWidth: .infinity)
                         .frame(height: isComposerExpanded ? ComposerLayout.expandedBottomInset : ComposerLayout.collapsedBottomInset)
                         .contentShape(Rectangle())
                         .background(
@@ -358,6 +360,22 @@ struct ConversationDetailView: View {
                 if shouldAutoCollapseComposerForTouchScrollUITest, isComposerExpanded {
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard shouldAutoCollapseComposerForTouchScrollUITest else {
+                            return
+                        }
+
+                        collapseComposer()
+                    }
+                } else if shouldAutoCollapseComposerForTouchScrollUITest {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        guard shouldAutoCollapseComposerForTouchScrollUITest else {
+                            return
+                        }
+
+                        expandComposer()
+
+                        try? await Task.sleep(nanoseconds: 350_000_000)
                         guard shouldAutoCollapseComposerForTouchScrollUITest else {
                             return
                         }

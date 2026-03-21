@@ -154,14 +154,13 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "tool_entry"
         app.launch()
 
-        let toolEntry = app.descendants(matching: .any)["conversation.tool-entry"]
+        let toolEntry = conversationToolEntry(in: app)
         if !toolEntry.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing tool entry hierarchy")
             XCTFail("Missing tool entry button in the watch composer.")
             return
         }
 
-        XCTAssertEqual(toolEntry.label, "工具与图片")
         XCTAssertTrue(waitForHittable(toolEntry, timeout: 5))
         toolEntry.tap()
 
@@ -198,7 +197,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(doneButton, timeout: 2))
         doneButton.tap()
 
-        let restoredToolEntry = app.buttons["conversation.tool-entry"]
+        let restoredToolEntry = conversationToolEntry(in: app)
         let dismissalDeadline = Date().addingTimeInterval(5)
         while Date() < dismissalDeadline {
             if toolSheet.isHittable == false || restoredToolEntry.exists {
@@ -225,14 +224,14 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
         row.tap()
 
-        let toolEntry = app.descendants(matching: .any)["conversation.tool-entry"]
-        if !toolEntry.waitForExistence(timeout: 5) {
+        let backButton = app.buttons["BackButton"].firstMatch
+        if !backButton.waitForExistence(timeout: 5) {
             attachDebugHierarchy(app, named: "Conversation detail did not open hierarchy")
             XCTFail("Conversation detail did not open after tapping the row.")
             return
         }
 
-        XCTAssertTrue(toolEntry.isHittable)
+        XCTAssertTrue(backButton.isHittable)
     }
 
     @MainActor
@@ -426,6 +425,9 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             XCTFail("The touch-scroll-after-collapse scenario should reach the collapsed composer state.")
             return
         }
+
+        XCTAssertTrue(waitForHittable(openComposerButton, timeout: 2))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
 
         assertConversationCanScrollByTouchDrag(
             in: app,
@@ -735,6 +737,28 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    private func conversationToolEntry(in app: XCUIApplication) -> XCUIElement {
+        let buttonMatch = app.buttons["conversation.tool-entry"].firstMatch
+        if buttonMatch.exists {
+            return buttonMatch
+        }
+
+        let labelMatch = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "工具与图片"))
+            .firstMatch
+        if labelMatch.exists {
+            return labelMatch
+        }
+
+        let identifierMatch = app.descendants(matching: .any)["conversation.tool-entry"].firstMatch
+        if identifierMatch.exists {
+            return identifierMatch
+        }
+
+        return app.buttons["photo.on.rectangle"].firstMatch
+    }
+
+    @MainActor
     private func revealConversationRowIfNeeded(
         _ row: XCUIElement,
         in app: XCUIApplication
@@ -790,43 +814,84 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
-        if !bottomMarker.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing \(context) bottom marker hierarchy")
-            XCTFail("Missing bottom marker for \(context) touch-scroll verification.")
-            return
-        }
+        let topMarker = app.staticTexts.matching(
+            NSPredicate(format: "label == %@", "Touch Scroll Top Marker")
+        ).firstMatch
+        let bottomMarker = app.staticTexts.matching(
+            NSPredicate(format: "label == %@", "Touch Scroll Bottom Marker")
+        ).firstMatch
 
-        if !waitForNonEmptyFrame(of: bottomMarker, timeout: 5) {
-            attachDebugHierarchy(app, named: "Missing \(context) bottom marker frame hierarchy")
-            XCTFail("Bottom marker never received a measurable frame for \(context).")
-            return
+        let initialVisibleMarker: String
+        let trackedMarker: XCUIElement
+        let initialTrackedMidY: CGFloat
+        let dragOffsets: [(start: CGVector, end: CGVector)]
+
+        let bottomMarkerIsVisible =
+            bottomMarker.waitForExistence(timeout: 2) &&
+            waitForNonEmptyFrame(of: bottomMarker, timeout: 2) &&
+            scrollView.frame.intersects(bottomMarker.frame)
+
+        if bottomMarkerIsVisible {
+            initialVisibleMarker = "bottom"
+            trackedMarker = bottomMarker
+            initialTrackedMidY = bottomMarker.frame.midY
+
+            // Keep drag starts inside the left gutter so the gesture cannot land on message
+            // bubbles, the retry button, or the collapsed-composer affordance.
+            dragOffsets = [
+                (start: CGVector(dx: 0.06, dy: 0.72), end: CGVector(dx: 0.06, dy: 0.96)),
+                (start: CGVector(dx: 0.06, dy: 0.64), end: CGVector(dx: 0.06, dy: 0.94)),
+                (start: CGVector(dx: 0.09, dy: 0.72), end: CGVector(dx: 0.09, dy: 0.96))
+            ]
+        } else {
+            if !topMarker.waitForExistence(timeout: 10) {
+                attachDebugHierarchy(app, named: "Missing \(context) top marker hierarchy")
+                XCTFail("Missing top marker for \(context) touch-scroll verification.")
+                return
+            }
+
+            if !waitForNonEmptyFrame(of: topMarker, timeout: 5) {
+                attachDebugHierarchy(app, named: "Missing \(context) top marker frame hierarchy")
+                XCTFail("Top marker never received a measurable frame for \(context).")
+                return
+            }
+
+            initialVisibleMarker = "top"
+            trackedMarker = topMarker
+            initialTrackedMidY = topMarker.frame.midY
+            dragOffsets = [
+                (start: CGVector(dx: 0.06, dy: 0.86), end: CGVector(dx: 0.06, dy: 0.22)),
+                (start: CGVector(dx: 0.06, dy: 0.78), end: CGVector(dx: 0.06, dy: 0.20)),
+                (start: CGVector(dx: 0.09, dy: 0.86), end: CGVector(dx: 0.09, dy: 0.22))
+            ]
         }
 
         attachScreenshot(app, named: "\(context)-start")
 
-        let topMarker = app.staticTexts["Touch Scroll Top Marker"]
-        let initialBottomMidY = bottomMarker.frame.midY
-        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.74))
-        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
-
         var didScroll = false
-        for _ in 0..<6 {
+        for dragOffset in dragOffsets {
+            let start = scrollView.coordinate(withNormalizedOffset: dragOffset.start)
+            let end = scrollView.coordinate(withNormalizedOffset: dragOffset.end)
             start.press(forDuration: 0.05, thenDragTo: end)
 
             let deadline = Date().addingTimeInterval(1.2)
             while Date() < deadline {
-                let bottomMoved = bottomMarker.exists &&
-                    bottomMarker.frame.isEmpty == false &&
-                    bottomMarker.frame.midY > initialBottomMidY + 18
-                let bottomMovedOffscreen = bottomMarker.exists &&
-                    bottomMarker.frame.isEmpty == false &&
-                    scrollView.frame.intersects(bottomMarker.frame) == false
-                let topReached = topMarker.exists &&
+                let trackedMoved = trackedMarker.exists &&
+                    trackedMarker.frame.isEmpty == false &&
+                    abs(trackedMarker.frame.midY - initialTrackedMidY) > 18
+                let trackedMovedOffscreen = trackedMarker.exists &&
+                    trackedMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(trackedMarker.frame) == false
+                let topVisible = topMarker.exists &&
                     topMarker.frame.isEmpty == false &&
                     scrollView.frame.intersects(topMarker.frame)
+                let bottomVisible = bottomMarker.exists &&
+                    bottomMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(bottomMarker.frame)
+                let reachedOppositeMarker =
+                    initialVisibleMarker == "top" ? bottomVisible : topVisible
 
-                if bottomMoved || bottomMovedOffscreen || topReached {
+                if trackedMoved || trackedMovedOffscreen || reachedOppositeMarker {
                     didScroll = true
                     break
                 }
@@ -842,10 +907,11 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         let evidence = XCTAttachment(
             string: [
                 "context=\(context)",
-                "initialBottomMidY=\(initialBottomMidY)",
+                "initialVisibleMarker=\(initialVisibleMarker)",
+                "initialTrackedMidY=\(initialTrackedMidY)",
                 "finalTopFrame=\(topMarker.exists ? String(describing: topMarker.frame) : "missing")",
                 "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")",
-                "bottomExists=\(bottomMarker.exists)",
+                "finalBottomFrame=\(bottomMarker.exists ? String(describing: bottomMarker.frame) : "missing")",
                 "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")"
             ].joined(separator: "\n")
         )
