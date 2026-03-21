@@ -38,7 +38,6 @@ private enum ConversationScrollLayout {
     static let latestReplyStartAnchorID = "conversation-latest-reply-start-anchor"
     static let interruptionDragMinimumDistance: CGFloat = 6
     static let interruptionThreshold: CGFloat = 20
-    static let composerCollapseDragThreshold: CGFloat = 14
     static let suppressionDuration: TimeInterval = 0.28
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
 }
@@ -116,6 +115,7 @@ struct ConversationDetailView: View {
                                     composerView()
                                 }
                             }
+                            .allowsHitTesting(isComposerExpanded)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -263,8 +263,9 @@ struct ConversationDetailView: View {
                         .id("error")
                     }
 
-                    Color.clear
+                    Color.white.opacity(0.001)
                         .frame(height: isComposerExpanded ? ComposerLayout.expandedBottomInset : ComposerLayout.collapsedBottomInset)
+                        .contentShape(Rectangle())
                         .background(
                             GeometryReader { geometry in
                                 Color.clear.preference(
@@ -318,10 +319,6 @@ struct ConversationDetailView: View {
                             return
                         }
 
-                        if abs(value.translation.height) >= ConversationScrollLayout.composerCollapseDragThreshold {
-                            collapseComposer()
-                        }
-
                         pauseStreamingRefresh(
                             for: streamingMessageID,
                             autoScrollSessionMessageID: autoScrollSessionMessageID
@@ -357,6 +354,17 @@ struct ConversationDetailView: View {
                     latestAssistantMessageID: latestAssistantMessageID,
                     force: true
                 )
+
+                if shouldAutoCollapseComposerForTouchScrollUITest, isComposerExpanded {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard shouldAutoCollapseComposerForTouchScrollUITest else {
+                            return
+                        }
+
+                        collapseComposer()
+                    }
+                }
             }
             .onChange(of: conversation.messages.count) { _, _ in
                 reconcileRenderedHistory(with: conversation.messages)
@@ -733,6 +741,7 @@ struct ConversationDetailView: View {
                     }
                 }
         )
+        .accessibilityIdentifier("conversation.composer")
     }
 
     private var lockedComposerView: some View {
@@ -745,6 +754,7 @@ struct ConversationDetailView: View {
         ) {
             isShowingActivationCenter = true
         }
+        .accessibilityIdentifier("conversation.composer")
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
@@ -780,6 +790,7 @@ struct ConversationDetailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open composer")
+        .accessibilityIdentifier("conversation.composer.open")
     }
 
     private var retryButton: some View {
@@ -1382,6 +1393,10 @@ struct ConversationDetailView: View {
         ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_autoscroll_interrupt"
     }
 
+    private var shouldAutoCollapseComposerForTouchScrollUITest: Bool {
+        ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_touch_scroll_after_collapse"
+    }
+
     #if DEBUG
     private var isBackgroundReplyUITestDiagnosticsEnabled: Bool {
         ProcessInfo.processInfo.environment["AIChat_UI_TEST_SCENARIO"] == "conversation_background_reply_notification"
@@ -1632,15 +1647,14 @@ private struct CompactMenuButtonLabel: View {
                 .frame(width: leadingIconFrameSize, height: leadingIconFrameSize)
                 .scaleEffect(leadingIconScale)
 
-            OverflowScrollingText(
-                text: title,
-                font: .system(size: titlePointSize, weight: .semibold, design: .rounded),
-                color: .white,
-                gap: 16,
-                speed: 24,
-                expandsHorizontally: true
-            )
-            .layoutPriority(1)
+            Text(title)
+                .font(.system(size: titlePointSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .allowsTightening(true)
+                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Image(systemName: "chevron.down")
                 .font(.system(size: isDense ? 9 : 10, weight: .semibold))

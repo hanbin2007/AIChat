@@ -407,80 +407,30 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll"
         app.launch()
 
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        if !scrollView.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing touch-scroll conversation hierarchy")
-            XCTFail("Missing conversation scroll view for touch scroll scenario.")
-            return
-        }
-
-        let topMarker = app.staticTexts["Touch Scroll Top Marker"]
-        if !topMarker.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing touch-scroll top marker hierarchy")
-            XCTFail("Missing top marker for touch scroll verification.")
-            return
-        }
-
-        if !waitForNonEmptyFrame(of: topMarker, timeout: 5) {
-            attachDebugHierarchy(app, named: "Missing touch-scroll top marker frame hierarchy")
-            XCTFail("Top marker never received a measurable frame.")
-            return
-        }
-
-        attachScreenshot(app, named: "touch-scroll-start")
-
-        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
-        let initialTopMidY = topMarker.frame.midY
-        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.74))
-        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
-
-        var didScroll = false
-        for _ in 0..<6 {
-            start.press(forDuration: 0.05, thenDragTo: end)
-
-            let deadline = Date().addingTimeInterval(1.2)
-            while Date() < deadline {
-                let topMoved = topMarker.exists &&
-                    topMarker.frame.midY < initialTopMidY - 18
-                let topMovedOffscreen = topMarker.exists &&
-                    scrollView.frame.intersects(topMarker.frame) == false
-                let bottomReached = bottomMarker.exists &&
-                    bottomMarker.frame.isEmpty == false &&
-                    scrollView.frame.intersects(bottomMarker.frame)
-
-                if topMoved || topMovedOffscreen || bottomReached {
-                    didScroll = true
-                    break
-                }
-
-                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-            }
-
-            if didScroll {
-                break
-            }
-        }
-
-        let evidence = XCTAttachment(
-            string: [
-                "initialTopMidY=\(initialTopMidY)",
-                "finalTopFrame=\(topMarker.exists ? String(describing: topMarker.frame) : "missing")",
-                "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")",
-                "bottomExists=\(bottomMarker.exists)",
-                "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")"
-            ].joined(separator: "\n")
+        assertConversationCanScrollByTouchDrag(
+            in: app,
+            context: "touch-scroll"
         )
-        evidence.name = "touch-scroll-evidence"
-        evidence.lifetime = .keepAlways
-        add(evidence)
+    }
 
-        if didScroll == false {
-            attachDebugHierarchy(app, named: "Touch scroll failure hierarchy")
-            attachScreenshot(app, named: "touch-scroll-failure")
+    @MainActor
+    func testConversationDetailCanScrollAfterComposerCollapse() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll_after_collapse"
+        app.launch()
+
+        let openComposerButton = app.buttons["conversation.composer.open"].firstMatch
+        if !openComposerButton.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Composer did not auto-collapse hierarchy")
+            attachScreenshot(app, named: "touch-scroll-after-collapse-collapse-failure")
+            XCTFail("The touch-scroll-after-collapse scenario should reach the collapsed composer state.")
+            return
         }
 
-        attachScreenshot(app, named: "touch-scroll-finish")
-        XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript.")
+        assertConversationCanScrollByTouchDrag(
+            in: app,
+            context: "touch-scroll-after-collapse"
+        )
     }
 
     @MainActor
@@ -826,6 +776,90 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         return element.frame.isEmpty == false
+    }
+
+    @MainActor
+    private func assertConversationCanScrollByTouchDrag(
+        in app: XCUIApplication,
+        context: String
+    ) {
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing \(context) conversation hierarchy")
+            XCTFail("Missing conversation scroll view for \(context) scenario.")
+            return
+        }
+
+        let bottomMarker = app.staticTexts["Touch Scroll Bottom Marker"]
+        if !bottomMarker.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing \(context) bottom marker hierarchy")
+            XCTFail("Missing bottom marker for \(context) touch-scroll verification.")
+            return
+        }
+
+        if !waitForNonEmptyFrame(of: bottomMarker, timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing \(context) bottom marker frame hierarchy")
+            XCTFail("Bottom marker never received a measurable frame for \(context).")
+            return
+        }
+
+        attachScreenshot(app, named: "\(context)-start")
+
+        let topMarker = app.staticTexts["Touch Scroll Top Marker"]
+        let initialBottomMidY = bottomMarker.frame.midY
+        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.74))
+        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.20))
+
+        var didScroll = false
+        for _ in 0..<6 {
+            start.press(forDuration: 0.05, thenDragTo: end)
+
+            let deadline = Date().addingTimeInterval(1.2)
+            while Date() < deadline {
+                let bottomMoved = bottomMarker.exists &&
+                    bottomMarker.frame.isEmpty == false &&
+                    bottomMarker.frame.midY > initialBottomMidY + 18
+                let bottomMovedOffscreen = bottomMarker.exists &&
+                    bottomMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(bottomMarker.frame) == false
+                let topReached = topMarker.exists &&
+                    topMarker.frame.isEmpty == false &&
+                    scrollView.frame.intersects(topMarker.frame)
+
+                if bottomMoved || bottomMovedOffscreen || topReached {
+                    didScroll = true
+                    break
+                }
+
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+
+            if didScroll {
+                break
+            }
+        }
+
+        let evidence = XCTAttachment(
+            string: [
+                "context=\(context)",
+                "initialBottomMidY=\(initialBottomMidY)",
+                "finalTopFrame=\(topMarker.exists ? String(describing: topMarker.frame) : "missing")",
+                "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")",
+                "bottomExists=\(bottomMarker.exists)",
+                "bottomVisibleInScroll=\(bottomMarker.exists ? String(scrollView.frame.intersects(bottomMarker.frame)) : "missing")"
+            ].joined(separator: "\n")
+        )
+        evidence.name = "\(context)-evidence"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        if didScroll == false {
+            attachDebugHierarchy(app, named: "\(context) failure hierarchy")
+            attachScreenshot(app, named: "\(context)-failure")
+        }
+
+        attachScreenshot(app, named: "\(context)-finish")
+        XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript for \(context).")
     }
 
     @MainActor

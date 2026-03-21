@@ -198,9 +198,7 @@ struct ConversationRowView: View, Equatable {
 
                 Spacer(minLength: 4)
 
-                Text(conversation.updatedAt, style: .relative)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                WatchRelativeTimestampText(updatedAt: conversation.updatedAt)
             }
 
             Text(conversation.previewText)
@@ -291,5 +289,74 @@ private struct WatchConversationMetaItem: View {
                     .monospacedDigit()
             }
         }
+    }
+}
+
+private struct WatchRelativeTimestampText: View {
+    let updatedAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: Self.nextMinuteBoundary(after: .now), by: 60)) { context in
+            Text(Self.label(for: updatedAt, relativeTo: context.date))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private static func nextMinuteBoundary(after date: Date) -> Date {
+        let calendar = Calendar.autoupdatingCurrent
+        return calendar.nextDate(
+            after: date,
+            matching: DateComponents(second: 0),
+            matchingPolicy: .nextTime
+        ) ?? date.addingTimeInterval(60)
+    }
+
+    private static func label(for updatedAt: Date, relativeTo now: Date) -> String {
+        guard updatedAt <= now else {
+            return justNowLabel(for: .autoupdatingCurrent)
+        }
+
+        let calendar = Calendar.autoupdatingCurrent
+        let locale = Locale.autoupdatingCurrent
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .abbreviated
+
+        let components = calendar.dateComponents(
+            [.year, .month, .weekOfMonth, .day, .hour, .minute],
+            from: updatedAt,
+            to: now
+        )
+
+        if let years = components.year, years > 0 {
+            return formatter.localizedString(from: DateComponents(year: -years))
+        }
+
+        if let months = components.month, months > 0 {
+            return formatter.localizedString(from: DateComponents(month: -months))
+        }
+
+        if let weeks = components.weekOfMonth, weeks > 0 {
+            return formatter.localizedString(from: DateComponents(weekOfMonth: -weeks))
+        }
+
+        if let days = components.day, days > 0 {
+            return formatter.localizedString(from: DateComponents(day: -days))
+        }
+
+        if let hours = components.hour, hours > 0 {
+            return formatter.localizedString(from: DateComponents(hour: -hours))
+        }
+
+        if let minutes = components.minute, minutes > 0 {
+            return formatter.localizedString(from: DateComponents(minute: -minutes))
+        }
+
+        return justNowLabel(for: locale)
+    }
+
+    private static func justNowLabel(for locale: Locale) -> String {
+        locale.identifier.hasPrefix("zh") ? "刚刚" : "Just now"
     }
 }
