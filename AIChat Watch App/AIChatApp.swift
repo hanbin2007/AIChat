@@ -255,6 +255,15 @@ private struct UITestBootstrap {
                 initialConversationID: nil,
                 launchDestination: .root
             )
+        case "conversation_list_initial_loading":
+            return UITestBootstrap(
+                store: ChatStore.previewStore(
+                    conversations: [],
+                    isInitialConversationLoadInProgress: true
+                ),
+                initialConversationID: nil,
+                launchDestination: .root
+            )
         case "conversation_autoscroll_interrupt":
             return makeAutoScrollInterruptBootstrap()
         case "conversation_touch_scroll":

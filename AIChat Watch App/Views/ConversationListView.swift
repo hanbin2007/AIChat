@@ -72,9 +72,15 @@ struct ConversationListView: View {
                     }
 
                     if chatStore.conversationListItems.isEmpty {
-                        emptyState
-                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                            .listRowBackground(Color.clear)
+                        if chatStore.isInitialConversationLoadInProgress && chatStore.startupError == nil {
+                            initialLoadingState
+                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                .listRowBackground(Color.clear)
+                        } else {
+                            emptyState
+                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                                .listRowBackground(Color.clear)
+                        }
                     } else {
                         ForEach(visibleConversationEntries) { entry in
                             NavigationLink(value: entry.item.id) {
@@ -110,6 +116,17 @@ struct ConversationListView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .animation(nil, value: visibleConversationLimit)
+                .overlay(alignment: .topLeading) {
+                    if chatStore.isInitialConversationLoadInProgress,
+                       chatStore.conversationListItems.isEmpty,
+                       chatStore.startupError == nil {
+                        Text("Loading conversations")
+                            .font(.system(size: 1))
+                            .foregroundStyle(.clear)
+                            .frame(width: 1, height: 1)
+                            .accessibilityIdentifier("conversation.list.initial-loading.marker")
+                    }
+                }
             }
         }
         .onAppear {
@@ -149,6 +166,20 @@ struct ConversationListView: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    private var initialLoadingState: some View {
+        HStack {
+            Spacer(minLength: 0)
+
+            ProgressView()
+                .controlSize(.regular)
+                .tint(.cyan)
+                .accessibilityIdentifier("conversation.list.initial-loading.spinner")
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 72)
     }
 
     private var emptyState: some View {

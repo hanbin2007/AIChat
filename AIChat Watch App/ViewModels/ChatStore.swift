@@ -411,6 +411,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var conversationListItems: [WatchConversationListItem] = []
     @Published private(set) var favoriteConversationListItems: [WatchConversationListItem] = []
     @Published private(set) var startupError: String?
+    @Published private(set) var isInitialConversationLoadInProgress = false
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
@@ -733,6 +734,10 @@ final class ChatStore: ObservableObject {
         }
 
         hasLoadedConversations = true
+        isInitialConversationLoadInProgress = true
+        defer {
+            isInitialConversationLoadInProgress = false
+        }
         await refreshActivationState()
 
         do {
@@ -3387,6 +3392,7 @@ extension ChatStore {
         sendingConversationIDs: Set<UUID> = [],
         conversationErrors: [UUID: String] = [:],
         startupError: String? = nil,
+        isInitialConversationLoadInProgress: Bool = false,
         activationState: OfflineActivationState? = OfflineActivationState(
             license: OfflineActivationLicense(
                 deviceToken: 0,
@@ -3436,6 +3442,7 @@ extension ChatStore {
         store.transcribingConversationIDs = []
         store.conversationErrors = conversationErrors
         store.startupError = startupError
+        store.isInitialConversationLoadInProgress = isInitialConversationLoadInProgress
         store.activationState = activationState.map { previewState in
             OfflineActivationState(
                 license: OfflineActivationLicense(

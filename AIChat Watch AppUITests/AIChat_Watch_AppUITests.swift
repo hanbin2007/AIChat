@@ -481,6 +481,40 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationListShowsLoadingIndicatorDuringInitialLoad() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_initial_loading"
+        app.launch()
+
+        let list = app.collectionViews["conversation.list"].firstMatch
+        if !list.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing conversation list for initial loading hierarchy")
+            XCTFail("Missing conversation list for initial loading scenario.")
+            return
+        }
+
+        let identifiedLoadingIndicator = app.activityIndicators["conversation.list.initial-loading.spinner"].firstMatch
+        let fallbackLoadingIndicator = app.activityIndicators.firstMatch
+        let loadingMarker = app.descendants(matching: .any)
+            .matching(identifier: "conversation.list.initial-loading.marker")
+            .firstMatch
+        let foundLoadingIndicator =
+            loadingMarker.waitForExistence(timeout: 2) ||
+            identifiedLoadingIndicator.waitForExistence(timeout: 2) ||
+            fallbackLoadingIndicator.waitForExistence(timeout: 3)
+
+        if !foundLoadingIndicator {
+            attachDebugHierarchy(app, named: "Missing initial loading indicator hierarchy")
+            attachScreenshot(app, named: "conversation-list-initial-loading-missing")
+            XCTFail("The conversation list should show a loading indicator during the initial history load.")
+            return
+        }
+
+        XCTAssertFalse(app.buttons["conversation.empty.primary"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["conversation.empty-state"].exists)
+    }
+
+    @MainActor
     func testConversationListCanScrollWhileBackgroundReplyStreams() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
