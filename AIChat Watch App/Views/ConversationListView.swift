@@ -13,9 +13,12 @@ struct ConversationListView: View {
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
     @State private var visibleConversationLimit = 0
+    @State private var isLoadingMoreConversations = false
+    @State private var paginationTask: Task<Void, Never>?
 
-    private static let pageSize = 24
-    private static let preloadThreshold = 6
+    private static let pageSize = 8
+    private static let preloadThreshold = 2
+    private static let paginationLoadDelayNanoseconds: UInt64 = 120_000_000
 
     var body: some View {
         WatchMinuteRelativeTimeline { relativeNow in
@@ -80,14 +83,24 @@ struct ConversationListView: View {
                                 deleteSwipeAction(for: entry.item)
                             }
                             .onAppear {
-                                loadMoreConversationsIfNeeded(currentIndex: entry.index)
+                                scheduleLoadMoreConversationsIfNeeded(currentIndex: entry.index)
                             }
+                        }
+
+                        if isLoadingMoreConversations {
+                            paginationLoadingRow
+                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 10, trailing: 0))
+                                .listRowBackground(Color.clear)
+                                .onAppear {
+                                    scheduleLoadMoreConversations(force: true)
+                                }
                         }
                     }
                 }
                 .accessibilityIdentifier("conversation.list")
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .animation(nil, value: visibleConversationLimit)
             }
         }
         .onAppear {
@@ -95,6 +108,11 @@ struct ConversationListView: View {
         }
         .onChange(of: chatStore.conversationListItems.count) { oldValue, newValue in
             syncVisibleConversationLimit(previousCount: oldValue, newCount: newValue)
+        }
+        .onDisappear {
+            paginationTask?.cancel()
+            paginationTask = nil
+            isLoadingMoreConversations = false
         }
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
@@ -108,6 +126,19 @@ struct ConversationListView: View {
     private var visibleConversationEntries: [IndexedConversationListItem] {
         visibleConversationItems.enumerated().map { offset, item in
             IndexedConversationListItem(index: offset, item: item)
+        }
+    }
+
+    private var paginationLoadingRow: some View {
+        HStack {
+            Spacer(minLength: 0)
+
+            ProgressView()
+                .controlSize(.small)
+                .tint(.cyan)
+                .accessibilityIdentifier("conversation.list.loading")
+
+            Spacer(minLength: 0)
         }
     }
 
@@ -199,19 +230,28 @@ struct ConversationListView: View {
 
         guard newCount > 0 else {
             visibleConversationLimit = 0
+            isLoadingMoreConversations = false
+            paginationTask?.cancel()
+            paginationTask = nil
             return
         }
 
         let minimumVisible = min(Self.pageSize, newCount)
         if previousCount == 0 || visibleConversationLimit == 0 {
             visibleConversationLimit = minimumVisible
+            isLoadingMoreConversations = false
             return
         }
 
         visibleConversationLimit = min(max(visibleConversationLimit, minimumVisible), newCount)
+        if visibleConversationLimit >= newCount {
+            isLoadingMoreConversations = false
+            paginationTask?.cancel()
+            paginationTask = nil
+        }
     }
 
-    private func loadMoreConversationsIfNeeded(currentIndex: Int) {
+    private func scheduleLoadMoreConversationsIfNeeded(currentIndex: Int) {
         guard visibleConversationLimit < chatStore.conversationListItems.count else {
             return
         }
@@ -221,10 +261,43 @@ struct ConversationListView: View {
             return
         }
 
-        visibleConversationLimit = min(
+        scheduleLoadMoreConversations()
+    }
+
+    private func scheduleLoadMoreConversations(force: Bool = false) {
+        guard visibleConversationLimit < chatStore.conversationListItems.count else {
+            isLoadingMoreConversations = false
+            paginationTask?.cancel()
+            paginationTask = nil
+            return
+        }
+
+        guard force || isLoadingMoreConversations == false else {
+            return
+        }
+
+        guard paginationTask == nil else {
+            return
+        }
+
+        let nextLimit = min(
             visibleConversationLimit + Self.pageSize,
             chatStore.conversationListItems.count
         )
+
+        isLoadingMoreConversations = true
+        paginationTask = Task(priority: .utility) {
+            try? await Task.sleep(nanoseconds: Self.paginationLoadDelayNanoseconds)
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            await MainActor.run {
+                visibleConversationLimit = nextLimit
+                isLoadingMoreConversations = false
+                paginationTask = nil
+            }
+        }
     }
 }
 #endif
