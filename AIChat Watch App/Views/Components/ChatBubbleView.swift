@@ -10,6 +10,11 @@ import SwiftUI
 import WatchKit
 #endif
 
+private enum MessageBubbleInteraction {
+    static let actionsLongPressDuration = 0.35
+    static let actionsLongPressMaximumDistance: CGFloat = 4
+}
+
 struct ChatBubbleView: View, Equatable {
     @EnvironmentObject private var chatStore: ChatStore
 
@@ -257,13 +262,19 @@ struct ChatBubbleView: View, Equatable {
         )
         .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
         #if os(watchOS)
-        .onLongPressGesture(minimumDuration: 0.35) {
-            guard canPinMessage else {
-                return
-            }
+        .simultaneousGesture(
+            LongPressGesture(
+                minimumDuration: MessageBubbleInteraction.actionsLongPressDuration,
+                maximumDistance: MessageBubbleInteraction.actionsLongPressMaximumDistance
+            )
+            .onEnded { _ in
+                guard canPinMessage else {
+                    return
+                }
 
-            isShowingMessageActions = true
-        }
+                isShowingMessageActions = true
+            }
+        )
         .confirmationDialog(
             "Message Actions",
             isPresented: $isShowingMessageActions,
