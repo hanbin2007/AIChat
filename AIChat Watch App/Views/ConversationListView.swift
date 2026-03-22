@@ -19,7 +19,7 @@ struct ConversationListView: View {
 
     private static let initialPageSize = 3
     private static let incrementalPageSize = 3
-    private static let preloadThreshold = 1
+    private static let preloadThreshold = 2
     private static let paginationLoadDelayNanoseconds: UInt64 = 16_000_000
 
     init(
