@@ -20,11 +20,7 @@ private enum AssistantMessageMarkdownPreparationDecider {
     }
 
     static func containsLaTeX(_ text: String) -> Bool {
-        text.contains("$$") ||
-        text.contains("\\(") ||
-        text.contains("\\[") ||
-        text.contains("\\begin{equation}") ||
-        text.contains("\\begin{equation*}")
+        text.containsAssistantRenderableMath
     }
 
     private static func lineCount(in text: String) -> Int {

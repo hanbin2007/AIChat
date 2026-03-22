@@ -1,10 +1,13 @@
 #if os(watchOS)
 import SwiftUI
 
+private let formulaHarnessConversationID =
+    UUID(uuidString: "00000000-0000-0000-0000-00000000f001") ?? UUID()
+
 struct FormulaZoomHarnessView: View {
     private let targetFormulaMarkdown =
         """
-        **$b \\in (0, \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**
+        答案是 **$b \\in (0, \\sqrt{3}) \\cup (\\sqrt{3}, \\frac{\\sqrt{30}}{3}]$**。
         """
 
     private let longDisplayMathMarkdown =
@@ -117,6 +120,10 @@ private struct FormulaEvidenceCard: View {
     let markdown: String
     let accessibilityIdentifier: String
 
+    private var previewMessage: ChatMessage {
+        ChatMessage(role: .assistant, text: markdown)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -129,7 +136,11 @@ private struct FormulaEvidenceCard: View {
                     .foregroundStyle(.white.opacity(0.72))
             }
 
-            AssistantMessageMarkdownView(text: markdown)
+            ChatBubbleView(
+                conversationID: formulaHarnessConversationID,
+                message: previewMessage,
+                forceExpandedContent: true
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

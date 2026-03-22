@@ -424,6 +424,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var pairedWatchActivationRequestCode: String?
     @Published private(set) var companionActivationFeedbackMessage: String?
     @Published private(set) var sendFailureRetryLimit: Int
+    @Published private(set) var isGlobalAutoScrollEnabled: Bool
     @Published private(set) var defaultConversationConfiguration: ConversationAIConfiguration
     @Published private(set) var transcriptionModel: String
     @Published private(set) var transcriptionCustomPrompt: String
@@ -503,6 +504,7 @@ final class ChatStore: ObservableObject {
         self.syncStatus = syncBridge.currentStatus
         self.syncStatusDescription = syncBridge.currentStatus.description
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
+        self.isGlobalAutoScrollEnabled = Self.loadGlobalAutoScrollEnabled(from: resolvedDefaults)
         self.defaultConversationConfiguration = Self.loadDefaultConversationConfiguration(
             from: resolvedDefaults,
             fallbackModel: configuration.geminiModel
@@ -782,8 +784,10 @@ final class ChatStore: ObservableObject {
         }
 
         do {
-            let status = try await relayAccountService.refreshOrBootstrapStatus()
-            await updateRelayAccountStatus(status, shareToCompanion: true)
+            let status = try await relayAccountService.fetchAccountStatusIfPossible()
+            if status != nil {
+                await updateRelayAccountStatus(status, shareToCompanion: true)
+            }
         } catch {
             if relayAccountStatus == nil {
                 startupError = error.localizedDescription
@@ -858,6 +862,17 @@ final class ChatStore: ObservableObject {
                 startupError = error.localizedDescription
             }
         }
+    }
+
+    @discardableResult
+    func requestManagedRelayAccess() async throws -> RelayAccountStatusResponse? {
+        guard configuration.backendMode == .relay else {
+            return nil
+        }
+
+        let status = try await relayAccountService.refreshOrBootstrapStatus(forceBootstrap: true)
+        await updateRelayAccountStatus(status, shareToCompanion: true)
+        return status
     }
 
     @discardableResult
@@ -1357,6 +1372,15 @@ final class ChatStore: ObservableObject {
 
         sendFailureRetryLimit = normalizedLimit
         defaults.set(normalizedLimit, forKey: DefaultsKeys.sendFailureRetryLimit)
+    }
+
+    func updateGlobalAutoScrollEnabled(_ enabled: Bool) {
+        guard isGlobalAutoScrollEnabled != enabled else {
+            return
+        }
+
+        isGlobalAutoScrollEnabled = enabled
+        defaults.set(enabled, forKey: DefaultsKeys.globalAutoScrollEnabled)
     }
 
     func updateDefaultConversationModel(_ model: String) {
@@ -3284,6 +3308,19 @@ final class ChatStore: ObservableObject {
         return normalizedValue
     }
 
+    private static func loadGlobalAutoScrollEnabled(from defaults: UserDefaults) -> Bool {
+        let enabled: Bool
+
+        if defaults.object(forKey: DefaultsKeys.globalAutoScrollEnabled) == nil {
+            enabled = true
+        } else {
+            enabled = defaults.bool(forKey: DefaultsKeys.globalAutoScrollEnabled)
+        }
+
+        defaults.set(enabled, forKey: DefaultsKeys.globalAutoScrollEnabled)
+        return enabled
+    }
+
     private static func loadDefaultConversationConfiguration(
         from defaults: UserDefaults,
         fallbackModel: String
@@ -3353,6 +3390,7 @@ final class ChatStore: ObservableObject {
 
 private enum DefaultsKeys {
     static let sendFailureRetryLimit = "chat.send_failure_retry_limit"
+    static let globalAutoScrollEnabled = "chat.global_auto_scroll_enabled"
     static let defaultConversationModel = "chat.default_conversation_model"
     static let defaultConversationThinkingIntensity = "chat.default_conversation_thinking_intensity"
     static let defaultConversationSystemPrompt = "chat.default_conversation_system_prompt"

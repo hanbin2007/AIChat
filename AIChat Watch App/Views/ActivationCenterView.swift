@@ -174,10 +174,19 @@ struct ActivationCenterView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("尚未绑定在线账户；首次启动会自动申请试用额度。")
+                Text("尚未绑定在线账户。点击下方按钮后会显式申请在线使用权限，并在这里返回结果。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            Button(requestAccessButtonTitle) {
+                Task {
+                    await requestManagedRelayAccess()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSubmitting || chatStore.relayBillingBusy)
+            .accessibilityIdentifier("activation.request_access")
 
             Button("刷新状态") {
                 Task {
@@ -371,6 +380,28 @@ struct ActivationCenterView: View {
         }
     }
 
+    private var requestAccessButtonTitle: String {
+        guard let account = chatStore.relayAccountStatus?.account else {
+            return "申请使用"
+        }
+
+        return account.state == .active && account.creditBalance > 0 ? "刷新在线权限" : "重新申请使用"
+    }
+
+    private func requestManagedRelayAccess() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        chatStore.clearCompanionActivationFeedbackMessage()
+
+        do {
+            let status = try await chatStore.requestManagedRelayAccess()
+            feedbackMessage = relayAccessResultMessage(from: status)
+        } catch {
+            feedbackMessage = "申请失败：\(error.localizedDescription)"
+        }
+    }
+
     private func priceText(for plan: RelayPlanCatalogItem) -> String {
         let amount = NSDecimalNumber(decimal: plan.priceUSD).doubleValue
         return String(format: "$%.2f", amount)
@@ -400,6 +431,24 @@ struct ActivationCenterView: View {
         case .inactive:
             return "未激活"
         }
+    }
+
+    private func relayAccessResultMessage(from status: RelayAccountStatusResponse?) -> String {
+        guard let account = status?.account else {
+            return "申请已提交，但暂未返回账户状态。"
+        }
+
+        var parts = ["申请结果：\(accountStateText(account.state))", "余额 \(account.creditBalance) credits"]
+
+        if let expiration = account.creditExpiresAt {
+            parts.append("到期 \(expiration.formatted(date: .abbreviated, time: .shortened))")
+        }
+
+        if let note = account.adminNote?.nonEmptyTrimmed {
+            parts.append(note)
+        }
+
+        return parts.joined(separator: " • ")
     }
 
     private func planTitle(_ planID: String?) -> String {

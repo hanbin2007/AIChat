@@ -38,8 +38,13 @@ private enum ConversationScrollLayout {
     static let latestReplyStartAnchorID = "conversation-latest-reply-start-anchor"
     static let interruptionDragMinimumDistance: CGFloat = 6
     static let interruptionThreshold: CGFloat = 20
-    static let suppressionDuration: TimeInterval = 0.28
+    static let autoScrollAnimationDuration: TimeInterval = 1.0
+    static let suppressionDuration: TimeInterval = 1.05
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
+
+    static var autoScrollAnimation: Animation {
+        .timingCurve(0.18, 0.92, 0.22, 1.0, duration: autoScrollAnimationDuration)
+    }
 }
 
 private enum VoiceCaptureMode {
@@ -413,7 +418,7 @@ struct ConversationDetailView: View {
             .onChange(of: conversation.updatedAt) { _, _ in
                 scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
-                    animated: false,
+                    animated: true,
                     autoScrollSessionMessageID: autoScrollSessionMessageID,
                     latestAssistantMessageID: latestAssistantMessageID
                 )
@@ -425,10 +430,23 @@ struct ConversationDetailView: View {
 
                 scrollToAutoScrollTargetIfNeeded(
                     with: proxy,
-                    animated: false,
+                    animated: true,
                     autoScrollSessionMessageID: autoScrollSessionMessageID,
                     latestAssistantMessageID: latestAssistantMessageID
                 )
+            }
+            .onChange(of: chatStore.isGlobalAutoScrollEnabled) { _, isEnabled in
+                if isEnabled {
+                    isAutoScrollInterrupted = false
+                    interruptedAutoScrollSessionMessageID = nil
+                    scrollToAutoScrollTargetIfNeeded(
+                        with: proxy,
+                        animated: true,
+                        autoScrollSessionMessageID: autoScrollSessionMessageID,
+                        latestAssistantMessageID: latestAssistantMessageID,
+                        force: true
+                    )
+                }
             }
             .onChange(of: streamingMessageID) { _, newMessageID in
                 handleStreamingMessageChange(
@@ -456,7 +474,7 @@ struct ConversationDetailView: View {
                 .foregroundStyle(.secondary)
 
             if chatStore.isReadOnlyMode {
-                Button("Activate on Watch") {
+                Button(readOnlyActivationEntryTitle) {
                     isShowingActivationCenter = true
                 }
                 .buttonStyle(.borderedProminent)
@@ -763,7 +781,7 @@ struct ConversationDetailView: View {
             message: chatStore.activationStatusMessage,
             iconName: "lock.fill",
             accentColor: .orange,
-            actionTitle: "输入激活码"
+            actionTitle: readOnlyActivationEntryTitle
         ) {
             isShowingActivationCenter = true
         }
@@ -981,7 +999,7 @@ struct ConversationDetailView: View {
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
 
         if animated {
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(ConversationScrollLayout.autoScrollAnimation) {
                 proxy.scrollTo(ConversationScrollLayout.bottomAnchorID, anchor: .bottom)
             }
             return
@@ -995,10 +1013,17 @@ struct ConversationDetailView: View {
         }
     }
 
-    private func scrollToReplyStart(with proxy: ScrollViewProxy) {
+    private func scrollToReplyStart(with proxy: ScrollViewProxy, animated: Bool) {
         isAutoScrollInterrupted = false
         autoScrollInvocationCount += 1
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
+
+        if animated {
+            withAnimation(ConversationScrollLayout.autoScrollAnimation) {
+                proxy.scrollTo(ConversationScrollLayout.latestReplyStartAnchorID, anchor: .top)
+            }
+            return
+        }
 
         var transaction = Transaction()
         transaction.animation = nil
@@ -1038,7 +1063,7 @@ struct ConversationDetailView: View {
 
         if let completedAutoScrollReplyMessageID,
            completedAutoScrollReplyMessageID == latestAssistantMessageID {
-            scrollToReplyStart(with: proxy)
+            scrollToReplyStart(with: proxy, animated: animated)
             return
         }
 
@@ -1046,6 +1071,10 @@ struct ConversationDetailView: View {
     }
 
     private func shouldAutoScroll(for autoScrollSessionMessageID: UUID?) -> Bool {
+        guard chatStore.isGlobalAutoScrollEnabled else {
+            return false
+        }
+
         if interruptedAutoScrollSessionMessageID == autoScrollSessionMessageID,
            interruptedAutoScrollSessionMessageID != nil {
             return false
@@ -1076,7 +1105,7 @@ struct ConversationDetailView: View {
             streamingRenderResumeTask = nil
             scrollToAutoScrollTargetIfNeeded(
                 with: proxy,
-                animated: false,
+                animated: true,
                 autoScrollSessionMessageID: autoScrollSessionMessageID,
                 latestAssistantMessageID: latestAssistantMessageID
             )
@@ -1098,7 +1127,7 @@ struct ConversationDetailView: View {
         streamingRenderResumeTask = nil
         scrollToAutoScrollTargetIfNeeded(
             with: proxy,
-            animated: false,
+            animated: true,
             autoScrollSessionMessageID: autoScrollSessionMessageID,
             latestAssistantMessageID: latestAssistantMessageID
         )
@@ -1492,6 +1521,15 @@ struct ConversationDetailView: View {
         }
 
         return "Send Voice | \(duration)"
+    }
+
+    private var readOnlyActivationEntryTitle: String {
+        if chatStore.configuration.backendMode == .relay,
+           chatStore.hasManagedRelayAccess == false {
+            return "申请使用"
+        }
+
+        return "输入激活码"
     }
 
     private func draftTextBinding() -> Binding<String> {
