@@ -23,13 +23,21 @@ struct RelayAccountService {
             deviceAlias: Self.currentDeviceAlias()
         )
 
-        let response: RelayAccountStatusResponse = try await performJSONRequest(
-            to: configuration.relayBootstrapURL,
-            method: "POST",
-            body: payload
-        )
-        try await repository.saveStatus(response)
-        return response
+        do {
+            let response: RelayAccountStatusResponse = try await performJSONRequest(
+                to: configuration.relayBootstrapURL,
+                method: "POST",
+                body: payload
+            )
+            try await repository.saveStatus(response)
+            return response
+        } catch RelayAPIError.emptyResponse {
+            if let status = try await fetchAccountStatusIfPossible() {
+                try await repository.saveStatus(status)
+                return status
+            }
+            return nil
+        }
     }
 
     func fetchAccountStatusIfPossible() async throws -> RelayAccountStatusResponse? {
@@ -43,12 +51,16 @@ struct RelayAccountService {
             return nil
         }
 
-        return try await performJSONRequest(
-            to: configuration.relayAccountStatusURL,
-            method: "GET",
-            bearerToken: bearerToken,
-            deviceIDHeader: deviceIdentity.rawIdentifier
-        )
+        do {
+            return try await performJSONRequest(
+                to: configuration.relayAccountStatusURL,
+                method: "GET",
+                bearerToken: bearerToken,
+                deviceIDHeader: deviceIdentity.rawIdentifier
+            )
+        } catch RelayAPIError.emptyResponse {
+            return nil
+        }
     }
 
     func exchangeOfflineActivation(
@@ -72,13 +84,21 @@ struct RelayAccountService {
             activationFingerprint: state.activationCodeFingerprint
         )
 
-        let response: RelayAccountStatusResponse = try await performJSONRequest(
-            to: url,
-            method: "POST",
-            body: payload
-        )
-        try await repository.saveStatus(response)
-        return response
+        do {
+            let response: RelayAccountStatusResponse = try await performJSONRequest(
+                to: url,
+                method: "POST",
+                body: payload
+            )
+            try await repository.saveStatus(response)
+            return response
+        } catch RelayAPIError.emptyResponse {
+            if let status = try await fetchAccountStatusIfPossible() {
+                try await repository.saveStatus(status)
+                return status
+            }
+            throw RelayAPIError.emptyResponse
+        }
     }
 
     func fetchCatalog() async throws -> RelayCatalogResponse {
@@ -107,13 +127,21 @@ struct RelayAccountService {
             platform: Self.currentPlatform,
             transaction: transaction
         )
-        let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
-            to: configuration.relayPurchaseSubmitURL,
-            method: "POST",
-            body: payload
-        )
-        try await repository.saveStatus(response.status)
-        return response.status
+        do {
+            let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
+                to: configuration.relayPurchaseSubmitURL,
+                method: "POST",
+                body: payload
+            )
+            try await repository.saveStatus(response.status)
+            return response.status
+        } catch RelayAPIError.emptyResponse {
+            if let status = try await fetchAccountStatusIfPossible() {
+                try await repository.saveStatus(status)
+                return status
+            }
+            throw RelayAPIError.emptyResponse
+        }
     }
 
     func restorePurchases(transactions: [RelaySubmittedTransaction]) async throws -> RelayAccountStatusResponse {
@@ -122,13 +150,21 @@ struct RelayAccountService {
             platform: Self.currentPlatform,
             transactions: transactions
         )
-        let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
-            to: configuration.relayPurchaseRestoreURL,
-            method: "POST",
-            body: payload
-        )
-        try await repository.saveStatus(response.status)
-        return response.status
+        do {
+            let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
+                to: configuration.relayPurchaseRestoreURL,
+                method: "POST",
+                body: payload
+            )
+            try await repository.saveStatus(response.status)
+            return response.status
+        } catch RelayAPIError.emptyResponse {
+            if let status = try await fetchAccountStatusIfPossible() {
+                try await repository.saveStatus(status)
+                return status
+            }
+            throw RelayAPIError.emptyResponse
+        }
     }
 
     func requestPairingToken() async throws -> RelayPairingTokenResponse {
@@ -150,13 +186,21 @@ struct RelayAccountService {
             platform: Self.currentPlatform,
             deviceAlias: Self.currentDeviceAlias()
         )
-        let response: RelayAccountStatusResponse = try await performJSONRequest(
-            to: configuration.relayJoinPairedURL,
-            method: "POST",
-            body: payload
-        )
-        try await repository.saveStatus(response)
-        return response
+        do {
+            let response: RelayAccountStatusResponse = try await performJSONRequest(
+                to: configuration.relayJoinPairedURL,
+                method: "POST",
+                body: payload
+            )
+            try await repository.saveStatus(response)
+            return response
+        } catch RelayAPIError.emptyResponse {
+            if let status = try await fetchAccountStatusIfPossible() {
+                try await repository.saveStatus(status)
+                return status
+            }
+            throw RelayAPIError.emptyResponse
+        }
     }
 
     private func performJSONRequest<T: Decodable, Body: Encodable>(
@@ -198,9 +242,11 @@ struct RelayAccountService {
             throw relayClientError(from: data)
         }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(T.self, from: data)
+        guard responseBodyContainsJSON(data) else {
+            throw RelayAPIError.emptyResponse
+        }
+
+        return try decodeRelayResponse(T.self, from: data)
     }
 
     private func performJSONRequest<T: Decodable>(
@@ -240,5 +286,93 @@ struct RelayAccountService {
         #else
         return "Device"
         #endif
+    }
+
+    private func responseBodyContainsJSON(_ data: Data) -> Bool {
+        guard data.isEmpty == false else {
+            return false
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else {
+            return true
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty == false && trimmed != "null"
+    }
+
+    private func decodeRelayResponse<T: Decodable>(
+        _ type: T.Type,
+        from data: Data
+    ) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            guard let normalizedData = normalizeRelayResponseData(data) else {
+                throw RelayAPIError.invalidResponse
+            }
+
+            let fallbackDecoder = JSONDecoder()
+            do {
+                return try fallbackDecoder.decode(T.self, from: normalizedData)
+            } catch {
+                throw RelayAPIError.invalidResponse
+            }
+        }
+    }
+
+    private func normalizeRelayResponseData(_ data: Data) -> Data? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let normalizedObject = normalizeRelayResponseObject(object)
+        return try? JSONSerialization.data(withJSONObject: normalizedObject)
+    }
+
+    private func normalizeRelayResponseObject(_ object: Any) -> Any {
+        switch object {
+        case let dictionary as [String: Any]:
+            var normalized: [String: Any] = [:]
+            normalized.reserveCapacity(dictionary.count)
+            for (key, value) in dictionary {
+                normalized[normalizedRelayResponseKey(key)] = normalizeRelayResponseObject(value)
+            }
+            return normalized
+        case let array as [Any]:
+            return array.map(normalizeRelayResponseObject)
+        default:
+            return object
+        }
+    }
+
+    private func normalizedRelayResponseKey(_ key: String) -> String {
+        guard key.contains("_") else {
+            return key
+        }
+
+        let uppercaseSegments: Set<String> = ["id", "url", "uri", "api", "usd"]
+        let segments = key.split(separator: "_").map(String.init)
+        guard let firstSegment = segments.first else {
+            return key
+        }
+
+        let normalizedFirst = uppercaseSegments.contains(firstSegment) ? firstSegment.uppercased() : firstSegment
+        let normalizedTail = segments.dropFirst().map { segment in
+            if uppercaseSegments.contains(segment) {
+                return segment.uppercased()
+            }
+
+            guard let firstCharacter = segment.first else {
+                return segment
+            }
+
+            return String(firstCharacter).uppercased() + segment.dropFirst()
+        }
+
+        return ([normalizedFirst] + normalizedTail).joined()
     }
 }
