@@ -248,6 +248,23 @@ struct ChatBubbleView: View, Equatable {
                         .font(.caption2)
                         .foregroundStyle(.yellow)
                 }
+
+                #if os(watchOS)
+                if canPinMessage {
+                    Spacer(minLength: 0)
+
+                    Button {
+                        isShowingMessageActions = true
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.52))
+                            .frame(width: 28, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                #endif
             }
         }
         .padding(12)
@@ -261,11 +278,21 @@ struct ChatBubbleView: View, Equatable {
                 .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
         )
         .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
-        .contextMenu {
-            if canPinMessage {
-                messageActions
-            }
+        #if os(watchOS)
+        .confirmationDialog(
+            "Message Actions",
+            isPresented: $isShowingMessageActions,
+            titleVisibility: .visible
+        ) {
+            messageActions
+        } message: {
+            Text("Choose how this message should be remembered.")
         }
+        #else
+        .contextMenu {
+            messageActions
+        }
+        #endif
     }
 
     private func syncRenderedContentIfNeeded() {
