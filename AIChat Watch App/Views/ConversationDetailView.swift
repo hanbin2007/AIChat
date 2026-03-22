@@ -1191,14 +1191,26 @@ struct ConversationDetailView: View {
         autoScrollSessionMessageID: UUID?,
         streamingMessageID: UUID? = nil
     ) {
-        guard Date.now >= scrollInterruptionsSuppressedUntil,
-              messagesViewportHeight > 0
-        else {
+        guard messagesViewportHeight > 0 else {
             return
         }
 
         let distanceFromBottom = maxY - messagesViewportHeight
+        let previousDistance = currentDistanceFromBottom
         currentDistanceFromBottom = max(distanceFromBottom, 0)
+
+        // Detect user scrolling away from bottom even during the suppression
+        // window — replaces the removed DragGesture's pauseStreamingRefresh.
+        if distanceFromBottom > ConversationScrollLayout.interruptionThreshold,
+           distanceFromBottom > previousDistance + 4 {
+            suspendStreamingRender(for: streamingMessageID)
+        }
+
+        // Auto-scroll interruption is subject to the suppression window to avoid
+        // false positives from programmatic scroll animations.
+        guard Date.now >= scrollInterruptionsSuppressedUntil else {
+            return
+        }
 
         if completedAutoScrollReplyMessageID == autoScrollSessionMessageID,
            completedAutoScrollReplyMessageID != nil {
@@ -1215,7 +1227,6 @@ struct ConversationDetailView: View {
         }
 
         interruptAutoScroll(for: autoScrollSessionMessageID)
-        suspendStreamingRender(for: streamingMessageID)
     }
 
     private func visibleMessages(in conversation: ConversationThread) -> ArraySlice<ChatMessage> {
