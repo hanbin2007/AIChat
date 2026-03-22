@@ -120,4 +120,39 @@ final class ActivationRepositoryTests: XCTestCase {
         let clearedState = await restartedRepository.loadState()
         XCTAssertNil(clearedState)
     }
+
+    func testRelayAccountStatusResponseDecodesWhenOptionalCollectionsAreMissing() throws {
+        let json =
+            """
+            {
+              "account": {
+                "account_id": "00000000-0000-0000-0000-000000000601",
+                "state": "active",
+                "source": "trial",
+                "credit_balance": 48
+              },
+              "device": {
+                "device_id": "WATCH-RELAY-DEVICE",
+                "platform": "watch"
+              },
+              "key": {
+                "key_id": "00000000-0000-0000-0000-000000000602",
+                "key_value": "relay-key-compat",
+                "state": "active",
+                "source": "trial",
+                "issued_at": 764553600
+              }
+            }
+            """
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        let status = try decoder.decode(RelayAccountStatusResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(status.account?.creditBalance, 48)
+        XCTAssertEqual(status.device?.deviceID, "WATCH-RELAY-DEVICE")
+        XCTAssertEqual(status.key?.keyValue, "relay-key-compat")
+        XCTAssertTrue(status.grants.isEmpty)
+        XCTAssertTrue(status.recentUsage.isEmpty)
+    }
 }
