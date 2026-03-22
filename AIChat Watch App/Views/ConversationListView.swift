@@ -124,6 +124,7 @@ struct ConversationListView: View {
                             .font(.system(size: 1))
                             .foregroundStyle(.clear)
                             .frame(width: 1, height: 1)
+                            .allowsHitTesting(false)
                             .accessibilityIdentifier("conversation.list.initial-loading.marker")
                     }
                 }
