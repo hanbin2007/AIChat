@@ -13,6 +13,7 @@ struct ConversationListView: View {
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
     @State private var visibleConversationLimit = 0
+    @State private var visibleConversationEntries: [IndexedConversationListItem] = []
     @State private var isLoadingMoreConversations = false
     @State private var paginationTask: Task<Void, Never>?
 
@@ -132,9 +133,10 @@ struct ConversationListView: View {
         }
         .onAppear {
             resetVisibleConversationLimitIfNeeded()
+            replaceVisibleConversationEntries()
         }
-        .onChange(of: chatStore.conversationListItems.count) { oldValue, newValue in
-            syncVisibleConversationLimit(previousCount: oldValue, newCount: newValue)
+        .onChange(of: chatStore.conversationListItems) { oldValue, newValue in
+            syncVisibleConversationEntries(previousItems: oldValue, newItems: newValue)
         }
         .onDisappear {
             paginationTask?.cancel()
@@ -143,16 +145,6 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
-        }
-    }
-
-    private var visibleConversationItems: ArraySlice<WatchConversationListItem> {
-        chatStore.conversationListItems.prefix(visibleConversationLimit)
-    }
-
-    private var visibleConversationEntries: [IndexedConversationListItem] {
-        visibleConversationItems.enumerated().map { offset, item in
-            IndexedConversationListItem(index: offset, item: item)
         }
     }
 
@@ -264,13 +256,18 @@ struct ConversationListView: View {
         visibleConversationLimit = min(Self.initialPageSize, chatStore.conversationListItems.count)
     }
 
-    private func syncVisibleConversationLimit(previousCount: Int, newCount: Int) {
-        guard newCount != previousCount else {
+    private func syncVisibleConversationEntries(
+        previousItems: [WatchConversationListItem],
+        newItems: [WatchConversationListItem]
+    ) {
+        guard previousItems != newItems else {
             return
         }
 
+        let newCount = newItems.count
         guard newCount > 0 else {
             visibleConversationLimit = 0
+            visibleConversationEntries = []
             isLoadingMoreConversations = false
             paginationTask?.cancel()
             paginationTask = nil
@@ -278,13 +275,15 @@ struct ConversationListView: View {
         }
 
         let minimumVisible = min(Self.initialPageSize, newCount)
-        if previousCount == 0 || visibleConversationLimit == 0 {
+        if visibleConversationLimit == 0 {
             visibleConversationLimit = minimumVisible
             isLoadingMoreConversations = false
+            replaceVisibleConversationEntries(using: newItems)
             return
         }
 
         visibleConversationLimit = min(max(visibleConversationLimit, minimumVisible), newCount)
+        replaceVisibleConversationEntries(using: newItems)
         if visibleConversationLimit >= newCount {
             isLoadingMoreConversations = false
             paginationTask?.cancel()
@@ -293,11 +292,11 @@ struct ConversationListView: View {
     }
 
     private func scheduleLoadMoreConversationsIfNeeded(currentIndex: Int) {
-        guard visibleConversationLimit < chatStore.conversationListItems.count else {
+        guard visibleConversationEntries.count < chatStore.conversationListItems.count else {
             return
         }
 
-        let triggerIndex = max(visibleConversationLimit - Self.preloadThreshold, 0)
+        let triggerIndex = max(visibleConversationEntries.count - Self.preloadThreshold, 0)
         guard currentIndex >= triggerIndex else {
             return
         }
@@ -306,7 +305,7 @@ struct ConversationListView: View {
     }
 
     private func scheduleLoadMoreConversations(force: Bool = false) {
-        guard visibleConversationLimit < chatStore.conversationListItems.count else {
+        guard visibleConversationEntries.count < chatStore.conversationListItems.count else {
             isLoadingMoreConversations = false
             paginationTask?.cancel()
             paginationTask = nil
@@ -322,7 +321,7 @@ struct ConversationListView: View {
         }
 
         let nextLimit = min(
-            visibleConversationLimit + Self.incrementalPageSize,
+            visibleConversationEntries.count + Self.incrementalPageSize,
             chatStore.conversationListItems.count
         )
 
@@ -335,16 +334,66 @@ struct ConversationListView: View {
             }
 
             await MainActor.run {
-                visibleConversationLimit = nextLimit
+                appendVisibleConversationEntries(upTo: nextLimit)
                 isLoadingMoreConversations = false
                 paginationTask = nil
             }
         }
     }
+
+    private func replaceVisibleConversationEntries(
+        using items: [WatchConversationListItem]? = nil
+    ) {
+        let sourceItems = items ?? chatStore.conversationListItems
+        let clampedLimit = min(visibleConversationLimit, sourceItems.count)
+        visibleConversationLimit = clampedLimit
+
+        var updatedEntries: [IndexedConversationListItem] = []
+        updatedEntries.reserveCapacity(clampedLimit)
+
+        for index in 0..<clampedLimit {
+            updatedEntries.append(
+                IndexedConversationListItem(
+                    index: index,
+                    item: sourceItems[index]
+                )
+            )
+        }
+
+        if visibleConversationEntries != updatedEntries {
+            visibleConversationEntries = updatedEntries
+        }
+    }
+
+    private func appendVisibleConversationEntries(upTo targetLimit: Int) {
+        let sourceItems = chatStore.conversationListItems
+        let startIndex = visibleConversationEntries.count
+        let clampedTargetLimit = min(targetLimit, sourceItems.count)
+
+        guard clampedTargetLimit > startIndex else {
+            visibleConversationLimit = clampedTargetLimit
+            return
+        }
+
+        var appendedEntries: [IndexedConversationListItem] = []
+        appendedEntries.reserveCapacity(clampedTargetLimit - startIndex)
+
+        for index in startIndex..<clampedTargetLimit {
+            appendedEntries.append(
+                IndexedConversationListItem(
+                    index: index,
+                    item: sourceItems[index]
+                )
+            )
+        }
+
+        visibleConversationLimit = clampedTargetLimit
+        visibleConversationEntries.append(contentsOf: appendedEntries)
+    }
 }
 #endif
 
-private struct IndexedConversationListItem: Identifiable {
+private struct IndexedConversationListItem: Identifiable, Equatable {
     let index: Int
     let item: WatchConversationListItem
 
