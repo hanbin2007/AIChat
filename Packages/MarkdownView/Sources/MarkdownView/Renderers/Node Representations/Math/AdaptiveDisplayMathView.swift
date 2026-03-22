@@ -48,35 +48,37 @@ private struct WatchAdaptiveDisplayMathView: View {
     }
 
     var body: some View {
-        WatchZoomableMathContainer(
-            latexMath: latexMath,
-            expandedFont: Layout.expandedFont,
-            showsIndicator: true,
-            accessibilityIdentifier: "math.zoom.trigger.display"
-        ) {
-            ZStack(alignment: .topTrailing) {
-                Math(latexMath)
-                    .mathFont(Layout.collapsedFont)
-                    .mathTypesettingStyle(.display)
-                    .frame(width: max(naturalSize.width, 1), height: max(naturalSize.height, 1), alignment: .center)
-                    .scaleEffect(collapsedScale, anchor: .center)
-            }
-            .frame(
-                maxWidth: .infinity,
-                minHeight: max(naturalSize.height * collapsedScale, 1),
-                alignment: .center
-            )
-            .clipped()
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(key: MathAvailableWidthPreferenceKey.self, value: proxy.size.width)
+        GeometryReader { proxy in
+            let measuredWidth = max(proxy.size.width, 1)
+
+            WatchZoomableMathContainer(
+                latexMath: latexMath,
+                expandedFont: Layout.expandedFont,
+                showsIndicator: true,
+                accessibilityIdentifier: "math.zoom.trigger.display"
+            ) {
+                ZStack(alignment: .topTrailing) {
+                    Math(latexMath)
+                        .mathFont(Layout.collapsedFont)
+                        .mathTypesettingStyle(.display)
+                        .frame(width: max(naturalSize.width, 1), height: max(naturalSize.height, 1), alignment: .center)
+                        .scaleEffect(collapsedScale, anchor: .center)
                 }
+                .frame(
+                    width: measuredWidth,
+                    height: max(naturalSize.height * collapsedScale, 1),
+                    alignment: .center
+                )
+                .clipped()
             }
-            .onPreferenceChange(MathAvailableWidthPreferenceKey.self) { width in
-                availableWidth = width
+            .onAppear {
+                availableWidth = measuredWidth
+            }
+            .onChange(of: measuredWidth) { _, newWidth in
+                availableWidth = newWidth
             }
         }
+        .frame(height: max(naturalSize.height * collapsedScale, 1))
     }
 
     private func measuredSize(for font: Math.Font) -> CGSize {
@@ -232,14 +234,6 @@ func measuredMathSize(for latexMath: String, font: Math.Font) -> CGSize {
         width: max(measuredSize.width, 1),
         height: max(measuredSize.height, 1)
     )
-}
-
-private struct MathAvailableWidthPreferenceKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 private struct ExpandedMathScrollOffsetPreferenceKey: PreferenceKey {

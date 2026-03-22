@@ -83,6 +83,8 @@ struct GlobalSettingsView: View {
                 }
 
                 Section("Requests") {
+                    Toggle("Auto Scroll", isOn: globalAutoScrollBinding())
+
                     VStack(alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Auto Retry")
@@ -127,6 +129,11 @@ struct GlobalSettingsView: View {
                             .disabled(chatStore.sendFailureRetryLimit >= ChatStore.maximumSendFailureRetryLimit)
                         }
                     }
+
+                    Text("控制所有对话在收到新回复时是否自动跟随到底部。关闭后保留手动滚动位置。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section("Global Memory") {
@@ -194,6 +201,17 @@ struct GlobalSettingsView: View {
             },
             set: { newValue in
                 chatStore.updateDefaultConversationModel(newValue)
+            }
+        )
+    }
+
+    private func globalAutoScrollBinding() -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.isGlobalAutoScrollEnabled
+            },
+            set: { newValue in
+                chatStore.updateGlobalAutoScrollEnabled(newValue)
             }
         )
     }

@@ -1116,6 +1116,8 @@ extension String {
             return .plain
         }
 
+        let containsMath = containsAssistantRenderableMath
+
         guard containsMarkdownFormattingHintForAssistantRendering else {
             return .plain
         }
@@ -1126,12 +1128,25 @@ extension String {
             }
         }
 
-        if count > AssistantMessageRenderingThreshold.maximumMarkdownCharacters ||
-            lineCount > AssistantMessageRenderingThreshold.maximumMarkdownLines {
+        if (count > AssistantMessageRenderingThreshold.maximumMarkdownCharacters ||
+            lineCount > AssistantMessageRenderingThreshold.maximumMarkdownLines) &&
+            containsMath == false {
             return .plain
         }
 
         return .markdown
+    }
+
+    var containsAssistantRenderableMath: Bool {
+        if contains("$$") ||
+            contains("\\(") ||
+            contains("\\[") ||
+            contains("\\begin{equation}") ||
+            contains("\\begin{equation*}") {
+            return true
+        }
+
+        return containsLikelyInlineMathDelimitedByDollar
     }
 
     fileprivate var containsMarkdownFormattingHintForAssistantRendering: Bool {
@@ -1139,9 +1154,7 @@ extension String {
             contains("`") ||
             contains("![") ||
             contains("](") ||
-            contains("$$") ||
-            contains("\\(") ||
-            contains("\\[") {
+            containsAssistantRenderableMath {
             return true
         }
 
@@ -1168,6 +1181,65 @@ extension String {
                 options: .regularExpression
             ) != nil
         }
+    }
+
+    private var containsLikelyInlineMathDelimitedByDollar: Bool {
+        var pendingOpeningDollarIndex: String.Index?
+        var index = startIndex
+
+        while index < endIndex {
+            guard self[index] == "$" else {
+                index = self.index(after: index)
+                continue
+            }
+
+            if index > startIndex,
+               self[self.index(before: index)] == "\\" {
+                index = self.index(after: index)
+                continue
+            }
+
+            if let openingDollarIndex = pendingOpeningDollarIndex {
+                let contentStart = self.index(after: openingDollarIndex)
+                let content = String(self[contentStart..<index])
+
+                if Self.isLikelyInlineMathContent(content) {
+                    return true
+                }
+
+                pendingOpeningDollarIndex = nil
+            } else {
+                pendingOpeningDollarIndex = index
+            }
+
+            index = self.index(after: index)
+        }
+
+        return false
+    }
+
+    private static func isLikelyInlineMathContent(_ content: String) -> Bool {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false,
+              trimmed.contains("\n") == false
+        else {
+            return false
+        }
+
+        let obviousMathTokens = ["\\", "^", "_", "{", "}", "=", "+", "-", "*", "/", "<", ">", "(", ")", "[", "]", "|"]
+        if obviousMathTokens.contains(where: { trimmed.contains($0) }) {
+            return true
+        }
+
+        let containsWhitespace = trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+        if containsWhitespace {
+            return false
+        }
+
+        let hasLetter = trimmed.unicodeScalars.contains(where: CharacterSet.letters.contains)
+        let hasDigit = trimmed.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
+
+        return hasLetter || (hasDigit && trimmed.count <= 8)
     }
 }
 

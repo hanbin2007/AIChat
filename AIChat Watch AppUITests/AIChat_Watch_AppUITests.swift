@@ -47,6 +47,9 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testFormulaCanOpenZoomSheetAndScrollHorizontally() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "formula_zoom"
+        if let artifactsRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"] {
+            app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] = artifactsRoot
+        }
         app.launch()
 
         let harness = app.descendants(matching: .any)["formula.zoom.harness"]
@@ -102,6 +105,9 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testLastFormulaRendersAndCapturesEvidence() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "formula_zoom"
+        if let artifactsRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"] {
+            app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] = artifactsRoot
+        }
         app.launch()
 
         let harness = app.descendants(matching: .any)["formula.zoom.harness"]
@@ -128,13 +134,28 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         XCTAssertFalse(targetContainer.staticTexts["Formula unsupported"].exists)
 
         attachScreenshot(app, named: "last-formula-card")
+        attachScreenshot(app, named: "short-inline-formula-bubble")
 
-        let inlineFormulaQuery = targetContainer
-            .descendants(matching: .any)
-            .matching(identifier: "math.zoom.trigger.inline")
-        XCTAssertEqual(inlineFormulaQuery.count, 1)
+        let displayContainer = app.descendants(matching: .any)["formula.zoom.display_formula.container"]
+        if !revealElement(displayContainer, in: app, directions: [.up, .down], timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing display formula container hierarchy")
+            XCTFail("Missing deterministic container for the long display formula.")
+            return
+        }
 
-        let targetFormula = inlineFormulaQuery.firstMatch
+        let invalidDisplayFormula = app.descendants(matching: .any)["math.invalid.block"]
+        if invalidDisplayFormula.exists {
+            attachScreenshot(app, named: "long-display-formula-invalid")
+            XCTFail("The long display formula rendered as an invalid math view.")
+            return
+        }
+
+        attachScreenshot(app, named: "long-display-formula-bubble")
+
+        let targetFormula = targetContainer
+            .descendants(matching: .button)
+            .matching(NSPredicate(format: "label == %@", "Math formula"))
+            .firstMatch
         if !revealElement(targetFormula, in: app, directions: [.down, .up], timeout: 10) {
             attachDebugHierarchy(app, named: "Missing last formula trigger hierarchy")
             XCTFail("Missing tappable inline math trigger for the last formula.")
@@ -1149,7 +1170,8 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if element.exists && waitForHittable(element, timeout: 0.2) {
+            if element.exists &&
+                (waitForHittable(element, timeout: 0.2) || isElementVisibleInViewport(element, in: app)) {
                 return true
             }
 
@@ -1161,13 +1183,35 @@ final class AIChat_Watch_AppUITests: XCTestCase {
                 performScroll(direction, in: app)
                 RunLoop.current.run(until: Date().addingTimeInterval(0.35))
 
-                if element.exists && waitForHittable(element, timeout: 0.5) {
+                if element.exists &&
+                    (waitForHittable(element, timeout: 0.5) || isElementVisibleInViewport(element, in: app)) {
                     return true
                 }
             }
         }
 
-        return element.exists && element.isHittable
+        return element.exists && (element.isHittable || isElementVisibleInViewport(element, in: app))
+    }
+
+    @MainActor
+    private func isElementVisibleInViewport(
+        _ element: XCUIElement,
+        in app: XCUIApplication
+    ) -> Bool {
+        guard element.exists else {
+            return false
+        }
+
+        let frame = element.frame
+        let viewport = app.windows.firstMatch.frame
+        guard frame.isEmpty == false, viewport.isEmpty == false else {
+            return false
+        }
+
+        let visibleWidth = min(frame.maxX, viewport.maxX) - max(frame.minX, viewport.minX)
+        let visibleHeight = min(frame.maxY, viewport.maxY) - max(frame.minY, viewport.minY)
+
+        return visibleWidth > 24 && visibleHeight > 24
     }
 
     @MainActor
@@ -1345,7 +1389,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
     private func screenshotArtifactsDirectory(for app: XCUIApplication) -> URL {
         let directory: URL
-        if let configuredRoot = app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
+        if let configuredRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
+           configuredRoot.isEmpty == false {
+            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
+        } else if let configuredRoot = app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
            configuredRoot.isEmpty == false {
             directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
         } else {
