@@ -17,9 +17,9 @@ struct ConversationListView: View {
     @State private var isLoadingMoreConversations = false
     @State private var paginationTask: Task<Void, Never>?
 
-    private static let initialPageSize = 8
-    private static let incrementalPageSize = 4
-    private static let preloadThreshold = 3
+    private static let initialPageSize = 3
+    private static let incrementalPageSize = 3
+    private static let preloadThreshold = 1
     private static let paginationLoadDelayNanoseconds: UInt64 = 16_000_000
 
     init(
