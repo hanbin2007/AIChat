@@ -1,0 +1,206 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "A01CE4EA-43D2-4202-840C-5D35B7C65946.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Missing display formula trigger hierarchy_0_11A9D409-9EF1-4943-BFC4-1C58FF4C97EB.txt",
+        "timestamp" : 1774188651.237
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "ACC05254-F54E-40B3-BCCD-4A799D35F9FC",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.49 下午",
+        "timestamp" : 1774188649.45
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "090014A9-92C6-4B2D-9EEC-40A29EDDD5E9",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.49 下午",
+        "timestamp" : 1774188649.869
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "80C05701-B204-4FB4-A18C-C85E29762FDC",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.47 下午",
+        "timestamp" : 1774188647.99
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "B5EB0ECE-746D-4294-A987-2D8AB547F3EB",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.48 下午",
+        "timestamp" : 1774188648.408
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "A671802D-3D96-4D2E-BA31-4560A2C2F13B",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.44 下午",
+        "timestamp" : 1774188644.879
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "C1389BCF-A30A-418E-A774-7D9FA03444D6",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.45 下午",
+        "timestamp" : 1774188645.298
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "72F538D3-EB57-4C44-B2C8-85920FFF54A4",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.41 下午",
+        "timestamp" : 1774188641.752
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "10CEBAEA-E77A-41BE-ADAA-5FBE0BD3F9FE",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.42 下午",
+        "timestamp" : 1774188642.17
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "065D13C3-E38E-4D9B-8695-07A45E4485BE",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.38 下午",
+        "timestamp" : 1774188638.624
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "F35F4F28-14F9-4C11-90D0-55280F1BA64B",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.39 下午",
+        "timestamp" : 1774188639.045
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "D83A7C5D-CF36-4635-9399-BF38D8E39A54",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.35 下午",
+        "timestamp" : 1774188635.527
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "13B04AB5-B44A-4870-B966-72CF4BE983BE",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.35 下午",
+        "timestamp" : 1774188635.945
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "09222562-666E-43DE-A01C-C8F00ABB81D9.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "short-inline-formula-bubble-path_0_65233550-6279-483A-9A99-04B3B3DE595B.txt",
+        "timestamp" : 1774188625.399
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "7565285B-3628-4013-A192-3C2E6EAF62F1.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "short-inline-formula-bubble_0_F91020A1-692C-42C1-A50D-1E6E87F5BFE9.png",
+        "timestamp" : 1774188625.398
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "3049D10B-83C7-47F4-BD38-302D110A6295.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "last-formula-card-path_0_999823D3-65FA-4779-B8EF-B2253BCDD914.txt",
+        "timestamp" : 1774188625.366
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "E3EB529A-74CA-4B62-BCB2-D405960BFF80.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "last-formula-card_0_189C39CF-FAA5-4EDA-9F74-5BD65BD8FA12.png",
+        "timestamp" : 1774188625.365
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "4554E1DF-0AFD-4795-971A-865B3D4F8151",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.22 下午",
+        "timestamp" : 1774188622.93
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "3C982CD8-72C8-4D98-BB0E-43D32225FF5A",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.23 下午",
+        "timestamp" : 1774188623.345
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "2D1A98F2-A4FB-4D63-B205-DAAFDDDC9853",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "UI Snapshot 2026-03-22 at 10.10.09 下午",
+        "timestamp" : 1774188609.574
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "5EF1E620-636B-48AD-B207-4BDAE33642C8",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Synthesized Event 2026-03-22 at 10.10.10 下午",
+        "timestamp" : 1774188610.105
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "93A83695-2859-4388-B337-957616D03F55",
+        "deviceName" : "iPhone 17",
+        "exportedFileName" : "7F34ADD6-3244-427A-8802-CF21EFD12EF2.mp4",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "Screen Recording 2026-03-22 at 10.09.54 下午.mp4",
+        "timestamp" : 1774188594.358
+      }
+    ],
+    "testIdentifier" : "AIChat_Watch_AppUITests/testLastFormulaRendersAndCapturesEvidence()",
+    "testIdentifierURL" : "test://com.apple.xcode/AIChat/AIChat%20Watch%20AppUITests/AIChat_Watch_AppUITests/testLastFormulaRendersAndCapturesEvidence"
+  }
+]
