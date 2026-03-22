@@ -1512,47 +1512,23 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
     }
 
     var previewText: String {
-        guard let lastMessage = messages.last(where: \.hasVisibleContent) else {
-            return L10n.tr("conversation.preview.empty")
-        }
-
-        if lastMessage.status == .streaming {
-            return L10n.tr("conversation.preview.streaming")
-        }
-
-        if lastMessage.status == .failed, lastMessage.cleanedText.isEmpty {
-            return L10n.tr("conversation.preview.failed")
-        }
-
-        if let text = lastMessage.cleanedText.nonEmptyTrimmed {
-            return text.previewSnippet(maxLength: 220)
-        }
-
-        if let thoughtSummary = lastMessage.cleanedThoughtSummary {
-            return thoughtSummary.previewSnippet(maxLength: 220)
-        }
-
-        return attachmentSummary(for: lastMessage.attachments)
+        listSummary.previewText
     }
 
     var messageCount: Int {
-        messages.lazy.reduce(into: 0) { count, message in
-            if message.hasVisibleContent {
-                count += 1
-            }
-        }
+        listSummary.messageCount
     }
 
     var containsAudioAttachments: Bool {
-        messages.lazy.contains { message in
-            message.attachments.contains(where: \.isAudio)
-        }
+        listSummary.containsAudioAttachments
     }
 
     var containsImageAttachments: Bool {
-        messages.lazy.contains { message in
-            message.attachments.contains(where: \.isImage)
-        }
+        listSummary.containsImageAttachments
+    }
+
+    var listSummary: ConversationThreadListSummary {
+        ConversationThreadListSummary(conversation: self)
     }
 
     mutating func append(_ message: ChatMessage) {
@@ -1655,25 +1631,6 @@ nonisolated struct ConversationThread: Identifiable, Codable, Hashable {
         messages.removeAll { $0.id == id }
         updatedAt = .now
     }
-
-    private func attachmentSummary(for attachments: [ChatAttachment]) -> String {
-        let imageCount = attachments.filter(\.isImage).count
-        let audioCount = attachments.filter(\.isAudio).count
-
-        switch (imageCount, audioCount) {
-        case (0, 1):
-            return L10n.tr("conversation.attachment.voice.one")
-        case (0, let audioCount) where audioCount > 1:
-            return L10n.format("conversation.attachment.voice.many", audioCount)
-        case (1, 0):
-            return L10n.tr("conversation.attachment.image.one")
-        case (let imageCount, 0) where imageCount > 1:
-            return L10n.format("conversation.attachment.image.many", imageCount)
-        default:
-            return L10n.format("conversation.attachment.total", attachments.count)
-        }
-    }
-
     private static func isUntitledTitle(_ title: String) -> Bool {
         legacyUntitledTitles.contains(title) || title == untitledTitle
     }
