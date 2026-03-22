@@ -12,77 +12,102 @@ struct ConversationListView: View {
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
+    @State private var visibleConversationLimit = 0
+
+    private static let pageSize = 24
+    private static let preloadThreshold = 6
 
     var body: some View {
-        ZStack {
-            AppBackdropView()
+        WatchMinuteRelativeTimeline { relativeNow in
+            ZStack {
+                AppBackdropView()
 
-            List {
-                ActivationStatusCard(
-                    title: chatStore.activationStatusTitle,
-                    message: chatStore.activationStatusMessage,
-                    iconName: chatStore.isReadOnlyMode ? "lock.fill" : "checkmark.seal.fill",
-                    accentColor: chatStore.isReadOnlyMode ? .orange : .green,
-                    actionTitle: chatStore.isReadOnlyMode ? "立即激活" : "管理授权"
-                ) {
-                    isShowingActivationCenter = true
-                }
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                .listRowBackground(Color.clear)
+                List {
+                    ActivationStatusCard(
+                        title: chatStore.activationStatusTitle,
+                        message: chatStore.activationStatusMessage,
+                        iconName: chatStore.isReadOnlyMode ? "lock.fill" : "checkmark.seal.fill",
+                        accentColor: chatStore.isReadOnlyMode ? .orange : .green,
+                        actionTitle: chatStore.isReadOnlyMode ? "立即激活" : "管理授权"
+                    ) {
+                        isShowingActivationCenter = true
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                    .listRowBackground(Color.clear)
 
-                if chatStore.configuration.isAIConfigured == false {
-                    ConfigurationBannerView(message: chatStore.configuration.configurationMessage)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                        .listRowBackground(Color.clear)
-                }
+                    if chatStore.configuration.isAIConfigured == false {
+                        ConfigurationBannerView(message: chatStore.configuration.configurationMessage)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
 
-                ConfigurationBannerView(
-                    iconName: "network",
-                    title: chatStore.configuration.backendSummary,
-                    message: "\(chatStore.storageDescription) • \(chatStore.syncStatusDescription)"
-                )
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                .listRowBackground(Color.clear)
-
-                if let startupError = chatStore.startupError {
                     ConfigurationBannerView(
-                        iconName: "exclamationmark.triangle.fill",
-                        title: "Storage Error",
-                        message: startupError
+                        iconName: "network",
+                        title: chatStore.configuration.backendSummary,
+                        message: "\(chatStore.storageDescription) • \(chatStore.syncStatusDescription)"
                     )
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                     .listRowBackground(Color.clear)
-                }
 
-                if chatStore.conversations.isEmpty {
-                    emptyState
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                    if let startupError = chatStore.startupError {
+                        ConfigurationBannerView(
+                            iconName: "exclamationmark.triangle.fill",
+                            title: "Storage Error",
+                            message: startupError
+                        )
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
-                } else {
-                    ForEach(chatStore.conversations) { conversation in
-                        NavigationLink(value: conversation.id) {
-                            ConversationRowView(
-                                conversation: conversation,
-                                aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
-                            )
-                            .equatable()
-                        }
-                        .accessibilityIdentifier("conversation.row.\(conversation.id.uuidString)")
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            favoriteSwipeAction(for: conversation)
-                            deleteSwipeAction(for: conversation)
+                    }
+
+                    if chatStore.conversationListItems.isEmpty {
+                        emptyState
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(visibleConversationEntries) { entry in
+                            NavigationLink(value: entry.item.id) {
+                                ConversationRowView(
+                                    item: entry.item,
+                                    relativeNow: relativeNow
+                                )
+                                .equatable()
+                            }
+                            .accessibilityIdentifier("conversation.row.\(entry.item.id.uuidString)")
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                favoriteSwipeAction(for: entry.item)
+                                deleteSwipeAction(for: entry.item)
+                            }
+                            .onAppear {
+                                loadMoreConversationsIfNeeded(currentIndex: entry.index)
+                            }
                         }
                     }
                 }
+                .accessibilityIdentifier("conversation.list")
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .accessibilityIdentifier("conversation.list")
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+        }
+        .onAppear {
+            resetVisibleConversationLimitIfNeeded()
+        }
+        .onChange(of: chatStore.conversationListItems.count) { oldValue, newValue in
+            syncVisibleConversationLimit(previousCount: oldValue, newCount: newValue)
         }
         .sheet(isPresented: $isShowingActivationCenter) {
             ActivationCenterView()
+        }
+    }
+
+    private var visibleConversationItems: ArraySlice<WatchConversationListItem> {
+        chatStore.conversationListItems.prefix(visibleConversationLimit)
+    }
+
+    private var visibleConversationEntries: [IndexedConversationListItem] {
+        visibleConversationItems.enumerated().map { offset, item in
+            IndexedConversationListItem(index: offset, item: item)
         }
     }
 
@@ -133,37 +158,87 @@ struct ConversationListView: View {
     }
 
     @ViewBuilder
-    private func favoriteSwipeAction(for conversation: ConversationThread) -> some View {
+    private func favoriteSwipeAction(for item: WatchConversationListItem) -> some View {
         Button {
             Task {
-                await chatStore.setConversationFavorite(conversation.isFavorite == false, for: conversation.id)
+                await chatStore.setConversationFavorite(item.isFavorite == false, for: item.id)
             }
         } label: {
             Label(
-                conversation.isFavorite ? L10n.tr("favorites.remove") : L10n.tr("favorites.add"),
-                systemImage: conversation.isFavorite ? "star.slash" : "star"
+                item.isFavorite ? L10n.tr("favorites.remove") : L10n.tr("favorites.add"),
+                systemImage: item.isFavorite ? "star.slash" : "star"
             )
         }
-        .tint(conversation.isFavorite ? .orange : .yellow)
+        .tint(item.isFavorite ? .orange : .yellow)
     }
 
     @ViewBuilder
-    private func deleteSwipeAction(for conversation: ConversationThread) -> some View {
+    private func deleteSwipeAction(for item: WatchConversationListItem) -> some View {
         Button(role: .destructive) {
             Task {
-                await chatStore.deleteConversation(id: conversation.id)
+                await chatStore.deleteConversation(id: item.id)
             }
         } label: {
             Label("Delete", systemImage: "trash")
         }
-        .accessibilityIdentifier("conversation.delete.\(conversation.id.uuidString)")
+        .accessibilityIdentifier("conversation.delete.\(item.id.uuidString)")
+    }
+
+    private func resetVisibleConversationLimitIfNeeded() {
+        guard visibleConversationLimit == 0 else {
+            return
+        }
+
+        visibleConversationLimit = min(Self.pageSize, chatStore.conversationListItems.count)
+    }
+
+    private func syncVisibleConversationLimit(previousCount: Int, newCount: Int) {
+        guard newCount != previousCount else {
+            return
+        }
+
+        guard newCount > 0 else {
+            visibleConversationLimit = 0
+            return
+        }
+
+        let minimumVisible = min(Self.pageSize, newCount)
+        if previousCount == 0 || visibleConversationLimit == 0 {
+            visibleConversationLimit = minimumVisible
+            return
+        }
+
+        visibleConversationLimit = min(max(visibleConversationLimit, minimumVisible), newCount)
+    }
+
+    private func loadMoreConversationsIfNeeded(currentIndex: Int) {
+        guard visibleConversationLimit < chatStore.conversationListItems.count else {
+            return
+        }
+
+        let triggerIndex = max(visibleConversationLimit - Self.preloadThreshold, 0)
+        guard currentIndex >= triggerIndex else {
+            return
+        }
+
+        visibleConversationLimit = min(
+            visibleConversationLimit + Self.pageSize,
+            chatStore.conversationListItems.count
+        )
     }
 }
 #endif
 
+private struct IndexedConversationListItem: Identifiable {
+    let index: Int
+    let item: WatchConversationListItem
+
+    var id: UUID { item.id }
+}
+
 struct ConversationRowView: View, Equatable {
-    let conversation: ConversationThread
-    let aiConfiguration: ConversationAIConfiguration
+    let item: WatchConversationListItem
+    let relativeNow: Date
 
     static func == (lhs: ConversationRowView, rhs: ConversationRowView) -> Bool {
         lhs.rowSignature == rhs.rowSignature
@@ -171,26 +246,22 @@ struct ConversationRowView: View, Equatable {
 
     private var rowSignature: WatchConversationRowSignature {
         WatchConversationRowSignature(
-            id: conversation.id,
-            title: conversation.title,
-            updatedAt: conversation.updatedAt,
-            isFavorite: conversation.isFavorite,
-            previewText: conversation.previewText,
-            messageCount: conversation.messageCount,
-            containsAudioAttachments: conversation.containsAudioAttachments,
-            containsImageAttachments: conversation.containsImageAttachments,
-            aiConfiguration: aiConfiguration
+            item: item,
+            relativeTimestampLabel: WatchRelativeTimestampText.label(
+                for: item.updatedAt,
+                relativeTo: relativeNow
+            )
         )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(conversation.title)
+                Text(item.title)
                     .font(.headline)
                     .lineLimit(2)
 
-                if conversation.isFavorite {
+                if item.isFavorite {
                     Image(systemName: "star.fill")
                         .font(.caption2)
                         .foregroundStyle(.yellow)
@@ -198,10 +269,13 @@ struct ConversationRowView: View, Equatable {
 
                 Spacer(minLength: 4)
 
-                WatchRelativeTimestampText(updatedAt: conversation.updatedAt)
+                WatchRelativeTimestampText(
+                    updatedAt: item.updatedAt,
+                    referenceDate: relativeNow
+                )
             }
 
-            Text(conversation.previewText)
+            Text(item.previewText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -233,26 +307,26 @@ struct ConversationRowView: View, Equatable {
         HStack(spacing: 5) {
             WatchConversationMetaItem(
                 iconName: "bubble.left.and.bubble.right",
-                title: "\(conversation.messageCount)"
+                title: "\(item.messageCount)"
             )
 
-            if includeAttachments, conversation.containsAudioAttachments {
+            if includeAttachments, item.containsAudioAttachments {
                 WatchConversationMetaItem(iconName: "waveform")
             }
 
-            if includeAttachments, conversation.containsImageAttachments {
+            if includeAttachments, item.containsImageAttachments {
                 WatchConversationMetaItem(iconName: "photo")
             }
 
             WatchConversationMetaItem(
                 iconName: "cpu",
-                title: AIModelCatalog.shortLabel(for: aiConfiguration.model)
+                title: item.modelShortLabel
             )
 
             if includeThinking {
                 WatchConversationMetaItem(
                     iconName: "brain.head.profile",
-                    title: aiConfiguration.thinkingIntensity.shortLabel
+                    title: item.thinkingShortLabel
                 )
             }
         }
@@ -262,15 +336,8 @@ struct ConversationRowView: View, Equatable {
 }
 
 private struct WatchConversationRowSignature: Equatable {
-    let id: UUID
-    let title: String
-    let updatedAt: Date
-    let isFavorite: Bool
-    let previewText: String
-    let messageCount: Int
-    let containsAudioAttachments: Bool
-    let containsImageAttachments: Bool
-    let aiConfiguration: ConversationAIConfiguration
+    let item: WatchConversationListItem
+    let relativeTimestampLabel: String
 }
 
 private struct WatchConversationMetaItem: View {
@@ -294,16 +361,15 @@ private struct WatchConversationMetaItem: View {
 
 private struct WatchRelativeTimestampText: View {
     let updatedAt: Date
+    let referenceDate: Date
 
     var body: some View {
-        TimelineView(.periodic(from: Self.nextMinuteBoundary(after: .now), by: 60)) { context in
-            Text(Self.label(for: updatedAt, relativeTo: context.date))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
+        Text(Self.label(for: updatedAt, relativeTo: referenceDate))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 
-    private static func nextMinuteBoundary(after date: Date) -> Date {
+    static func nextMinuteBoundary(after date: Date) -> Date {
         let calendar = Calendar.autoupdatingCurrent
         return calendar.nextDate(
             after: date,
@@ -312,7 +378,7 @@ private struct WatchRelativeTimestampText: View {
         ) ?? date.addingTimeInterval(60)
     }
 
-    private static func label(for updatedAt: Date, relativeTo now: Date) -> String {
+    static func label(for updatedAt: Date, relativeTo now: Date) -> String {
         guard updatedAt <= now else {
             return justNowLabel(for: .autoupdatingCurrent)
         }
@@ -358,5 +424,19 @@ private struct WatchRelativeTimestampText: View {
 
     private static func justNowLabel(for locale: Locale) -> String {
         locale.identifier.hasPrefix("zh") ? "刚刚" : "Just now"
+    }
+}
+
+struct WatchMinuteRelativeTimeline<Content: View>: View {
+    let content: (Date) -> Content
+
+    init(@ViewBuilder content: @escaping (Date) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: WatchRelativeTimestampText.nextMinuteBoundary(after: .now), by: 60)) { context in
+            content(context.date)
+        }
     }
 }

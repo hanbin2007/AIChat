@@ -5,6 +5,7 @@
 //  Created by zhb on 2026/3/7.
 //
 
+import Combine
 import SwiftUI
 import UserNotifications
 import XCTest
@@ -836,6 +837,135 @@ final class AIChat_Watch_AppTests: XCTestCase {
                 "Heavy LaTeX conversation initial render regressed to \(elapsed)s"
             )
         }
+    }
+
+    func testConversationThreadListSummaryCapturesPreviewAndAttachmentFlags() {
+        let conversation = ConversationThread(
+            title: "Summary",
+            messages: [
+                ChatMessage(role: .user, text: "First question"),
+                ChatMessage(
+                    role: .assistant,
+                    text: "Attached image only",
+                    attachments: [
+                        ChatImageAttachment(
+                            kind: .image,
+                            filename: "photo.jpg",
+                            mimeType: "image/jpeg",
+                            data: Data([0x01]),
+                            pixelWidth: 1,
+                            pixelHeight: 1
+                        )
+                    ]
+                ),
+                ChatMessage(
+                    role: .user,
+                    text: "",
+                    attachments: [
+                        try! ChatAttachment.makeRecordedAudio(
+                            from: Data([0x02]),
+                            suggestedFilename: "voice.m4a",
+                            durationSeconds: 1.2
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let summary = ConversationThreadListSummary(conversation: conversation)
+
+        XCTAssertEqual(summary.previewText, L10n.tr("conversation.attachment.voice.one"))
+        XCTAssertEqual(summary.messageCount, 3)
+        XCTAssertTrue(summary.containsAudioAttachments)
+        XCTAssertTrue(summary.containsImageAttachments)
+    }
+
+    @MainActor
+    func testConversationListInitialRenderPerformanceForLargeHistory() async throws {
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+
+        measure(metrics: [XCTClockMetric()], options: options) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let snapshot = autoreleasepool { () -> CGImage? in
+                let store = ChatStore.previewStore(
+                    conversations: makeHistoryListConversations(count: 180),
+                    completionFeedbackProvider: NoopCompletionFeedbackProvider()
+                )
+                return renderConversationListSnapshot(store: store)
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+            XCTAssertNotNil(snapshot)
+            XCTAssertLessThan(
+                elapsed,
+                0.45,
+                "Large watch conversation list initial render regressed to \(elapsed)s"
+            )
+        }
+    }
+
+    @MainActor
+    func testConversationListPublishesOnlyMeaningfulUpdatesDuringStreamingReply() async throws {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000611") ?? UUID()
+        let baseDate = Date(timeIntervalSince1970: 1_763_000_000)
+        let store = ChatStore.previewStore(
+            conversations: [
+                ConversationThread(
+                    id: conversationID,
+                    title: "Streaming Cache Target",
+                    createdAt: baseDate,
+                    updatedAt: baseDate,
+                    isFavorite: false,
+                    messages: [
+                        ChatMessage(
+                            role: .user,
+                            text: "Keep the history row stable while the assistant streams.",
+                            createdAt: baseDate
+                        )
+                    ]
+                ),
+                ConversationThread(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000612") ?? UUID(),
+                    title: "Older Thread",
+                    createdAt: baseDate.addingTimeInterval(-60),
+                    updatedAt: baseDate.addingTimeInterval(-60),
+                    isFavorite: false,
+                    messages: [
+                        ChatMessage(
+                            role: .assistant,
+                            text: "Older message that should stay below the streaming target.",
+                            createdAt: baseDate.addingTimeInterval(-60)
+                        )
+                    ]
+                )
+            ],
+            aiService: DelayedPreviewAIStreamingService(
+                steps: [
+                    (60_000_000, .answerDelta("First partial. ")),
+                    (60_000_000, .answerDelta("Second partial. ")),
+                    (60_000_000, .answerDelta("Final reply.")),
+                ]
+            ),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider()
+        )
+
+        var publishedSnapshots: [[WatchConversationListItem]] = []
+        let cancellable = store.$conversationListItems
+            .dropFirst()
+            .sink { publishedSnapshots.append($0) }
+        defer { cancellable.cancel() }
+
+        await store.retryLatestReply(in: conversationID)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertLessThanOrEqual(
+            publishedSnapshots.count,
+            4,
+            "Streaming list cache published too many intermediate updates: \(publishedSnapshots.count)"
+        )
+        XCTAssertEqual(store.conversationListItems.first?.id, conversationID)
+        XCTAssertEqual(store.conversationListItems.first?.previewText, "First partial. Second partial. Final reply.")
     }
 
     func testGemini31ProExtremeUsesDynamicMaximumThinking() {
@@ -3315,6 +3445,47 @@ final class AIChat_Watch_AppTests: XCTestCase {
         return renderer.cgImage
     }
 
+    @MainActor
+    private func renderConversationListSnapshot(store: ChatStore) -> CGImage? {
+        let width: CGFloat = 184
+        let height: CGFloat = 224
+        let content = ConversationListView(navigationPath: .constant([]))
+            .environmentObject(store)
+            .frame(width: width, height: height)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(width: width, height: height)
+        return renderer.cgImage
+    }
+
+    private func makeHistoryListConversations(count: Int) -> [ConversationThread] {
+        let seededDate = Date(timeIntervalSince1970: 1_762_401_000)
+
+        return (0..<count).map { index in
+            let createdAt = seededDate.addingTimeInterval(Double(index * 90))
+            let title = "History Thread \(index + 1)"
+            return ConversationThread(
+                id: UUID(),
+                title: title,
+                createdAt: createdAt,
+                updatedAt: createdAt.addingTimeInterval(30),
+                isFavorite: index.isMultiple(of: 11),
+                messages: [
+                    ChatMessage(
+                        role: .assistant,
+                        text: """
+                        \(title)
+                        This seeded history row includes enough text to keep watch list cells realistic during render testing.
+                        """,
+                        createdAt: createdAt
+                    )
+                ]
+            )
+        }
+        .sorted(by: ConversationThread.sortsByMostRecentFirst)
+    }
+
     private func makeHeavyMarkdownMessages(count: Int) -> [ChatMessage] {
         let heavyMarkdown = Array(
             repeating: """
@@ -3464,6 +3635,31 @@ private struct EchoReplyAIStreamingService: AIStreamingService {
         return AsyncThrowingStream { continuation in
             continuation.yield(.answerDelta("Echo: \(latestUserText)"))
             continuation.finish()
+        }
+    }
+}
+
+private nonisolated struct DelayedPreviewAIStreamingService: AIStreamingService {
+    let steps: [(delayNanoseconds: UInt64, event: AIStreamEvent)]
+
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let streamTask = Task {
+                do {
+                    for step in steps {
+                        try await Task.sleep(nanoseconds: step.delayNanoseconds)
+                        continuation.yield(step.event)
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                streamTask.cancel()
+            }
         }
     }
 }

@@ -395,14 +395,14 @@ private struct UITestBootstrap {
         let streamingConversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000450") ?? UUID()
         var conversations: [ConversationThread] = []
 
-        for index in 1...48 {
+        for index in 1...72 {
             let conversationID =
                 UUID(uuidString: String(format: "00000000-0000-0000-0000-0000000005%02d", index)) ?? UUID()
-            let createdAt = seededDate.addingTimeInterval(Double(48 - index) * 90)
+            let createdAt = seededDate.addingTimeInterval(Double(72 - index) * 90)
             let title: String
             if index == 1 {
                 title = "List Scroll Top Marker"
-            } else if index == 48 {
+            } else if index == 72 {
                 title = "List Scroll Bottom Marker"
             } else if index == 6 {
                 title = "List Streaming Target"

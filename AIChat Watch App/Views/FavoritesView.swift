@@ -13,39 +13,41 @@ struct FavoritesView: View {
     @Binding var navigationPath: [UUID]
 
     var body: some View {
-        ZStack {
-            AppBackdropView()
+        WatchMinuteRelativeTimeline { relativeNow in
+            ZStack {
+                AppBackdropView()
 
-            List {
-                if chatStore.favoriteConversations.isEmpty {
-                    emptyState
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowBackground(Color.clear)
-                } else {
-                    ForEach(chatStore.favoriteConversations) { conversation in
-                        NavigationLink(value: conversation.id) {
-                            ConversationRowView(
-                                conversation: conversation,
-                                aiConfiguration: chatStore.aiConfiguration(for: conversation.id)
-                            )
-                        }
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                Task {
-                                    await chatStore.setConversationFavorite(false, for: conversation.id)
-                                }
-                            } label: {
-                                Label(L10n.tr("favorites.remove"), systemImage: "star.slash")
+                List {
+                    if chatStore.favoriteConversationListItems.isEmpty {
+                        emptyState
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    } else {
+                        ForEach(chatStore.favoriteConversationListItems) { item in
+                            NavigationLink(value: item.id) {
+                                ConversationRowView(
+                                    item: item,
+                                    relativeNow: relativeNow
+                                )
                             }
-                            .tint(.orange)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    Task {
+                                        await chatStore.setConversationFavorite(false, for: item.id)
+                                    }
+                                } label: {
+                                    Label(L10n.tr("favorites.remove"), systemImage: "star.slash")
+                                }
+                                .tint(.orange)
+                            }
                         }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
         }
     }
 

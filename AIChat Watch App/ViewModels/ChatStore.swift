@@ -404,6 +404,8 @@ final class ChatStore: ObservableObject {
     static let streamingProgressPersistenceInterval: TimeInterval = 1
 
     @Published private(set) var conversations: [ConversationThread] = []
+    @Published private(set) var conversationListItems: [WatchConversationListItem] = []
+    @Published private(set) var favoriteConversationListItems: [WatchConversationListItem] = []
     @Published private(set) var startupError: String?
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
@@ -764,6 +766,7 @@ final class ChatStore: ObservableObject {
     func refreshActivationState() async {
         activationState = activationRepository.loadState()
         relayAccountStatus = await relayAccessRepository.loadState()?.status
+        rebuildConversationListCaches()
 
         guard configuration.backendMode == .relay else {
             return
@@ -796,6 +799,7 @@ final class ChatStore: ObservableObject {
         )
         try activationRepository.saveState(nextState)
         activationState = nextState
+        rebuildConversationListCaches()
 
         if configuration.backendMode == .relay {
             let status = try await relayAccountService.exchangeOfflineActivation(
@@ -810,6 +814,7 @@ final class ChatStore: ObservableObject {
         do {
             try activationRepository.clearState()
             activationState = nil
+            rebuildConversationListCaches()
         } catch {
             startupError = error.localizedDescription
         }
@@ -1868,15 +1873,34 @@ final class ChatStore: ObservableObject {
             return
         }
 
-        var updatedConversations = conversations.filter { $0.id != conversation.id }
-        updatedConversations.append(conversation)
-        updatedConversations.sort(by: ConversationThread.sortsByMostRecentFirst)
-        setConversations(updatedConversations)
+        let existingConversationIndex = conversationIndexByID[conversation.id]
+        let existingConversation = existingConversationIndex.map { conversations[$0] }
+        var updatedConversations = conversations
+
+        if let existingConversationIndex {
+            updatedConversations.remove(at: existingConversationIndex)
+        }
+
+        let insertionIndex = conversationInsertionIndex(for: conversation, in: updatedConversations)
+        updatedConversations.insert(conversation, at: insertionIndex)
+
+        guard existingConversation != conversation || existingConversationIndex != insertionIndex else {
+            return
+        }
+
+        conversations = updatedConversations
+        rebuildConversationIndex()
+        upsertConversationListItem(for: conversation, atConversationIndex: insertionIndex)
     }
 
     private func setConversations(_ updatedConversations: [ConversationThread]) {
+        guard conversations != updatedConversations else {
+            return
+        }
+
         conversations = updatedConversations
         rebuildConversationIndex()
+        rebuildConversationListCaches()
     }
 
     private func mergeStoredAttachmentMetadata(from storedConversation: ConversationThread) {
@@ -1916,6 +1940,72 @@ final class ChatStore: ObservableObject {
     private func rebuildConversationIndex() {
         conversationIndexByID = Dictionary(
             uniqueKeysWithValues: conversations.enumerated().map { ($0.element.id, $0.offset) }
+        )
+    }
+
+    private func rebuildConversationListCaches() {
+        let items = conversations.map(makeConversationListItem)
+        applyConversationListItems(items)
+    }
+
+    private func conversationInsertionIndex(
+        for conversation: ConversationThread,
+        in sortedConversations: [ConversationThread]
+    ) -> Int {
+        sortedConversations.firstIndex { existingConversation in
+            ConversationThread.sortsByMostRecentFirst(conversation, existingConversation)
+        } ?? sortedConversations.endIndex
+    }
+
+    private func upsertConversationListItem(
+        for conversation: ConversationThread,
+        atConversationIndex conversationIndex: Int
+    ) {
+        let item = makeConversationListItem(for: conversation)
+
+        if let existingItemIndex = conversationListItems.firstIndex(where: { $0.id == item.id }),
+           existingItemIndex == conversationIndex,
+           conversationListItems[existingItemIndex] == item {
+            return
+        }
+
+        var updatedItems = conversationListItems
+        if let existingItemIndex = updatedItems.firstIndex(where: { $0.id == item.id }) {
+            updatedItems.remove(at: existingItemIndex)
+        }
+
+        updatedItems.insert(item, at: min(conversationIndex, updatedItems.count))
+        applyConversationListItems(updatedItems)
+    }
+
+    private func applyConversationListItems(_ items: [WatchConversationListItem]) {
+        if conversationListItems != items {
+            conversationListItems = items
+        }
+
+        let favoriteItems = items.filter(\.isFavorite)
+        if favoriteConversationListItems != favoriteItems {
+            favoriteConversationListItems = favoriteItems
+        }
+    }
+
+    private func makeConversationListItem(for conversation: ConversationThread) -> WatchConversationListItem {
+        let summary = conversation.listSummary
+        let effectiveConfiguration = licensedConfiguration(
+            from: conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+        )
+
+        return WatchConversationListItem(
+            id: conversation.id,
+            title: conversation.title,
+            updatedAt: conversation.updatedAt,
+            isFavorite: conversation.isFavorite,
+            previewText: summary.previewText,
+            messageCount: summary.messageCount,
+            containsAudioAttachments: summary.containsAudioAttachments,
+            containsImageAttachments: summary.containsImageAttachments,
+            modelShortLabel: AIModelCatalog.shortLabel(for: effectiveConfiguration.model),
+            thinkingShortLabel: effectiveConfiguration.thinkingIntensity.shortLabel
         )
     }
 
@@ -2591,6 +2681,7 @@ final class ChatStore: ObservableObject {
         if nextActivationState != activationState {
             try activationRepository.saveState(nextActivationState)
             activationState = nextActivationState
+            rebuildConversationListCaches()
         }
     }
 
@@ -2933,6 +3024,7 @@ final class ChatStore: ObservableObject {
     ) async {
         let previousStatus = relayAccountStatus
         relayAccountStatus = status
+        rebuildConversationListCaches()
 
         guard shareToCompanion else {
             return
@@ -3261,7 +3353,7 @@ private enum DefaultsKeys {
 }
 
 #if DEBUG
-private struct PreviewAIStreamingService: AIStreamingService {
+private nonisolated struct PreviewAIStreamingService: AIStreamingService {
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             continuation.yield(.thoughtDelta("Reviewing the draft and condensing the most useful points."))
@@ -3271,7 +3363,7 @@ private struct PreviewAIStreamingService: AIStreamingService {
     }
 }
 
-private struct PreviewAITranscriptionService: AITranscriptionService {
+private nonisolated struct PreviewAITranscriptionService: AITranscriptionService {
     func transcribeUserAudio(
         _ audioAttachment: ChatAttachment,
         in conversation: ConversationThread,
@@ -3330,7 +3422,8 @@ extension ChatStore {
             transcriptionService: transcriptionService,
             completionFeedbackProvider: completionFeedbackProvider,
             configuration: configuration,
-            syncBridge: CompanionSyncBridge(isEnabled: false)
+            syncBridge: CompanionSyncBridge(isEnabled: false),
+            replyPersistenceController: NoopReplyPersistenceController()
         )
 
         store.setConversations(conversations.sorted(by: ConversationThread.sortsByMostRecentFirst))
@@ -3354,6 +3447,7 @@ extension ChatStore {
                 usedMessageCount: previewState.usedMessageCount
             )
         }
+        store.rebuildConversationListCaches()
         store.hasLoadedConversations = true
         return store
     }

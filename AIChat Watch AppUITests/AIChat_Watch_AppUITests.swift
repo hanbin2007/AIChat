@@ -451,8 +451,8 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         attachScreenshot(app, named: "history-list-scroll-start")
 
-        let bottomRow = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000548"]
-        if !revealElement(bottomRow, in: app, directions: [.up], timeout: 12, maxSwipesPerDirection: 10) {
+        let bottomRow = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000572"]
+        if !revealElement(bottomRow, in: app, directions: [.up], timeout: 16, maxSwipesPerDirection: 16) {
             attachDebugHierarchy(app, named: "History list never reached bottom marker hierarchy")
             attachScreenshot(app, named: "history-list-scroll-failure")
             XCTFail("The history conversation list did not scroll to the bottom marker.")
