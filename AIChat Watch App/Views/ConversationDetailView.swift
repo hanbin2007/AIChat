@@ -102,23 +102,22 @@ struct ConversationDetailView: View {
             AppBackdropView()
 
             if let conversation = chatStore.conversation(id: conversationID) {
-                ZStack(alignment: .bottomTrailing) {
-                    VStack(spacing: ComposerLayout.messagesToComposerSpacing) {
-                        messagesView(conversation: conversation)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                VStack(spacing: ComposerLayout.messagesToComposerSpacing) {
+                    messagesView(conversation: conversation)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                        composerSurface
-                            .frame(maxWidth: .infinity, alignment: .bottom)
-                            .frame(height: isComposerExpanded ? nil : 0, alignment: .bottom)
-                            .clipped()
-                            .opacity(isComposerExpanded ? 1 : 0)
-                            .allowsHitTesting(isComposerExpanded)
-                            .accessibilityHidden(isComposerExpanded == false)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, ComposerLayout.containerBottomPadding)
-
+                    composerSurface
+                        .frame(maxWidth: .infinity, alignment: .bottom)
+                        .frame(height: isComposerExpanded ? nil : 0, alignment: .bottom)
+                        .clipped()
+                        .opacity(isComposerExpanded ? 1 : 0)
+                        .allowsHitTesting(isComposerExpanded)
+                        .accessibilityHidden(isComposerExpanded == false)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.horizontal, 6)
+                .padding(.bottom, ComposerLayout.containerBottomPadding)
+                .overlay(alignment: .bottomTrailing) {
                     if isComposerExpanded == false {
                         collapsedComposerButton
                             .padding(.trailing, 10)
@@ -317,28 +316,15 @@ struct ConversationDetailView: View {
                         .padding(.bottom, isComposerExpanded ? 12 : 62)
                 }
             }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: ConversationScrollLayout.interruptionDragMinimumDistance)
-                    .onChanged { value in
-                        guard abs(value.translation.height) >= ConversationScrollLayout.interruptionDragMinimumDistance,
-                              isPredominantlyVertical(value.translation)
-                        else {
-                            return
-                        }
 
-                        pauseStreamingRefresh(
-                            for: streamingMessageID,
-                            autoScrollSessionMessageID: autoScrollSessionMessageID
-                        )
-                    }
-            )
             .onPreferenceChange(ConversationViewportHeightPreferenceKey.self) { height in
                 messagesViewportHeight = height
             }
             .onPreferenceChange(ConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
                 handleBottomAnchorPositionChange(
                     maxY,
-                    autoScrollSessionMessageID: autoScrollSessionMessageID
+                    autoScrollSessionMessageID: autoScrollSessionMessageID,
+                    streamingMessageID: streamingMessageID
                 )
             }
             .onAppear {
@@ -751,10 +737,14 @@ struct ConversationDetailView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
-        .contentShape(RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous))
+        .contentShape(isComposerExpanded ? AnyShape(RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)) : AnyShape(Rectangle().size(.zero)))
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
+                    guard isComposerExpanded else {
+                        return
+                    }
+
                     guard isPredominantlyVertical(value.translation) else {
                         return
                     }
@@ -778,10 +768,14 @@ struct ConversationDetailView: View {
             isShowingActivationCenter = true
         }
         .accessibilityIdentifier("conversation.composer")
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(isComposerExpanded ? AnyShape(RoundedRectangle(cornerRadius: 22, style: .continuous)) : AnyShape(Rectangle().size(.zero)))
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
+                    guard isComposerExpanded else {
+                        return
+                    }
+
                     guard isPredominantlyVertical(value.translation) else {
                         return
                     }
@@ -1165,7 +1159,8 @@ struct ConversationDetailView: View {
 
     private func handleBottomAnchorPositionChange(
         _ maxY: CGFloat,
-        autoScrollSessionMessageID: UUID?
+        autoScrollSessionMessageID: UUID?,
+        streamingMessageID: UUID? = nil
     ) {
         guard Date.now >= scrollInterruptionsSuppressedUntil,
               messagesViewportHeight > 0
@@ -1191,6 +1186,7 @@ struct ConversationDetailView: View {
         }
 
         interruptAutoScroll(for: autoScrollSessionMessageID)
+        suspendStreamingRender(for: streamingMessageID)
     }
 
     private func visibleMessages(in conversation: ConversationThread) -> ArraySlice<ChatMessage> {

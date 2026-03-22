@@ -261,34 +261,11 @@ struct ChatBubbleView: View, Equatable {
                 .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
         )
         .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
-        #if os(watchOS)
-        .simultaneousGesture(
-            LongPressGesture(
-                minimumDuration: MessageBubbleInteraction.actionsLongPressDuration,
-                maximumDistance: MessageBubbleInteraction.actionsLongPressMaximumDistance
-            )
-            .onEnded { _ in
-                guard canPinMessage else {
-                    return
-                }
-
-                isShowingMessageActions = true
-            }
-        )
-        .confirmationDialog(
-            "Message Actions",
-            isPresented: $isShowingMessageActions,
-            titleVisibility: .visible
-        ) {
-            messageActions
-        } message: {
-            Text("Choose how this message should be remembered.")
-        }
-        #else
         .contextMenu {
-            messageActions
+            if canPinMessage {
+                messageActions
+            }
         }
-        #endif
     }
 
     private func syncRenderedContentIfNeeded() {
