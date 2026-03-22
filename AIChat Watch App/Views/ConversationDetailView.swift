@@ -107,17 +107,13 @@ struct ConversationDetailView: View {
                         messagesView(conversation: conversation)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                        if isComposerExpanded {
-                            Group {
-                                if chatStore.isReadOnlyMode {
-                                    lockedComposerView
-                                } else {
-                                    composerView()
-                                }
-                            }
+                        composerSurface
+                            .frame(maxWidth: .infinity, alignment: .bottom)
+                            .frame(height: isComposerExpanded ? nil : 0, alignment: .bottom)
+                            .clipped()
+                            .opacity(isComposerExpanded ? 1 : 0)
                             .allowsHitTesting(isComposerExpanded)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
+                            .accessibilityHidden(isComposerExpanded == false)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.horizontal, 6)
@@ -213,6 +209,15 @@ struct ConversationDetailView: View {
             streamingRenderResumeTask = nil
         }
         .animation(.easeOut(duration: 0.2), value: isComposerExpanded)
+    }
+
+    @ViewBuilder
+    private var composerSurface: some View {
+        if chatStore.isReadOnlyMode {
+            lockedComposerView
+        } else {
+            composerView()
+        }
     }
 
     private func messagesView(conversation: ConversationThread) -> some View {

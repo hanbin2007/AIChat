@@ -459,6 +459,28 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationDetailCanScrollFromLowerViewportAfterComposerCollapse() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll_after_collapse"
+        app.launch()
+
+        let openComposerButton = app.buttons["conversation.composer.open"].firstMatch
+        if !openComposerButton.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Composer did not auto-collapse for lower viewport hierarchy")
+            XCTFail("The lower-viewport touch scroll scenario should reach the collapsed composer state.")
+            return
+        }
+
+        XCTAssertTrue(waitForHittable(openComposerButton, timeout: 2))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+
+        assertConversationCanScrollFromLowerViewportTouch(
+            in: app,
+            context: "touch-scroll-lower-after-collapse"
+        )
+    }
+
+    @MainActor
     func testConversationListCanScrollWhileBackgroundReplyStreams() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
@@ -984,6 +1006,92 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         attachScreenshot(app, named: "\(context)-finish")
         XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript for \(context).")
+    }
+
+    @MainActor
+    private func assertConversationCanScrollFromLowerViewportTouch(
+        in app: XCUIApplication,
+        context: String
+    ) {
+        let lightTouchDuration = 0.015
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        if !scrollView.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing \(context) conversation hierarchy")
+            XCTFail("Missing conversation scroll view for \(context) scenario.")
+            return
+        }
+
+        let topMarker = app.staticTexts.matching(
+            NSPredicate(format: "label == %@", "Touch Scroll Top Marker")
+        ).firstMatch
+        let bottomMarker = app.staticTexts.matching(
+            NSPredicate(format: "label == %@", "Touch Scroll Bottom Marker")
+        ).firstMatch
+
+        guard topMarker.waitForExistence(timeout: 10) else {
+            attachDebugHierarchy(app, named: "Missing \(context) top marker hierarchy")
+            XCTFail("Missing top marker for \(context) lower-viewport verification.")
+            return
+        }
+
+        guard waitForNonEmptyFrame(of: topMarker, timeout: 5) else {
+            attachDebugHierarchy(app, named: "Missing \(context) top marker frame hierarchy")
+            XCTFail("Top marker never received a measurable frame for \(context) lower-viewport verification.")
+            return
+        }
+
+        let bottomMarkerIsVisible =
+            bottomMarker.waitForExistence(timeout: 2) &&
+            waitForNonEmptyFrame(of: bottomMarker, timeout: 2) &&
+            scrollView.frame.intersects(bottomMarker.frame)
+
+        let trackedMarker = bottomMarkerIsVisible ? bottomMarker : topMarker
+        let initialTrackedMidY = trackedMarker.frame.midY
+        let directionMultiplier: CGFloat = bottomMarkerIsVisible ? 1 : -1
+        let startPoint = CGPoint(
+            x: scrollView.frame.midX,
+            y: scrollView.frame.maxY - (scrollView.frame.height * 0.18)
+        )
+        let start = app.coordinate(
+            withNormalizedOffset: normalizedOffset(for: startPoint, in: app.frame)
+        )
+
+        attachScreenshot(app, named: "\(context)-start")
+
+        let end = start.withOffset(
+            CGVector(dx: 0, dy: directionMultiplier * scrollView.frame.height * 0.28)
+        )
+        start.press(forDuration: lightTouchDuration, thenDragTo: end)
+
+        let deadline = Date().addingTimeInterval(1.2)
+        var didScroll = false
+        while Date() < deadline {
+            let trackedMoved = trackedMarker.exists &&
+                trackedMarker.frame.isEmpty == false &&
+                abs(trackedMarker.frame.midY - initialTrackedMidY) > 18
+            let trackedMovedOffscreen = trackedMarker.exists &&
+                trackedMarker.frame.isEmpty == false &&
+                scrollView.frame.intersects(trackedMarker.frame) == false
+            let reachedOppositeMarker =
+                bottomMarkerIsVisible ?
+                (topMarker.exists && topMarker.frame.isEmpty == false && scrollView.frame.intersects(topMarker.frame)) :
+                (bottomMarker.exists && bottomMarker.frame.isEmpty == false && scrollView.frame.intersects(bottomMarker.frame))
+
+            if trackedMoved || trackedMovedOffscreen || reachedOppositeMarker {
+                didScroll = true
+                break
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        if didScroll == false {
+            attachDebugHierarchy(app, named: "\(context) failure hierarchy")
+            attachScreenshot(app, named: "\(context)-failure")
+        }
+
+        attachScreenshot(app, named: "\(context)-finish")
+        XCTAssertTrue(didScroll, "Lower-viewport touch dragging should move the transcript for \(context).")
     }
 
     private func normalizedOffset(for point: CGPoint, in containerFrame: CGRect) -> CGVector {

@@ -16,9 +16,18 @@ struct ConversationListView: View {
     @State private var isLoadingMoreConversations = false
     @State private var paginationTask: Task<Void, Never>?
 
-    private static let pageSize = 8
-    private static let preloadThreshold = 2
-    private static let paginationLoadDelayNanoseconds: UInt64 = 120_000_000
+    private static let initialPageSize = 8
+    private static let incrementalPageSize = 4
+    private static let preloadThreshold = 3
+    private static let paginationLoadDelayNanoseconds: UInt64 = 16_000_000
+
+    init(
+        navigationPath: Binding<[UUID]>,
+        initialVisibleConversationLimit: Int = 0
+    ) {
+        self._navigationPath = navigationPath
+        self._visibleConversationLimit = State(initialValue: initialVisibleConversationLimit)
+    }
 
     var body: some View {
         WatchMinuteRelativeTimeline { relativeNow in
@@ -220,7 +229,7 @@ struct ConversationListView: View {
             return
         }
 
-        visibleConversationLimit = min(Self.pageSize, chatStore.conversationListItems.count)
+        visibleConversationLimit = min(Self.initialPageSize, chatStore.conversationListItems.count)
     }
 
     private func syncVisibleConversationLimit(previousCount: Int, newCount: Int) {
@@ -236,7 +245,7 @@ struct ConversationListView: View {
             return
         }
 
-        let minimumVisible = min(Self.pageSize, newCount)
+        let minimumVisible = min(Self.initialPageSize, newCount)
         if previousCount == 0 || visibleConversationLimit == 0 {
             visibleConversationLimit = minimumVisible
             isLoadingMoreConversations = false
@@ -281,12 +290,13 @@ struct ConversationListView: View {
         }
 
         let nextLimit = min(
-            visibleConversationLimit + Self.pageSize,
+            visibleConversationLimit + Self.incrementalPageSize,
             chatStore.conversationListItems.count
         )
 
         isLoadingMoreConversations = true
         paginationTask = Task(priority: .utility) {
+            await Task.yield()
             try? await Task.sleep(nanoseconds: Self.paginationLoadDelayNanoseconds)
             guard Task.isCancelled == false else {
                 return
@@ -320,7 +330,7 @@ struct ConversationRowView: View, Equatable {
     private var rowSignature: WatchConversationRowSignature {
         WatchConversationRowSignature(
             item: item,
-            relativeTimestampLabel: WatchRelativeTimestampText.label(
+            relativeTimestampDescriptor: WatchRelativeTimestampText.descriptor(
                 for: item.updatedAt,
                 relativeTo: relativeNow
             )
@@ -410,7 +420,7 @@ struct ConversationRowView: View, Equatable {
 
 private struct WatchConversationRowSignature: Equatable {
     let item: WatchConversationListItem
-    let relativeTimestampLabel: String
+    let relativeTimestampDescriptor: WatchRelativeTimestampText.Descriptor
 }
 
 private struct WatchConversationMetaItem: View {
@@ -433,11 +443,28 @@ private struct WatchConversationMetaItem: View {
 }
 
 private struct WatchRelativeTimestampText: View {
+    struct Descriptor: Equatable {
+        enum Unit: Equatable {
+            case justNow
+            case minute
+            case hour
+            case day
+            case week
+            case month
+            case year
+        }
+
+        let unit: Unit
+        let value: Int
+    }
+
     let updatedAt: Date
     let referenceDate: Date
 
     var body: some View {
-        Text(Self.label(for: updatedAt, relativeTo: referenceDate))
+        let descriptor = Self.descriptor(for: updatedAt, relativeTo: referenceDate)
+
+        Text(Self.label(for: descriptor, locale: .autoupdatingCurrent))
             .font(.caption2)
             .foregroundStyle(.secondary)
     }
@@ -451,16 +478,12 @@ private struct WatchRelativeTimestampText: View {
         ) ?? date.addingTimeInterval(60)
     }
 
-    static func label(for updatedAt: Date, relativeTo now: Date) -> String {
+    static func descriptor(for updatedAt: Date, relativeTo now: Date) -> Descriptor {
         guard updatedAt <= now else {
-            return justNowLabel(for: .autoupdatingCurrent)
+            return Descriptor(unit: .justNow, value: 0)
         }
 
         let calendar = Calendar.autoupdatingCurrent
-        let locale = Locale.autoupdatingCurrent
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = locale
-        formatter.unitsStyle = .abbreviated
 
         let components = calendar.dateComponents(
             [.year, .month, .weekOfMonth, .day, .hour, .minute],
@@ -469,30 +492,58 @@ private struct WatchRelativeTimestampText: View {
         )
 
         if let years = components.year, years > 0 {
-            return formatter.localizedString(from: DateComponents(year: -years))
+            return Descriptor(unit: .year, value: years)
         }
 
         if let months = components.month, months > 0 {
-            return formatter.localizedString(from: DateComponents(month: -months))
+            return Descriptor(unit: .month, value: months)
         }
 
         if let weeks = components.weekOfMonth, weeks > 0 {
-            return formatter.localizedString(from: DateComponents(weekOfMonth: -weeks))
+            return Descriptor(unit: .week, value: weeks)
         }
 
         if let days = components.day, days > 0 {
-            return formatter.localizedString(from: DateComponents(day: -days))
+            return Descriptor(unit: .day, value: days)
         }
 
         if let hours = components.hour, hours > 0 {
-            return formatter.localizedString(from: DateComponents(hour: -hours))
+            return Descriptor(unit: .hour, value: hours)
         }
 
         if let minutes = components.minute, minutes > 0 {
-            return formatter.localizedString(from: DateComponents(minute: -minutes))
+            return Descriptor(unit: .minute, value: minutes)
         }
 
-        return justNowLabel(for: locale)
+        return Descriptor(unit: .justNow, value: 0)
+    }
+
+    static func label(for updatedAt: Date, relativeTo now: Date) -> String {
+        label(
+            for: descriptor(for: updatedAt, relativeTo: now),
+            locale: .autoupdatingCurrent
+        )
+    }
+
+    static func label(for descriptor: Descriptor, locale: Locale) -> String {
+        let isChinese = locale.identifier.hasPrefix("zh")
+
+        switch descriptor.unit {
+        case .justNow:
+            return justNowLabel(for: locale)
+        case .minute:
+            return isChinese ? "\(descriptor.value) 分钟前" : "\(descriptor.value)m ago"
+        case .hour:
+            return isChinese ? "\(descriptor.value) 小时前" : "\(descriptor.value)h ago"
+        case .day:
+            return isChinese ? "\(descriptor.value) 天前" : "\(descriptor.value)d ago"
+        case .week:
+            return isChinese ? "\(descriptor.value) 周前" : "\(descriptor.value)w ago"
+        case .month:
+            return isChinese ? "\(descriptor.value) 个月前" : "\(descriptor.value)mo ago"
+        case .year:
+            return isChinese ? "\(descriptor.value) 年前" : "\(descriptor.value)y ago"
+        }
     }
 
     private static func justNowLabel(for locale: Locale) -> String {

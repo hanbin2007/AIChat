@@ -910,6 +910,35 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
+    func testConversationListContinuationRenderPerformance() async throws {
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+
+        measure(metrics: [XCTClockMetric()], options: options) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let snapshot = autoreleasepool { () -> CGImage? in
+                let store = ChatStore.previewStore(
+                    conversations: makeHistoryListConversations(count: 180),
+                    completionFeedbackProvider: NoopCompletionFeedbackProvider()
+                )
+                Self.retainedConversationListPerformanceStores.append(store)
+                return renderConversationListSnapshot(
+                    store: store,
+                    initialVisibleConversationLimit: 12
+                )
+            }
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+            XCTAssertNotNil(snapshot)
+            XCTAssertLessThan(
+                elapsed,
+                0.28,
+                "Watch conversation list continuation render regressed to \(elapsed)s"
+            )
+        }
+    }
+
+    @MainActor
     func testConversationListPublishesOnlyMeaningfulUpdatesDuringStreamingReply() async throws {
         let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000611") ?? UUID()
         let baseDate = Date(timeIntervalSince1970: 1_763_000_000)
@@ -3450,10 +3479,16 @@ final class AIChat_Watch_AppTests: XCTestCase {
     }
 
     @MainActor
-    private func renderConversationListSnapshot(store: ChatStore) -> CGImage? {
+    private func renderConversationListSnapshot(
+        store: ChatStore,
+        initialVisibleConversationLimit: Int = 0
+    ) -> CGImage? {
         let width: CGFloat = 184
         let height: CGFloat = 224
-        let content = ConversationListView(navigationPath: .constant([]))
+        let content = ConversationListView(
+            navigationPath: .constant([]),
+            initialVisibleConversationLimit: initialVisibleConversationLimit
+        )
             .environmentObject(store)
             .frame(width: width, height: height)
 
