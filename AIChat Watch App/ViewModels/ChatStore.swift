@@ -116,6 +116,10 @@ protocol ReplyPersistenceControlling: AnyObject {
 }
 
 final class NoopReplyPersistenceController: ReplyPersistenceControlling {
+    static let shared = NoopReplyPersistenceController()
+
+    private init() {}
+
     func beginStreamingReplyPersistence() -> UUID {
         UUID()
     }
@@ -3423,7 +3427,7 @@ extension ChatStore {
             completionFeedbackProvider: completionFeedbackProvider,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(isEnabled: false),
-            replyPersistenceController: NoopReplyPersistenceController()
+            replyPersistenceController: NoopReplyPersistenceController.shared
         )
 
         store.setConversations(conversations.sorted(by: ConversationThread.sortsByMostRecentFirst))

@@ -12,6 +12,9 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class AIChat_Watch_AppTests: XCTestCase {
+    @MainActor
+    private static var retainedConversationListPerformanceStores: [ChatStore] = []
+
     private let onePixelPNGBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
 
@@ -892,6 +895,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
                     conversations: makeHistoryListConversations(count: 180),
                     completionFeedbackProvider: NoopCompletionFeedbackProvider()
                 )
+                Self.retainedConversationListPerformanceStores.append(store)
                 return renderConversationListSnapshot(store: store)
             }
             let elapsed = CFAbsoluteTimeGetCurrent() - start
@@ -3125,7 +3129,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             transcriptionService: nil,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
-            replyPersistenceController: NoopReplyPersistenceController()
+            replyPersistenceController: NoopReplyPersistenceController.shared
         )
 
         await store.loadConversationsIfNeeded()
@@ -3179,7 +3183,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             transcriptionService: nil,
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
-            replyPersistenceController: NoopReplyPersistenceController()
+            replyPersistenceController: NoopReplyPersistenceController.shared
         )
 
         await store.loadConversationsIfNeeded()
