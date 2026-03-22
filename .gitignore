@@ -1,4 +1,5 @@
 DerivedData/
+.artifacts/
 .build/
 /build/
 .package-cache/
