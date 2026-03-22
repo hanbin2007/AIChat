@@ -15,6 +15,12 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         case down
     }
 
+    private var repositoryRootURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
@@ -413,6 +419,23 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationDetailCapturesLightTouchScrollEvidence() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll"
+        app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] =
+            repositoryRootURL
+            .appendingPathComponent("artifacts/watch-touch-scroll-frames", isDirectory: true)
+            .path
+        app.launch()
+
+        assertConversationCanScrollByTouchDrag(
+            in: app,
+            context: "touch-scroll-evidence",
+            evidenceFrameCount: 4
+        )
+    }
+
+    @MainActor
     func testConversationDetailCanScrollAfterComposerCollapse() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll_after_collapse"
@@ -805,8 +828,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     @MainActor
     private func assertConversationCanScrollByTouchDrag(
         in app: XCUIApplication,
-        context: String
+        context: String,
+        evidenceFrameCount: Int = 0
     ) {
+        let lightTouchDuration = 0.015
         let scrollView = app.scrollViews["conversation.messages.scroll"]
         if !scrollView.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing \(context) conversation hierarchy")
@@ -824,7 +849,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         let initialVisibleMarker: String
         let trackedMarker: XCUIElement
         let initialTrackedMidY: CGFloat
-        let dragOffsets: [(start: CGVector, end: CGVector)]
+        let dragTranslations: [CGVector]
 
         let bottomMarkerIsVisible =
             bottomMarker.waitForExistence(timeout: 2) &&
@@ -836,12 +861,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             trackedMarker = bottomMarker
             initialTrackedMidY = bottomMarker.frame.midY
 
-            // Keep drag starts inside the left gutter so the gesture cannot land on message
-            // bubbles, the retry button, or the collapsed-composer affordance.
-            dragOffsets = [
-                (start: CGVector(dx: 0.06, dy: 0.72), end: CGVector(dx: 0.06, dy: 0.96)),
-                (start: CGVector(dx: 0.06, dy: 0.64), end: CGVector(dx: 0.06, dy: 0.94)),
-                (start: CGVector(dx: 0.09, dy: 0.72), end: CGVector(dx: 0.09, dy: 0.96))
+            dragTranslations = [
+                CGVector(dx: 0, dy: scrollView.frame.height * 0.24),
+                CGVector(dx: 4, dy: scrollView.frame.height * 0.32),
+                CGVector(dx: -4, dy: scrollView.frame.height * 0.38)
             ]
         } else {
             if !topMarker.waitForExistence(timeout: 10) {
@@ -859,20 +882,31 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             initialVisibleMarker = "top"
             trackedMarker = topMarker
             initialTrackedMidY = topMarker.frame.midY
-            dragOffsets = [
-                (start: CGVector(dx: 0.06, dy: 0.86), end: CGVector(dx: 0.06, dy: 0.22)),
-                (start: CGVector(dx: 0.06, dy: 0.78), end: CGVector(dx: 0.06, dy: 0.20)),
-                (start: CGVector(dx: 0.09, dy: 0.86), end: CGVector(dx: 0.09, dy: 0.22))
+            dragTranslations = [
+                CGVector(dx: 0, dy: -scrollView.frame.height * 0.24),
+                CGVector(dx: 4, dy: -scrollView.frame.height * 0.32),
+                CGVector(dx: -4, dy: -scrollView.frame.height * 0.38)
             ]
         }
 
         attachScreenshot(app, named: "\(context)-start")
 
+        if trackedMarker.frame.isEmpty {
+            attachDebugHierarchy(app, named: "Missing \(context) tracked marker frame hierarchy")
+            XCTFail("Tracked marker did not expose a usable frame for \(context) touch-scroll verification.")
+            return
+        }
+
         var didScroll = false
-        for dragOffset in dragOffsets {
-            let start = scrollView.coordinate(withNormalizedOffset: dragOffset.start)
-            let end = scrollView.coordinate(withNormalizedOffset: dragOffset.end)
-            start.press(forDuration: 0.05, thenDragTo: end)
+        for dragTranslation in dragTranslations {
+            let start = app.coordinate(
+                withNormalizedOffset: normalizedOffset(
+                    for: CGPoint(x: trackedMarker.frame.midX, y: trackedMarker.frame.midY),
+                    in: app.frame
+                )
+            )
+            let end = start.withOffset(dragTranslation)
+            start.press(forDuration: lightTouchDuration, thenDragTo: end)
 
             let deadline = Date().addingTimeInterval(1.2)
             while Date() < deadline {
@@ -904,11 +938,35 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             }
         }
 
+        if didScroll, evidenceFrameCount > 0 {
+            let directionMultiplier: CGFloat = initialVisibleMarker == "bottom" ? 1 : -1
+
+            for evidenceIndex in 1...evidenceFrameCount {
+                let start = app.coordinate(
+                    withNormalizedOffset: normalizedOffset(
+                        for: CGPoint(x: scrollView.frame.midX, y: scrollView.frame.midY),
+                        in: app.frame
+                    )
+                )
+                let end = start.withOffset(
+                    CGVector(dx: 0, dy: directionMultiplier * scrollView.frame.height * 0.12)
+                )
+                start.press(forDuration: lightTouchDuration, thenDragTo: end)
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                attachScreenshot(
+                    app,
+                    named: String(format: "%@-frame-%02d", context, evidenceIndex)
+                )
+            }
+        }
+
         let evidence = XCTAttachment(
             string: [
                 "context=\(context)",
                 "initialVisibleMarker=\(initialVisibleMarker)",
                 "initialTrackedMidY=\(initialTrackedMidY)",
+                "trackedMarkerFrame=\(String(describing: trackedMarker.frame))",
+                "lightTouchDuration=\(lightTouchDuration)",
                 "finalTopFrame=\(topMarker.exists ? String(describing: topMarker.frame) : "missing")",
                 "topVisibleInScroll=\(topMarker.exists ? String(scrollView.frame.intersects(topMarker.frame)) : "missing")",
                 "finalBottomFrame=\(bottomMarker.exists ? String(describing: bottomMarker.frame) : "missing")",
@@ -926,6 +984,17 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         attachScreenshot(app, named: "\(context)-finish")
         XCTAssertTrue(didScroll, "Touch dragging the conversation should move the transcript for \(context).")
+    }
+
+    private func normalizedOffset(for point: CGPoint, in containerFrame: CGRect) -> CGVector {
+        guard containerFrame.width > 0, containerFrame.height > 0 else {
+            return CGVector(dx: 0.5, dy: 0.5)
+        }
+
+        return CGVector(
+            dx: (point.x - containerFrame.minX) / containerFrame.width,
+            dy: (point.y - containerFrame.minY) / containerFrame.height
+        )
     }
 
     @MainActor
@@ -1115,7 +1184,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
 
-        let fileURL = screenshotArtifactsDirectory().appendingPathComponent("\(name).png")
+        let fileURL = screenshotArtifactsDirectory(for: app).appendingPathComponent("\(name).png")
         do {
             try screenshot.pngRepresentation.write(to: fileURL)
             let pathAttachment = XCTAttachment(string: fileURL.path)
@@ -1132,9 +1201,15 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
     }
 
-    private func screenshotArtifactsDirectory() -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
+    private func screenshotArtifactsDirectory(for app: XCUIApplication) -> URL {
+        let directory: URL
+        if let configuredRoot = app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
+           configuredRoot.isEmpty == false {
+            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
+        } else {
+            directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
+        }
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
