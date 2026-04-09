@@ -793,6 +793,58 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testStreamingScrollPerformanceWithHangMonitor() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_scroll_performance"
+        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
+
+        // Wait for streaming to begin (the streaming service fires after 2s).
+        RunLoop.current.run(until: Date().addingTimeInterval(3))
+
+        // Scroll up and down four rounds while streaming is active.
+        for _ in 1...4 {
+            app.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            app.swipeDown()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+
+        // Wait for streaming to finish (30 chunks × 80ms = ~2.4s, plus margin).
+        RunLoop.current.run(until: Date().addingTimeInterval(3))
+
+        assertZeroDetectedHangs(in: app, context: "streaming-scroll-performance")
+        attachScreenshot(app, named: "streaming-scroll-performance-finish")
+    }
+
+    @MainActor
+    func testStreamingScrollPerformanceMeasure() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_scroll_performance"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
+
+        // Wait for streaming to begin.
+        RunLoop.current.run(until: Date().addingTimeInterval(3))
+
+        let metrics = conversationListScrollMetrics(for: app)
+
+        measure(metrics: metrics) {
+            for _ in 1...4 {
+                app.swipeUp()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+                app.swipeDown()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            }
+        }
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

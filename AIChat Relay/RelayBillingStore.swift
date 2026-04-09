@@ -90,9 +90,38 @@ actor RelayBillingStore {
                 try persist()
                 return statusResponse(accountID: account.id, deviceID: request.deviceID)
             }
+
+            let reissuedKey = try ensureKey(
+                accountID: account.id,
+                deviceID: request.deviceID,
+                platform: request.platform,
+                source: account.source,
+                deviceAlias: request.deviceAlias
+            )
+            if reissuedKey.state == .active {
+                refreshAccountBalance(for: account.id)
+                try persist()
+                return statusResponse(accountID: account.id, deviceID: request.deviceID)
+            }
         }
 
-        guard state.trialClaims[request.deviceID] == nil else {
+        if let existingClaim = state.trialClaims[request.deviceID] {
+            let claimedGrantAccountID = state.grants[existingClaim.grantID]?.accountID
+            if let accountID = claimedGrantAccountID, state.accounts[accountID] != nil {
+                let reissuedKey = try ensureKey(
+                    accountID: accountID,
+                    deviceID: request.deviceID,
+                    platform: request.platform,
+                    source: .trial,
+                    deviceAlias: request.deviceAlias
+                )
+                if reissuedKey.state == .active {
+                    refreshAccountBalance(for: accountID)
+                    try persist()
+                    return statusResponse(accountID: accountID, deviceID: request.deviceID)
+                }
+            }
+
             return RelayAccountStatusResponse(
                 account: nil,
                 device: RelayDeviceSummary(
@@ -116,7 +145,7 @@ actor RelayBillingStore {
         let expiration = Calendar.current.date(byAdding: .day, value: state.meteringPolicy.trialDurationDays, to: now)
         let keyValue = Self.generateClientKey()
 
-        var account = RelayBillingAccountRecord(
+        let account = RelayBillingAccountRecord(
             id: accountID,
             displayName: request.deviceAlias,
             adminNote: nil,
@@ -130,7 +159,6 @@ actor RelayBillingStore {
             grantIDs: [grantID],
             lastUsageAt: nil
         )
-        account.recalculateBalance(grants: state.grants)
 
         let device = RelayBillingDeviceRecord(
             deviceID: request.deviceID,

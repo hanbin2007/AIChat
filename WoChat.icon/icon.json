@@ -1,0 +1,40 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.13078,0.00359,0.68430,1.00000",
+      "display-p3:0.16474,0.67097,0.79855,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "sparkles.2.svg",
+          "name" : "sparkles.2",
+          "position" : {
+            "scale" : 35,
+            "translation-in-points" : [
+              47.373308460316366,
+              -36.90376513685749
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

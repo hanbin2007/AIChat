@@ -432,6 +432,12 @@ final class ChatStore: ObservableObject {
     @Published private(set) var globalPinnedMemories: [PinnedMemoryItem] = []
     @Published private(set) var promptPresets: [PromptPreset] = PromptPreset.builtInPresets
 
+    /// When `true`, streaming UI flushes are suppressed — the data keeps
+    /// accumulating in the `collectAssistantReplyStream` snapshot but no
+    /// `@Published` mutations reach SwiftUI, keeping the main thread free
+    /// for scroll rendering.
+    private(set) var isStreamingFlushSuppressed = false
+
     let configuration: AppConfiguration
     let storageDescription: String
     let deviceIdentity: WatchDeviceIdentity
@@ -1381,6 +1387,15 @@ final class ChatStore: ObservableObject {
 
         isGlobalAutoScrollEnabled = enabled
         defaults.set(enabled, forKey: DefaultsKeys.globalAutoScrollEnabled)
+    }
+
+    /// Toggle streaming flush suppression.  When suppressed, the
+    /// `collectAssistantReplyStream` `onFlush` callback becomes a
+    /// no-op, keeping the main thread free for scroll rendering.
+    /// The streaming snapshot keeps accumulating and will be pushed
+    /// on the next unsuppressed flush.
+    func setStreamingFlushSuppressed(_ suppressed: Bool) {
+        isStreamingFlushSuppressed = suppressed
     }
 
     func updateDefaultConversationModel(_ model: String) {
@@ -2790,9 +2805,13 @@ final class ChatStore: ObservableObject {
 
                 let streamedSnapshot = try await collectAssistantReplyStream(
                     from: aiService.streamReply(for: requestConversation),
-                    flushInterval: 0.05,
+                    flushInterval: 0.12,
                     persistenceInterval: Self.streamingProgressPersistenceInterval
                 ) { snapshot, shouldPersist in
+                    guard self.isStreamingFlushSuppressed == false else {
+                        return
+                    }
+
                     self.upsertAssistantMessage(
                         id: assistantMessageID,
                         in: conversationID,

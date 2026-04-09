@@ -11,6 +11,22 @@
 		D10000012F60000000000001 /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = D10000012F60000000000004 /* MarkdownView */; };
 		D10000012F60000000000002 /* MarkdownView in Frameworks */ = {isa = PBXBuildFile; productRef = D10000012F60000000000004 /* MarkdownView */; };
 		FD4A0A232F5C50E700E9D16E /* AIChat Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FD4A0A222F5C50E700E9D16E /* AIChat Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FD8A1CB42F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CB52F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CB62F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CB72F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CB82F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CB92F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CBA2F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CBB2F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CBC2F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CBD2F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CBE2F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CBF2F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CC02F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CC12F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
+		FD8A1CC22F796FD300F734A2 /* WoChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB32F796FD300F734A2 /* WoChat.icon */; };
+		FD8A1CC32F796FD300F734A2 /* StartNewChat.icon in Resources */ = {isa = PBXBuildFile; fileRef = FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,6 +107,8 @@
 		FD4A0A3B2F5C50E800E9D16E /* AIChat Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "AIChat Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0A562F5C50E800E9D16E /* AIChat Keygen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AIChat Keygen.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD4A0B482F5CFEC000E9D16E /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
+		FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = StartNewChat.icon; sourceTree = "<group>"; };
+		FD8A1CB32F796FD300F734A2 /* WoChat.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = WoChat.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -224,6 +242,8 @@
 				FD4A0A3E2F5C50E800E9D16E /* AIChat Watch AppUITests */,
 				C0D1F0013000000000000002 /* AIChat iOS AppUITests */,
 				FD4A0A1D2F5C50E700E9D16E /* Products */,
+				FD8A1CB22F796FD300F734A2 /* StartNewChat.icon */,
+				FD8A1CB32F796FD300F734A2 /* WoChat.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -508,6 +528,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CB82F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CB92F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -515,6 +537,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CBA2F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CBB2F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -522,6 +546,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CC22F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CC32F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -529,6 +555,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CB62F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CB72F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -536,6 +564,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CC02F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CC12F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -543,6 +573,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CB42F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CB52F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -550,6 +582,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CBC2F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CBD2F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -557,6 +591,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD8A1CBE2F796FD300F734A2 /* WoChat.icon in Resources */,
+				FD8A1CBF2F796FD300F734A2 /* StartNewChat.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -947,7 +983,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B1C2D3E40100000000000001 /* Debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = WoChat;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/AIChatWatchApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -992,7 +1028,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B1C2D3E40100000000000002 /* Release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = WoChat;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Config/AIChatWatchApp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1038,7 +1074,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B1C2D3E40100000000000001 /* Debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = WoChat;
 				CODE_SIGN_ENTITLEMENTS = Config/AIChat.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(APP_BUILD_VERSION)";
@@ -1064,7 +1100,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B1C2D3E40100000000000002 /* Release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = WoChat;
 				CODE_SIGN_ENTITLEMENTS = Config/AIChat.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(APP_BUILD_VERSION)";

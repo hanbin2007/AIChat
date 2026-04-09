@@ -41,6 +41,7 @@ private enum ConversationScrollLayout {
     static let autoScrollAnimationDuration: TimeInterval = 1.0
     static let suppressionDuration: TimeInterval = 1.05
     static let streamingRenderResumeDelayNanoseconds: UInt64 = 3_000_000_000
+    static let streamingAutoScrollThrottleInterval: TimeInterval = 0.3
 
     static var autoScrollAnimation: Animation {
         .timingCurve(0.18, 0.92, 0.22, 1.0, duration: autoScrollAnimationDuration)
@@ -98,6 +99,7 @@ struct ConversationDetailView: View {
     @State private var toolSettingsDraft: ToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
+    @State private var lastAutoScrollAt = Date.distantPast
     #if DEBUG
     @ObservedObject private var backgroundReplyDebugProbe = UITestBackgroundReplyDebugProbe.shared
     #endif
@@ -211,6 +213,7 @@ struct ConversationDetailView: View {
             initialHistoryLoadTask = nil
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
+            chatStore.setStreamingFlushSuppressed(false)
         }
         .animation(.easeOut(duration: 0.2), value: isComposerExpanded)
     }
@@ -997,6 +1000,7 @@ struct ConversationDetailView: View {
         isAutoScrollInterrupted = false
         autoScrollInvocationCount += 1
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(ConversationScrollLayout.suppressionDuration)
+        lastAutoScrollAt = Date.now
 
         if animated {
             withAnimation(ConversationScrollLayout.autoScrollAnimation) {
@@ -1061,6 +1065,11 @@ struct ConversationDetailView: View {
             return
         }
 
+        if force == false,
+           Date.now.timeIntervalSince(lastAutoScrollAt) < ConversationScrollLayout.streamingAutoScrollThrottleInterval {
+            return
+        }
+
         if let completedAutoScrollReplyMessageID,
            completedAutoScrollReplyMessageID == latestAssistantMessageID {
             scrollToReplyStart(with: proxy, animated: animated)
@@ -1103,6 +1112,7 @@ struct ConversationDetailView: View {
             suspendedStreamingRenderMessageID = nil
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
+            chatStore.setStreamingFlushSuppressed(false)
             scrollToAutoScrollTargetIfNeeded(
                 with: proxy,
                 animated: true,
@@ -1125,6 +1135,7 @@ struct ConversationDetailView: View {
         suspendedStreamingRenderMessageID = nil
         streamingRenderResumeTask?.cancel()
         streamingRenderResumeTask = nil
+        chatStore.setStreamingFlushSuppressed(false)
         scrollToAutoScrollTargetIfNeeded(
             with: proxy,
             animated: true,
@@ -1164,6 +1175,7 @@ struct ConversationDetailView: View {
         }
 
         suspendedStreamingRenderMessageID = streamingMessageID
+        chatStore.setStreamingFlushSuppressed(true)
         scheduleStreamingRenderResume(for: streamingMessageID)
     }
 
@@ -1182,6 +1194,7 @@ struct ConversationDetailView: View {
 
                 suspendedStreamingRenderMessageID = nil
                 streamingRenderResumeTask = nil
+                chatStore.setStreamingFlushSuppressed(false)
             }
         }
     }

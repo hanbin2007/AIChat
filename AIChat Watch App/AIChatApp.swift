@@ -282,6 +282,8 @@ private struct UITestBootstrap {
             return makeLatestMessageExpandedBootstrap()
         case "conversation_latest_thought_summary_collapsed":
             return makeLatestThoughtSummaryCollapsedBootstrap()
+        case "conversation_streaming_scroll_performance":
+            return makeStreamingScrollPerformanceBootstrap()
         default:
             return nil
         }
@@ -681,6 +683,68 @@ private struct UITestBootstrap {
         )
     }
 
+    private static func makeStreamingScrollPerformanceBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000408") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_403_000)
+        var messages: [ChatMessage] = []
+
+        let topMarker = "Touch Scroll Top Marker"
+        let bottomMarker = "Touch Scroll Bottom Marker"
+
+        for index in 1...10 {
+            let baseDate = seededDate.addingTimeInterval(Double(index * 60))
+            let userText = index == 1 ? topMarker : "Streaming scroll perf question \(index)"
+            let assistantText = index == 10 ?
+                bottomMarker :
+                """
+                Streaming scroll perf answer \(index)
+                Seeded padding line 2 ensures the transcript is tall enough for scrolling.
+                Seeded padding line 3 keeps the test deterministic.
+                """
+
+            messages.append(
+                ChatMessage(role: .user, text: userText, createdAt: baseDate)
+            )
+            messages.append(
+                ChatMessage(role: .assistant, text: assistantText, createdAt: baseDate.addingTimeInterval(20))
+            )
+        }
+
+        messages.append(
+            ChatMessage(
+                role: .user,
+                text: "Stream a long reply while I scroll up and down to stress-test hitch performance.",
+                createdAt: seededDate.addingTimeInterval(700)
+            )
+        )
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Streaming Scroll Performance",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(700),
+            isFavorite: false,
+            messages: messages
+        )
+
+        let store = ChatStore.previewStore(
+            conversations: [conversation],
+            aiService: UITestStreamingScrollStreamingService(),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider()
+        )
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await store.retryLatestReply(in: conversationID)
+        }
+
+        return UITestBootstrap(
+            store: store,
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
     private static func makeLongCollapsibleUITestReply(
         prefix: String,
         hiddenTailMarker: String,
@@ -1017,6 +1081,32 @@ private final class UITestBackgroundReplyCompletionFeedbackProvider: CompletionF
             event: event,
             deliveredInBackground: deliveredInBackground
         )
+    }
+}
+
+private struct UITestStreamingScrollStreamingService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                continuation.yield(.thoughtDelta("Preparing a rapid streaming reply for scroll-performance verification."))
+
+                for index in 1...30 {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                    continuation.yield(
+                        .answerDelta(
+                            "Streaming chunk \(index): padding text that grows the bubble while the UI test scrolls up and down to measure hitch ratio.\n"
+                        )
+                    )
+                }
+
+                continuation.finish()
+            }
+        }
     }
 }
 #endif
