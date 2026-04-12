@@ -38,17 +38,18 @@ private struct NewConversationWidgetView: View {
                 ZStack {
                     Circle()
                         .fill(Color.cyan.opacity(0.2))
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                    Image("StartNewChat")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
                 }
             case .accessoryInline:
-                Label("新对话", systemImage: "square.and.pencil")
+                Label { Text("新对话") } icon: { Image("StartNewChat").resizable().scaledToFit() }
             default:
                 HStack(spacing: 10) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                    Image("StartNewChat")
+                        .resizable()
+                        .scaledToFit()
                         .frame(width: 28, height: 28)
                         .background(
                             Circle()
