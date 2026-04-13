@@ -226,6 +226,7 @@ struct RelayAccountService {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
+            encoder.dateEncodingStrategy = .iso8601
             request.httpBody = try encoder.encode(body)
         }
 
