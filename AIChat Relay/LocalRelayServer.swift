@@ -8,6 +8,21 @@
 import Foundation
 import Network
 
+private struct RelayCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init(intValue: Int) {
+        self.stringValue = "\(intValue)"
+        self.intValue = intValue
+    }
+}
+
 actor LocalRelayServer {
     private let configurationProvider: @Sendable () async -> RelayRuntimeConfiguration
     private let eventHandler: @Sendable (RelayServerEvent) async -> Void
@@ -257,7 +272,7 @@ actor LocalRelayServer {
             }
 
             let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            decoder.keyDecodingStrategy = Self.snakeCaseKeyDecodingStrategy
 
             switch path {
             case "/v1/chat/stream":
@@ -584,7 +599,7 @@ actor LocalRelayServer {
         on connection: NWConnection
     ) async throws -> Bool {
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.keyDecodingStrategy = Self.snakeCaseKeyDecodingStrategy
 
         switch path {
         case "/v1/activation/bootstrap":
@@ -758,6 +773,31 @@ actor LocalRelayServer {
             "\r\n"
 
         try await send(Data(header.utf8), on: connection)
+    }
+
+    /// A key decoding strategy that converts snake_case JSON keys to camelCase
+    /// while correctly preserving common abbreviations (ID, URL, URI, API, USD).
+    /// Swift's built-in `.convertFromSnakeCase` lowercases abbreviations
+    /// (e.g. `device_id` → `deviceId` instead of `deviceID`), which causes
+    /// decoding failures for properties like `deviceID`, `accountID`, etc.
+    private static let snakeCaseKeyDecodingStrategy: JSONDecoder.KeyDecodingStrategy = .custom { codingPath in
+        guard let lastKey = codingPath.last else {
+            return RelayCodingKey(stringValue: "")
+        }
+        let key = lastKey.stringValue
+        guard key.contains("_") else {
+            return RelayCodingKey(stringValue: key)
+        }
+        let abbreviations: Set<String> = ["id", "url", "uri", "api", "usd"]
+        let segments = key.split(separator: "_").map(String.init)
+        guard let first = segments.first else {
+            return RelayCodingKey(stringValue: key)
+        }
+        let convertedFirst = abbreviations.contains(first) ? first.uppercased() : first
+        let rest = segments.dropFirst().map { segment in
+            abbreviations.contains(segment) ? segment.uppercased() : segment.capitalized
+        }
+        return RelayCodingKey(stringValue: convertedFirst + rest.joined())
     }
 
     private func sendJSON<T: Encodable>(
