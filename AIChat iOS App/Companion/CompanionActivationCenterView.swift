@@ -208,6 +208,14 @@ struct CompanionActivationCenterView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Button(requestAccessButtonTitle) {
+                Task {
+                    await requestManagedRelayAccess()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSubmitting || chatStore.relayBillingBusy)
+
             Button("刷新状态") {
                 Task {
                     await chatStore.refreshActivationState()
@@ -421,6 +429,43 @@ struct CompanionActivationCenterView: View {
         } catch {
             feedbackMessage = error.localizedDescription
         }
+    }
+
+    private var requestAccessButtonTitle: String {
+        guard let account = chatStore.relayAccountStatus?.account else {
+            return "申请试用"
+        }
+        return account.state == .active && account.creditBalance > 0 ? "刷新在线权限" : "重新申请使用"
+    }
+
+    private func requestManagedRelayAccess() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        do {
+            let status = try await chatStore.requestManagedRelayAccess()
+            feedbackMessage = relayAccessResultMessage(from: status)
+        } catch {
+            feedbackMessage = "申请失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func relayAccessResultMessage(from status: RelayAccountStatusResponse?) -> String {
+        guard let account = status?.account else {
+            return "申请已提交，但暂未返回账户状态。"
+        }
+
+        var parts = ["申请结果：\(accountStateText(account.state))", "余额 \(account.creditBalance) credits"]
+
+        if let expiration = account.creditExpiresAt {
+            parts.append("到期 \(expiration.formatted(date: .abbreviated, time: .shortened))")
+        }
+
+        if let note = account.adminNote?.nonEmptyTrimmed {
+            parts.append(note)
+        }
+
+        return parts.joined(separator: " • ")
     }
 
     private func restoreRelayPurchases() async {
