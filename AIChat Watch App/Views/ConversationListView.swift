@@ -193,8 +193,9 @@ struct ConversationListView: View {
                     isShowingActivationCenter = true
                 } else {
                     Task {
-                        let newConversationID = await chatStore.createConversation()
-                        navigationPath = [newConversationID]
+                        if let newConversationID = await chatStore.createConversation() {
+                            navigationPath = [newConversationID]
+                        }
                     }
                 }
             } label: {

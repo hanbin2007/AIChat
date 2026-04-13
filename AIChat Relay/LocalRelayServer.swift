@@ -600,6 +600,7 @@ actor LocalRelayServer {
     ) async throws -> Bool {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = Self.snakeCaseKeyDecodingStrategy
+        decoder.dateDecodingStrategy = .iso8601
 
         switch path {
         case "/v1/activation/bootstrap":
@@ -806,6 +807,7 @@ actor LocalRelayServer {
         on connection: NWConnection
     ) async throws {
         let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
         let body = try encoder.encode(payload)
         let header =
             "HTTP/1.1 \(statusCode) \(reasonPhrase(for: statusCode))\r\n" +

@@ -55,8 +55,9 @@ struct ContentView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task {
-                                let newConversationID = await chatStore.createConversation()
-                                navigationPath = [newConversationID]
+                                if let newConversationID = await chatStore.createConversation() {
+                                    navigationPath = [newConversationID]
+                                }
                             }
                         } label: {
                             Image(systemName: "square.and.pencil")
@@ -128,9 +129,10 @@ struct ContentView: View {
             }
 
             Task {
-                let conversationID = await chatStore.createConversation()
-                await MainActor.run {
-                    navigationPath = [conversationID]
+                if let conversationID = await chatStore.createConversation() {
+                    await MainActor.run {
+                        navigationPath = [conversationID]
+                    }
                 }
             }
         }

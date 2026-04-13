@@ -624,10 +624,6 @@ final class ChatStore: ObservableObject {
             return false
         }
 
-        if configuration.relayBearerToken != nil {
-            return true
-        }
-
         guard let account = relayAccountStatus?.account,
               let key = relayAccountStatus?.key
         else {
@@ -966,7 +962,11 @@ final class ChatStore: ObservableObject {
         #endif
     }
 
-    func createConversation() async -> UUID {
+    func createConversation() async -> UUID? {
+        guard isReadOnlyMode == false else {
+            return nil
+        }
+
         let conversation = ConversationThread.empty(
             aiConfiguration: defaultConversationConfiguration
         )
@@ -1742,6 +1742,16 @@ final class ChatStore: ObservableObject {
             return
         }
 
+        let currentConversation = conversation(id: conversationID)
+        let effectiveAIConfiguration = licensedConfiguration(
+            from: currentConversation?.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
+                ?? defaultConversationConfiguration
+        )
+        if let activationMessage = activationFailureMessage(for: effectiveAIConfiguration.model) {
+            conversationErrors[conversationID] = activationMessage
+            return
+        }
+
         let draft = ConversationDraft(text: "", attachments: [audioAttachment])
         await runSendTask(for: conversationID) { store in
             await store.send(draft: draft, in: conversationID, clearStoredDraft: false)
@@ -2358,17 +2368,19 @@ final class ChatStore: ObservableObject {
                 return nil
             }
 
-            if let account = relayAccountStatus?.account {
-                switch account.state {
-                case .active:
-                    return account.creditBalance > 0 ? nil : "在线额度已用尽。"
-                case .paused:
-                    return "当前 relay key 已在服务端暂停。"
-                case .expired:
-                    return "订阅或 credit 已过期。"
-                case .inactive:
-                    return "当前设备尚未完成在线激活。"
-                }
+            guard let account = relayAccountStatus?.account else {
+                return "正在验证在线状态，请稍候…"
+            }
+
+            switch account.state {
+            case .active:
+                return account.creditBalance > 0 ? nil : "在线额度已用尽。"
+            case .paused:
+                return "当前 relay key 已在服务端暂停。"
+            case .expired:
+                return "订阅或 credit 已过期。"
+            case .inactive:
+                return "当前设备尚未完成在线激活。"
             }
         }
 
@@ -3098,10 +3110,6 @@ final class ChatStore: ObservableObject {
             return false
         }
 
-        if configuration.relayBearerToken != nil {
-            return true
-        }
-
         guard let account = status?.account,
               let key = status?.key
         else {
@@ -3113,7 +3121,6 @@ final class ChatStore: ObservableObject {
 
     private func shareManagedRelayAccessToCompanionIfPossible() async {
         guard configuration.backendMode == .relay,
-              configuration.relayBearerToken == nil,
               canTransferActivationCodeToPairedWatch,
               isManagedRelayAccessActive(for: relayAccountStatus)
         else {

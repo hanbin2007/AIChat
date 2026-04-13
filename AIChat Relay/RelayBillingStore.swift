@@ -122,20 +122,9 @@ actor RelayBillingStore {
                 }
             }
 
-            return RelayAccountStatusResponse(
-                account: nil,
-                device: RelayDeviceSummary(
-                    deviceID: request.deviceID,
-                    platform: request.platform,
-                    alias: request.deviceAlias,
-                    note: nil,
-                    keyID: nil,
-                    lastSeenAt: .now
-                ),
-                key: nil,
-                grants: [],
-                recentUsage: []
-            )
+            // The trial claim references a grant or account that no longer exists.
+            // Clean up the stale claim so a fresh trial can be issued below.
+            state.trialClaims.removeValue(forKey: request.deviceID)
         }
 
         let accountID = UUID()

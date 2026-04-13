@@ -168,12 +168,27 @@ actor ConversationRepository {
         let context = try makeContext()
         try prepareStoreIfNeeded(in: context)
 
-        for record in try context.fetch(FetchDescriptor<GlobalPinnedMemoryRecord>()) {
+        let existingRecords = try context.fetch(FetchDescriptor<GlobalPinnedMemoryRecord>())
+        let existingByID = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.id, $0) })
+        let incomingByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+
+        // Delete records no longer in the incoming set.
+        for record in existingRecords where incomingByID[record.id] == nil {
             context.delete(record)
         }
 
+        // Update existing records in-place or insert new ones.
         for item in items {
-            context.insert(try makeGlobalPinnedMemoryRecord(from: item))
+            if let record = existingByID[item.id] {
+                let newRecord = try makeGlobalPinnedMemoryRecord(from: item)
+                record.text = newRecord.text
+                record.keywordsData = newRecord.keywordsData
+                record.scopeRawValue = newRecord.scopeRawValue
+                record.sourceMessageIDsData = newRecord.sourceMessageIDsData
+                record.updatedAt = newRecord.updatedAt
+            } else {
+                context.insert(try makeGlobalPinnedMemoryRecord(from: item))
+            }
         }
 
         try context.save()
@@ -192,12 +207,27 @@ actor ConversationRepository {
         let context = try makeContext()
         try prepareStoreIfNeeded(in: context)
 
-        for record in try context.fetch(FetchDescriptor<PromptPresetRecord>()) {
+        let existingRecords = try context.fetch(FetchDescriptor<PromptPresetRecord>())
+        let existingByID = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.id, $0) })
+        let incomingByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+
+        // Delete records that are no longer in the incoming set.
+        for record in existingRecords where incomingByID[record.id] == nil {
             context.delete(record)
         }
 
+        // Update existing records in-place or insert new ones.
         for item in items {
-            context.insert(makePromptPresetRecord(from: item))
+            if let record = existingByID[item.id] {
+                record.kindRawValue = item.kind.rawValue
+                record.title = item.title
+                record.content = item.content
+                record.isBuiltIn = item.isBuiltIn
+                record.createdAt = item.createdAt
+                record.updatedAt = item.updatedAt
+            } else {
+                context.insert(makePromptPresetRecord(from: item))
+            }
         }
 
         try context.save()
@@ -215,12 +245,21 @@ actor ConversationRepository {
         let context = try makeContext()
         try prepareStoreIfNeeded(in: context)
 
-        for record in try context.fetch(FetchDescriptor<DeletedConversationTombstoneRecord>()) {
+        let existingRecords = try context.fetch(FetchDescriptor<DeletedConversationTombstoneRecord>())
+        let existingByID = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.id, $0) })
+
+        // Delete records no longer in the incoming set.
+        for record in existingRecords where items[record.id] == nil {
             context.delete(record)
         }
 
+        // Update existing records in-place or insert new ones.
         for item in items {
-            context.insert(DeletedConversationTombstoneRecord(id: item.key, deletedAt: item.value))
+            if let record = existingByID[item.key] {
+                record.deletedAt = item.value
+            } else {
+                context.insert(DeletedConversationTombstoneRecord(id: item.key, deletedAt: item.value))
+            }
         }
 
         try context.save()

@@ -1674,7 +1674,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
             suggestedFilename: "voice.wav",
@@ -1726,7 +1727,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
             suggestedFilename: "voice.wav",
@@ -1775,7 +1777,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Keep the first instruction", for: conversationID)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x04, 0x05, 0x06]),
@@ -1829,7 +1832,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Keep this draft", for: conversationID)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x11, 0x22, 0x33]),
@@ -1890,7 +1894,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
 
         store.updateDraftText("First prompt", for: conversationID)
         await store.sendMessage(in: conversationID)
@@ -1939,7 +1944,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Ping", for: conversationID)
 
         await store.sendMessage(in: conversationID)
@@ -1995,7 +2001,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
             suggestedFilename: "voice.wav",
@@ -2139,7 +2146,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         store.updateDefaultConversationThinkingIntensity(.deep)
         store.updateDefaultConversationSystemPrompt("Answer like a release manager.")
 
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let conversation = try XCTUnwrap(store.conversation(id: conversationID))
 
         XCTAssertEqual(conversation.aiConfiguration?.model, "gemini-3.1-pro-preview")
@@ -2193,7 +2201,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
             suggestedFilename: "voice.wav",
@@ -2297,7 +2306,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await store.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         await store.renameConversation(id: conversationID, title: "Delete Me")
         let deletedConversation = try XCTUnwrap(store.conversation(id: conversationID))
 
@@ -2436,7 +2446,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await watchStore.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await watchStore.createConversation()
+        let conversationIDOrNil = await watchStore.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
         let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
@@ -2530,7 +2541,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await watchStore.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await watchStore.createConversation()
+        let conversationIDOrNil = await watchStore.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
         let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
@@ -2688,7 +2700,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await store.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Remember that I prefer concise release notes.", for: conversationID)
 
         let sendTask = Task {
@@ -2763,7 +2776,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await store.applyActivationCode(activationCode, now: now)
 
-        let sourceConversationID = await store.createConversation()
+        let sourceConversationIDOrNil = await store.createConversation()
+        let sourceConversationID = try XCTUnwrap(sourceConversationIDOrNil)
         store.updateDraftText("记住我是高二理科生。", for: sourceConversationID)
         await store.sendMessage(in: sourceConversationID)
 
@@ -2771,12 +2785,14 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let sourceMessageID = try XCTUnwrap(sourceConversation.messages.first(where: { $0.role == .user })?.id)
         await store.pinMessage(id: sourceMessageID, from: sourceConversationID, scope: .global)
 
-        let localOnlyConversationID = await store.createConversation()
+        let localOnlyConversationIDOrNil = await store.createConversation()
+        let localOnlyConversationID = try XCTUnwrap(localOnlyConversationIDOrNil)
         store.updateDraftText("我们先随便聊聊。", for: localOnlyConversationID)
         await store.sendMessage(in: localOnlyConversationID)
         XCTAssertTrue(aiService.conversations.last?.pinnedMemories.isEmpty == true)
 
-        let globalMemoryConversationID = await store.createConversation()
+        let globalMemoryConversationIDOrNil = await store.createConversation()
+        let globalMemoryConversationID = try XCTUnwrap(globalMemoryConversationIDOrNil)
         await store.updateUsesGlobalPinnedMemory(true, for: globalMemoryConversationID)
         store.updateDraftText("继续聊今天的计划。", for: globalMemoryConversationID)
         await store.sendMessage(in: globalMemoryConversationID)
@@ -2824,7 +2840,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await store.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.setGoogleSearchEnabled(true, for: conversationID)
         store.setCodeExecutionEnabled(true, for: conversationID)
 
@@ -2895,7 +2912,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Retry this send", for: conversationID)
 
         await store.sendMessage(in: conversationID)
@@ -2948,7 +2966,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Retry this answer", for: conversationID)
 
         await store.sendMessage(in: conversationID)
@@ -3001,7 +3020,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
             )
         )
         try await store.applyActivationCode(activationCode, now: now)
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Stop this answer", for: conversationID)
 
         let sendTask = Task {
@@ -3075,7 +3095,8 @@ final class AIChat_Watch_AppTests: XCTestCase {
         )
         try await store.applyActivationCode(activationCode, now: now)
 
-        let conversationID = await store.createConversation()
+        let conversationIDOrNil = await store.createConversation()
+        let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Persist this answer", for: conversationID)
 
         let sendTask = Task {

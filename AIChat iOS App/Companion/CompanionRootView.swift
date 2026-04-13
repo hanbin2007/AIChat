@@ -100,9 +100,10 @@ struct CompanionRootView: View {
 
     private func createConversation() {
         Task {
-            let conversationID = await chatStore.createConversation()
-            await MainActor.run {
-                selectedConversationID = conversationID
+            if let conversationID = await chatStore.createConversation() {
+                await MainActor.run {
+                    selectedConversationID = conversationID
+                }
             }
         }
     }

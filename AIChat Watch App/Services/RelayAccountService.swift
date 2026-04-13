@@ -307,6 +307,7 @@ struct RelayAccountService {
     ) throws -> T {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
 
         do {
             return try decoder.decode(T.self, from: data)
@@ -316,6 +317,7 @@ struct RelayAccountService {
             }
 
             let fallbackDecoder = JSONDecoder()
+            fallbackDecoder.dateDecodingStrategy = .iso8601
             do {
                 return try fallbackDecoder.decode(T.self, from: normalizedData)
             } catch {
