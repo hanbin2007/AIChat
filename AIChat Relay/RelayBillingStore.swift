@@ -540,6 +540,35 @@ actor RelayBillingStore {
         )
     }
 
+    /// Resolve the authoritative account / device / key metadata for an
+    /// authorized client, optionally attaching the request's model ID. This is
+    /// the bridge that lets the console filter surface user-level filters
+    /// (display name, admin notes, device alias/note, etc.) without
+    /// duplicating the billing state on the UI layer.
+    func metadata(
+        for authorized: RelayAuthorizedKeyContext,
+        modelID: String? = nil
+    ) -> RelayActorContext {
+        let accountRecord = state.accounts[authorized.accountID]
+        let deviceRecord = state.devices[authorized.deviceID]
+        let keyRecord = state.keys[authorized.keyID]
+        let trimmedModelID = modelID?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return RelayActorContext(
+            accountID: authorized.accountID,
+            accountDisplayName: accountRecord?.displayName,
+            accountNote: accountRecord?.adminNote,
+            deviceID: authorized.deviceID,
+            deviceAlias: deviceRecord?.alias,
+            deviceNote: deviceRecord?.note,
+            devicePlatform: deviceRecord?.platform,
+            keyID: authorized.keyID,
+            keyNote: keyRecord?.note,
+            modelID: (trimmedModelID?.isEmpty == false) ? trimmedModelID : nil,
+            accessSource: authorized.source
+        )
+    }
+
     func modifyAccount(
         accountID: UUID,
         displayName: String?,

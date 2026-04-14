@@ -488,50 +488,90 @@ final class RelayServerController: ObservableObject {
         case .didStop:
             status = .stopped
             startedAt = nil
-            appendLog(level: .info, message: "Relay server stopped.")
+            appendLog(
+                level: .info,
+                category: .lifecycle,
+                message: "Relay server stopped."
+            )
             showFeedback(
                 title: "Relay Stopped",
                 message: "The local relay listener has been stopped.",
                 style: .info
             )
-        case .didReceiveRequest(let path, let remoteAddress):
+        case let .didReceiveRequest(path, method, remoteAddress, context):
             requestCount += 1
             lastRequestAt = .now
-            appendLog(level: .info, message: requestLogMessage(prefix: "Received", path: path, remoteAddress: remoteAddress))
+            appendLog(
+                level: .info,
+                category: .request,
+                message: requestLogMessage(prefix: "Received", path: path, remoteAddress: remoteAddress),
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                context: context
+            )
             Task {
                 await refreshBillingSnapshot()
             }
-        case .didCompleteRequest(let path, let remoteAddress):
+        case let .didCompleteRequest(path, method, remoteAddress, context):
             completedRequestCount += 1
-            appendLog(level: .success, message: requestLogMessage(prefix: "Completed", path: path, remoteAddress: remoteAddress))
+            appendLog(
+                level: .success,
+                category: .completed,
+                message: requestLogMessage(prefix: "Completed", path: path, remoteAddress: remoteAddress),
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: 200,
+                context: context
+            )
             Task {
                 await refreshBillingSnapshot()
             }
-        case .didFailRequest(let path, let remoteAddress, let statusCode, let message):
+        case let .didFailRequest(path, method, remoteAddress, statusCode, message, context):
             let level: RelayLogLevel = statusCode >= 500 ? .error : .warning
             failedRequestCount += 1
             lastFailureAt = .now
             lastFailureMessage = message
             appendLog(
                 level: level,
+                category: .failure,
                 message: requestLogMessage(
                     prefix: "Failed [\(statusCode)]",
                     path: path,
                     remoteAddress: remoteAddress,
                     suffix: message
-                )
+                ),
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: statusCode,
+                context: context
             )
             Task {
                 await refreshBillingSnapshot()
             }
         case .debug(let event):
             appendDebug(event)
-        case .log(let level, let message):
-            appendLog(level: level, message: message)
+        case let .log(level, message, category, method, path, remoteAddress, statusCode, context):
+            appendLog(
+                level: level,
+                category: category,
+                message: message,
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: statusCode,
+                context: context
+            )
         case .listenerFailed(let message):
             status = .failed(message)
             startedAt = nil
-            appendLog(level: .error, message: "Listener failed: \(message)")
+            appendLog(
+                level: .error,
+                category: .lifecycle,
+                message: "Listener failed: \(message)"
+            )
             showFeedback(
                 title: "Relay Failed",
                 message: message,
@@ -540,17 +580,32 @@ final class RelayServerController: ObservableObject {
         }
     }
 
-    private func appendLog(level: RelayLogLevel, message: String) {
+    private func appendLog(
+        level: RelayLogLevel,
+        category: RelayLogCategory = .system,
+        message: String,
+        method: String? = nil,
+        path: String? = nil,
+        remoteAddress: String? = nil,
+        statusCode: Int? = nil,
+        context: RelayActorContext? = nil
+    ) {
         logEntries.append(
             RelayLogEntry(
                 timestamp: .now,
                 level: level,
-                message: message
+                category: category,
+                message: message,
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: statusCode,
+                context: context
             )
         )
 
-        if logEntries.count > 200 {
-            logEntries.removeFirst(logEntries.count - 200)
+        if logEntries.count > 500 {
+            logEntries.removeFirst(logEntries.count - 500)
         }
     }
 
@@ -566,12 +621,13 @@ final class RelayServerController: ObservableObject {
                 path: event.path,
                 address: event.address,
                 statusCode: event.statusCode,
-                body: event.body
+                body: event.body,
+                context: event.context
             )
         )
 
-        if debugEntries.count > 150 {
-            debugEntries.removeFirst(debugEntries.count - 150)
+        if debugEntries.count > 300 {
+            debugEntries.removeFirst(debugEntries.count - 300)
         }
     }
 
