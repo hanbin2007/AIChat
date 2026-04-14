@@ -7,18 +7,195 @@
 
 import Foundation
 
-enum RelayLogLevel: String, Codable, Sendable {
+enum RelayLogLevel: String, Codable, CaseIterable, Sendable {
     case info
     case success
     case warning
     case error
+
+    var displayName: String {
+        switch self {
+        case .info:
+            return "Info"
+        case .success:
+            return "Success"
+        case .warning:
+            return "Warning"
+        case .error:
+            return "Error"
+        }
+    }
+}
+
+enum RelayLogCategory: String, Codable, CaseIterable, Sendable {
+    case lifecycle
+    case request
+    case completed
+    case failure
+    case billing
+    case usage
+    case system
+
+    var displayName: String {
+        switch self {
+        case .lifecycle:
+            return "Lifecycle"
+        case .request:
+            return "Request"
+        case .completed:
+            return "Completed"
+        case .failure:
+            return "Failure"
+        case .billing:
+            return "Billing"
+        case .usage:
+            return "Usage"
+        case .system:
+            return "System"
+        }
+    }
+}
+
+/// Structured actor context captured alongside a log or debug entry so that the
+/// operator can filter by the downstream identities involved in a relay
+/// transaction. All fields are optional because lifecycle / system events have
+/// no associated actor.
+struct RelayActorContext: Equatable, Sendable, Hashable {
+    var accountID: UUID?
+    var accountDisplayName: String?
+    var accountNote: String?
+    var deviceID: String?
+    var deviceAlias: String?
+    var deviceNote: String?
+    var devicePlatform: RelayDevicePlatform?
+    var keyID: UUID?
+    var keyNote: String?
+    var modelID: String?
+    var accessSource: RelayAccessSource?
+
+    init(
+        accountID: UUID? = nil,
+        accountDisplayName: String? = nil,
+        accountNote: String? = nil,
+        deviceID: String? = nil,
+        deviceAlias: String? = nil,
+        deviceNote: String? = nil,
+        devicePlatform: RelayDevicePlatform? = nil,
+        keyID: UUID? = nil,
+        keyNote: String? = nil,
+        modelID: String? = nil,
+        accessSource: RelayAccessSource? = nil
+    ) {
+        self.accountID = accountID
+        self.accountDisplayName = accountDisplayName
+        self.accountNote = accountNote
+        self.deviceID = deviceID
+        self.deviceAlias = deviceAlias
+        self.deviceNote = deviceNote
+        self.devicePlatform = devicePlatform
+        self.keyID = keyID
+        self.keyNote = keyNote
+        self.modelID = modelID
+        self.accessSource = accessSource
+    }
+
+    var isEmpty: Bool {
+        accountID == nil && deviceID == nil && keyID == nil && modelID == nil
+    }
+
+    var accountDisplayTitle: String? {
+        if let displayName = RelayContextString.trimmedNonEmpty(accountDisplayName) {
+            return displayName
+        }
+        return accountID.map { "Account " + RelayContextString.shortID($0.uuidString) }
+    }
+
+    var deviceDisplayTitle: String? {
+        if let alias = RelayContextString.trimmedNonEmpty(deviceAlias) {
+            return alias
+        }
+        return deviceID.map { "Device " + RelayContextString.shortID($0) }
+    }
+
+    var keyDisplayTitle: String? {
+        if let note = RelayContextString.trimmedNonEmpty(keyNote) {
+            return note
+        }
+        return keyID.map { "Key " + RelayContextString.shortID($0.uuidString) }
+    }
+
+    var notesBlob: String {
+        [accountNote, deviceNote, keyNote]
+            .compactMap { RelayContextString.trimmedNonEmpty($0) }
+            .joined(separator: " · ")
+    }
+
+    var searchHaystack: String {
+        [
+            accountID?.uuidString,
+            accountDisplayName,
+            accountNote,
+            deviceID,
+            deviceAlias,
+            deviceNote,
+            devicePlatform?.rawValue,
+            keyID?.uuidString,
+            keyNote,
+            modelID,
+            accessSource?.rawValue
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+    }
+}
+
+enum RelayContextString {
+    static func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func shortID(_ value: String) -> String {
+        let sanitized = value.replacingOccurrences(of: "-", with: "")
+        let prefix = sanitized.prefix(8)
+        return String(prefix)
+    }
 }
 
 struct RelayLogEntry: Identifiable, Equatable, Sendable {
     let id = UUID()
     let timestamp: Date
     let level: RelayLogLevel
+    let category: RelayLogCategory
     let message: String
+    let method: String?
+    let path: String?
+    let remoteAddress: String?
+    let statusCode: Int?
+    let context: RelayActorContext?
+
+    init(
+        timestamp: Date,
+        level: RelayLogLevel,
+        category: RelayLogCategory = .system,
+        message: String,
+        method: String? = nil,
+        path: String? = nil,
+        remoteAddress: String? = nil,
+        statusCode: Int? = nil,
+        context: RelayActorContext? = nil
+    ) {
+        self.timestamp = timestamp
+        self.level = level
+        self.category = category
+        self.message = message
+        self.method = method
+        self.path = path
+        self.remoteAddress = remoteAddress
+        self.statusCode = statusCode
+        self.context = context
+    }
 }
 
 enum RelayDebugSource: String, Codable, CaseIterable, Sendable {
@@ -58,6 +235,37 @@ struct RelayDebugEvent: Equatable, Sendable {
     let address: String?
     let statusCode: Int?
     let body: String
+    var context: RelayActorContext?
+
+    init(
+        source: RelayDebugSource,
+        kind: RelayDebugKind,
+        title: String,
+        summary: String,
+        method: String?,
+        path: String?,
+        address: String?,
+        statusCode: Int?,
+        body: String,
+        context: RelayActorContext? = nil
+    ) {
+        self.source = source
+        self.kind = kind
+        self.title = title
+        self.summary = summary
+        self.method = method
+        self.path = path
+        self.address = address
+        self.statusCode = statusCode
+        self.body = body
+        self.context = context
+    }
+
+    func withContext(_ context: RelayActorContext?) -> RelayDebugEvent {
+        var copy = self
+        copy.context = context
+        return copy
+    }
 }
 
 struct RelayDebugEntry: Identifiable, Equatable, Sendable {
@@ -72,6 +280,33 @@ struct RelayDebugEntry: Identifiable, Equatable, Sendable {
     let address: String?
     let statusCode: Int?
     let body: String
+    let context: RelayActorContext?
+
+    init(
+        timestamp: Date,
+        source: RelayDebugSource,
+        kind: RelayDebugKind,
+        title: String,
+        summary: String,
+        method: String?,
+        path: String?,
+        address: String?,
+        statusCode: Int?,
+        body: String,
+        context: RelayActorContext? = nil
+    ) {
+        self.timestamp = timestamp
+        self.source = source
+        self.kind = kind
+        self.title = title
+        self.summary = summary
+        self.method = method
+        self.path = path
+        self.address = address
+        self.statusCode = statusCode
+        self.body = body
+        self.context = context
+    }
 }
 
 struct RelayEndpoint: Identifiable, Equatable, Sendable {
@@ -118,11 +353,27 @@ enum RelayServerStatus: Equatable {
 enum RelayServerEvent: Sendable {
     case didStart(port: UInt16)
     case didStop
-    case didReceiveRequest(path: String, remoteAddress: String?)
-    case didCompleteRequest(path: String, remoteAddress: String?)
-    case didFailRequest(path: String, remoteAddress: String?, statusCode: Int, message: String)
+    case didReceiveRequest(path: String, method: String?, remoteAddress: String?, context: RelayActorContext?)
+    case didCompleteRequest(path: String, method: String?, remoteAddress: String?, context: RelayActorContext?)
+    case didFailRequest(
+        path: String,
+        method: String?,
+        remoteAddress: String?,
+        statusCode: Int,
+        message: String,
+        context: RelayActorContext?
+    )
     case debug(RelayDebugEvent)
-    case log(level: RelayLogLevel, message: String)
+    case log(
+        level: RelayLogLevel,
+        message: String,
+        category: RelayLogCategory,
+        method: String?,
+        path: String?,
+        remoteAddress: String?,
+        statusCode: Int?,
+        context: RelayActorContext?
+    )
     case listenerFailed(message: String)
 }
 

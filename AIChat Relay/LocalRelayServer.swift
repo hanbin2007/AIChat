@@ -117,7 +117,10 @@ actor LocalRelayServer {
         case .ready:
             let configuration = await configurationProvider()
             await eventHandler(.didStart(port: configuration.port))
-            await eventHandler(.log(level: .success, message: "Relay is listening on port \(configuration.port)."))
+            await emitLifecycleLog(
+                level: .success,
+                message: "Relay is listening on port \(configuration.port)."
+            )
         case .failed(let error):
             listener = nil
             await eventHandler(.listenerFailed(message: error.localizedDescription))
@@ -136,9 +139,17 @@ actor LocalRelayServer {
 
             let request = try await readRequest(from: connection)
             let path = request.path
+            let method = request.method
             let remoteAddress = remoteAddressDescription(for: connection)
             let configuration = await configurationProvider()
-            await eventHandler(.didReceiveRequest(path: path, remoteAddress: remoteAddress))
+            await eventHandler(
+                .didReceiveRequest(
+                    path: path,
+                    method: method,
+                    remoteAddress: remoteAddress,
+                    context: nil
+                )
+            )
             await logDebugRequestIfNeeded(
                 request,
                 path: path,
@@ -152,7 +163,7 @@ actor LocalRelayServer {
                     payload: ["ok": true],
                     on: connection
                 )
-                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                await markSuccessfulRequest(path: path, method: method, remoteAddress: remoteAddress)
                 return
             }
 
@@ -162,20 +173,35 @@ actor LocalRelayServer {
                     payload: await billingStore.catalogResponse(),
                     on: connection
                 )
-                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                await markSuccessfulRequest(path: path, method: method, remoteAddress: remoteAddress)
                 return
             }
 
             if request.method == "GET", path == "/v1/account/status" {
+                let statusClientKey = bearerToken(from: request.headers)
+                let statusClientContext: RelayAuthorizedKeyContext? = if let statusClientKey {
+                    await billingStore.authorize(clientKey: statusClientKey)
+                } else {
+                    nil
+                }
                 try await sendJSON(
                     statusCode: 200,
                     payload: await billingStore.accountStatus(
-                        clientKey: bearerToken(from: request.headers),
+                        clientKey: statusClientKey,
                         deviceID: request.headers["x-aichat-device-id"]?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ),
                     on: connection
                 )
-                await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                var resolvedContext: RelayActorContext?
+                if let statusClientContext {
+                    resolvedContext = await billingStore.metadata(for: statusClientContext, modelID: nil)
+                }
+                await markSuccessfulRequest(
+                    path: path,
+                    method: method,
+                    remoteAddress: remoteAddress,
+                    context: resolvedContext
+                )
                 return
             }
 
@@ -184,6 +210,7 @@ actor LocalRelayServer {
                     statusCode: 404,
                     message: "Not found.",
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -194,6 +221,7 @@ actor LocalRelayServer {
                 if try await handleBillingRouteIfNeeded(
                     request: request,
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 ) {
@@ -204,6 +232,7 @@ actor LocalRelayServer {
                     statusCode: error.statusCode,
                     message: error.message,
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -214,6 +243,7 @@ actor LocalRelayServer {
                     statusCode: relayError.statusCode,
                     message: relayError.message,
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -225,6 +255,7 @@ actor LocalRelayServer {
                     statusCode: 404,
                     message: "Not found.",
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -236,6 +267,7 @@ actor LocalRelayServer {
                     statusCode: RelayHTTPError.missingConfiguration("Gemini API key is missing.").statusCode,
                     message: "Gemini API key is missing.",
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -247,6 +279,7 @@ actor LocalRelayServer {
                     statusCode: RelayHTTPError.missingConfiguration("Relay bearer token is missing.").statusCode,
                     message: "Relay bearer token is missing.",
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -265,6 +298,7 @@ actor LocalRelayServer {
                     statusCode: RelayHTTPError.unauthorized.statusCode,
                     message: RelayHTTPError.unauthorized.message,
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
@@ -280,11 +314,19 @@ actor LocalRelayServer {
                 do {
                     relayRequest = try decoder.decode(RelayChatRequest.self, from: request.body)
                 } catch {
+                    let earlyContext: RelayActorContext?
+                    if let clientAuthorized {
+                        earlyContext = await billingStore.metadata(for: clientAuthorized, modelID: nil)
+                    } else {
+                        earlyContext = nil
+                    }
                     try await sendFailureResponse(
                         statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
                         message: "Invalid JSON body.",
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: earlyContext,
                         on: connection
                     )
                     return
@@ -295,6 +337,12 @@ actor LocalRelayServer {
                     ? relayRequest.model!
                     : "gemini-3-flash-preview"
                 let usageBox = UsageSnapshotBox()
+                let actorContext: RelayActorContext?
+                if let clientAuthorized {
+                    actorContext = await billingStore.metadata(for: clientAuthorized, modelID: resolvedModelID)
+                } else {
+                    actorContext = nil
+                }
 
                 do {
                     let reservationEstimate: RelayUsageReservationEstimate?
@@ -330,7 +378,7 @@ actor LocalRelayServer {
                     try await relayBridge.streamChat(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
-                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled),
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled, context: actorContext),
                         onOpen: {
                             streamState.didOpen = true
                             try await self.sendSSEHeaders(on: connection)
@@ -352,13 +400,20 @@ actor LocalRelayServer {
                         searchCount: relayRequest.usesGoogleSearch == true ? 1 : 0,
                         usesAudioInput: false
                     )
-                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                    await markSuccessfulRequest(
+                        path: path,
+                        method: method,
+                        remoteAddress: remoteAddress,
+                        context: actorContext
+                    )
                 } catch let error as RelayHTTPError {
                     await markFailedRequest(
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
                         statusCode: error.statusCode,
-                        message: error.message
+                        message: error.message,
+                        context: actorContext
                     )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(error.message).data(), on: connection)
@@ -374,9 +429,11 @@ actor LocalRelayServer {
                     let relayError = RelayHTTPError.internalError(error.localizedDescription)
                     await markFailedRequest(
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
                         statusCode: relayError.statusCode,
-                        message: relayError.message
+                        message: relayError.message,
+                        context: actorContext
                     )
                     if streamState.didOpen {
                         try? await send(RelayOutboundEvent.error(relayError.message).data(), on: connection)
@@ -394,14 +451,32 @@ actor LocalRelayServer {
                 do {
                     relayRequest = try decoder.decode(RelayTranscriptionRequest.self, from: request.body)
                 } catch {
+                    let earlyContext: RelayActorContext?
+                    if let clientAuthorized {
+                        earlyContext = await billingStore.metadata(for: clientAuthorized, modelID: nil)
+                    } else {
+                        earlyContext = nil
+                    }
                     try await sendFailureResponse(
                         statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
                         message: "Invalid JSON body.",
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: earlyContext,
                         on: connection
                     )
                     return
+                }
+
+                let transcriptionModelID = relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? relayRequest.model!
+                    : "gemini-3-flash-preview"
+                let transcriptionContext: RelayActorContext?
+                if let clientAuthorized {
+                    transcriptionContext = await billingStore.metadata(for: clientAuthorized, modelID: transcriptionModelID)
+                } else {
+                    transcriptionContext = nil
                 }
 
                 do {
@@ -410,7 +485,7 @@ actor LocalRelayServer {
                         let estimatedInputTokens = try await relayBridge.estimateTranscriptionInputTokens(
                             relayRequest: relayRequest,
                             apiKey: configuration.geminiAPIKey,
-                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled, context: transcriptionContext)
                         )
                         let reservedCredits = await billingStore.creditsForUsage(
                             modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -438,7 +513,7 @@ actor LocalRelayServer {
                     let (relayResponse, upstreamUsage) = try await relayBridge.transcribeAudio(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
-                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled, context: transcriptionContext)
                     )
 
                     try await sendJSON(
@@ -451,26 +526,32 @@ actor LocalRelayServer {
                         path: path,
                         statusCode: 200,
                         remoteAddress: remoteAddress,
+                        context: transcriptionContext,
                         enabled: configuration.debugLoggingEnabled
                     )
                     await recordUsageIfNeeded(
                         clientContext: clientAuthorized,
                         reservation: reservationEstimate,
                         endpoint: path,
-                        modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                            ? relayRequest.model!
-                            : "gemini-3-flash-preview",
+                        modelID: transcriptionModelID,
                         usage: upstreamUsage,
                         searchCount: 0,
                         usesAudioInput: true
                     )
-                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                    await markSuccessfulRequest(
+                        path: path,
+                        method: method,
+                        remoteAddress: remoteAddress,
+                        context: transcriptionContext
+                    )
                 } catch let error as RelayHTTPError {
                     try await sendFailureResponse(
                         statusCode: error.statusCode,
                         message: error.message,
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: transcriptionContext,
                         on: connection
                     )
                 } catch {
@@ -479,7 +560,9 @@ actor LocalRelayServer {
                         statusCode: relayError.statusCode,
                         message: relayError.message,
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: transcriptionContext,
                         on: connection
                     )
                 }
@@ -488,14 +571,32 @@ actor LocalRelayServer {
                 do {
                     relayRequest = try decoder.decode(RelayMemoryExtractionRequest.self, from: request.body)
                 } catch {
+                    let earlyContext: RelayActorContext?
+                    if let clientAuthorized {
+                        earlyContext = await billingStore.metadata(for: clientAuthorized, modelID: nil)
+                    } else {
+                        earlyContext = nil
+                    }
                     try await sendFailureResponse(
                         statusCode: RelayHTTPError.badRequest("Invalid JSON body.").statusCode,
                         message: "Invalid JSON body.",
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: earlyContext,
                         on: connection
                     )
                     return
+                }
+
+                let memoryModelID = relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    ? relayRequest.model!
+                    : "gemini-3-flash-preview"
+                let memoryContext: RelayActorContext?
+                if let clientAuthorized {
+                    memoryContext = await billingStore.metadata(for: clientAuthorized, modelID: memoryModelID)
+                } else {
+                    memoryContext = nil
                 }
 
                 do {
@@ -504,7 +605,7 @@ actor LocalRelayServer {
                         let estimatedInputTokens = try await relayBridge.estimateMemoryInputTokens(
                             relayRequest: relayRequest,
                             apiKey: configuration.geminiAPIKey,
-                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                            debugLog: debugLogger(enabled: configuration.debugLoggingEnabled, context: memoryContext)
                         )
                         let reservedCredits = await billingStore.creditsForUsage(
                             modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -532,7 +633,7 @@ actor LocalRelayServer {
                     let (relayResponse, upstreamUsage) = try await relayBridge.extractMemory(
                         relayRequest: relayRequest,
                         apiKey: configuration.geminiAPIKey,
-                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled)
+                        debugLog: debugLogger(enabled: configuration.debugLoggingEnabled, context: memoryContext)
                     )
 
                     try await sendJSON(
@@ -545,26 +646,32 @@ actor LocalRelayServer {
                         path: path,
                         statusCode: 200,
                         remoteAddress: remoteAddress,
+                        context: memoryContext,
                         enabled: configuration.debugLoggingEnabled
                     )
                     await recordUsageIfNeeded(
                         clientContext: clientAuthorized,
                         reservation: reservationEstimate,
                         endpoint: path,
-                        modelID: relayRequest.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                            ? relayRequest.model!
-                            : "gemini-3-flash-preview",
+                        modelID: memoryModelID,
                         usage: upstreamUsage,
                         searchCount: 0,
                         usesAudioInput: false
                     )
-                    await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+                    await markSuccessfulRequest(
+                        path: path,
+                        method: method,
+                        remoteAddress: remoteAddress,
+                        context: memoryContext
+                    )
                 } catch let error as RelayHTTPError {
                     try await sendFailureResponse(
                         statusCode: error.statusCode,
                         message: error.message,
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: memoryContext,
                         on: connection
                     )
                 } catch {
@@ -573,7 +680,9 @@ actor LocalRelayServer {
                         statusCode: relayError.statusCode,
                         message: relayError.message,
                         path: path,
+                        method: method,
                         remoteAddress: remoteAddress,
+                        context: memoryContext,
                         on: connection
                     )
                 }
@@ -582,12 +691,16 @@ actor LocalRelayServer {
                     statusCode: 404,
                     message: "Not found.",
                     path: path,
+                    method: method,
                     remoteAddress: remoteAddress,
                     on: connection
                 )
             }
         } catch {
-            await eventHandler(.log(level: .warning, message: "Connection closed: \(error.localizedDescription)"))
+            await emitLifecycleLog(
+                level: .warning,
+                message: "Connection closed: \(error.localizedDescription)"
+            )
             connection.cancel()
         }
     }
@@ -595,6 +708,7 @@ actor LocalRelayServer {
     private func handleBillingRouteIfNeeded(
         request: HTTPRequest,
         path: String,
+        method: String?,
         remoteAddress: String?,
         on connection: NWConnection
     ) async throws -> Bool {
@@ -640,7 +754,18 @@ actor LocalRelayServer {
             return false
         }
 
-        await markSuccessfulRequest(path: path, remoteAddress: remoteAddress)
+        let billingContextKey = bearerToken(from: request.headers)
+        var billingContext: RelayActorContext?
+        if let billingContextKey,
+           let authorized = await billingStore.authorize(clientKey: billingContextKey) {
+            billingContext = await billingStore.metadata(for: authorized, modelID: nil)
+        }
+        await markSuccessfulRequest(
+            path: path,
+            method: method,
+            remoteAddress: remoteAddress,
+            context: billingContext
+        )
         return true
     }
 
@@ -825,14 +950,18 @@ actor LocalRelayServer {
         statusCode: Int,
         message: String,
         path: String,
+        method: String? = nil,
         remoteAddress: String?,
+        context: RelayActorContext? = nil,
         on connection: NWConnection
     ) async throws {
         await markFailedRequest(
             path: path,
+            method: method,
             remoteAddress: remoteAddress,
             statusCode: statusCode,
-            message: message
+            message: message,
+            context: context
         )
 
         try await sendJSON(
@@ -900,36 +1029,77 @@ actor LocalRelayServer {
 
     private func markSuccessfulRequest(
         path: String,
-        remoteAddress: String?
+        method: String? = nil,
+        remoteAddress: String?,
+        context: RelayActorContext? = nil
     ) async {
-        await eventHandler(.didCompleteRequest(path: path, remoteAddress: remoteAddress))
+        await eventHandler(
+            .didCompleteRequest(
+                path: path,
+                method: method,
+                remoteAddress: remoteAddress,
+                context: context
+            )
+        )
     }
 
     private func markFailedRequest(
         path: String,
+        method: String? = nil,
         remoteAddress: String?,
         statusCode: Int,
-        message: String
+        message: String,
+        context: RelayActorContext? = nil
     ) async {
         await eventHandler(
             .didFailRequest(
                 path: path,
+                method: method,
                 remoteAddress: remoteAddress,
                 statusCode: statusCode,
-                message: message
+                message: message,
+                context: context
+            )
+        )
+    }
+
+    /// Helper for emitting lifecycle/system log events without an actor
+    /// context attached. All other call sites should use the full
+    /// `.log(...)` case directly so the dashboard can offer rich filtering.
+    private func emitLifecycleLog(
+        level: RelayLogLevel,
+        message: String,
+        path: String? = nil,
+        method: String? = nil,
+        remoteAddress: String? = nil,
+        statusCode: Int? = nil,
+        category: RelayLogCategory = .lifecycle,
+        context: RelayActorContext? = nil
+    ) async {
+        await eventHandler(
+            .log(
+                level: level,
+                message: message,
+                category: category,
+                method: method,
+                path: path,
+                remoteAddress: remoteAddress,
+                statusCode: statusCode,
+                context: context
             )
         )
     }
 
     private func debugLogger(
-        enabled: Bool
+        enabled: Bool,
+        context: RelayActorContext? = nil
     ) -> (@Sendable (RelayDebugEvent) async -> Void)? {
         guard enabled else {
             return nil
         }
 
         return { [eventHandler] event in
-            await eventHandler(.debug(event))
+            await eventHandler(.debug(event.withContext(context)))
         }
     }
 
@@ -937,7 +1107,8 @@ actor LocalRelayServer {
         _ request: HTTPRequest,
         path: String,
         remoteAddress: String?,
-        configuration: RelayRuntimeConfiguration
+        configuration: RelayRuntimeConfiguration,
+        context: RelayActorContext? = nil
     ) async {
         guard configuration.debugLoggingEnabled else {
             return
@@ -956,11 +1127,12 @@ actor LocalRelayServer {
                     address: remoteAddress,
                     statusCode: nil,
                     body: RelayDebugFormatter.httpRequest(
-                    method: request.method,
-                    url: path,
-                    headers: request.headers,
-                    body: request.body
-                )
+                        method: request.method,
+                        url: path,
+                        headers: request.headers,
+                        body: request.body
+                    ),
+                    context: context
                 )
             )
         )
@@ -971,6 +1143,7 @@ actor LocalRelayServer {
         path: String,
         statusCode: Int,
         remoteAddress: String?,
+        context: RelayActorContext? = nil,
         enabled: Bool
     ) async {
         guard enabled else {
@@ -992,10 +1165,11 @@ actor LocalRelayServer {
                     address: remoteAddress,
                     statusCode: statusCode,
                     body: RelayDebugFormatter.httpResponse(
-                    statusCode: statusCode,
-                    headers: ["content-type": "application/json; charset=utf-8"],
-                    body: body
-                )
+                        statusCode: statusCode,
+                        headers: ["content-type": "application/json; charset=utf-8"],
+                        body: body
+                    ),
+                    context: context
                 )
             )
         )
@@ -1055,7 +1229,16 @@ actor LocalRelayServer {
             await eventHandler(
                 .log(
                     level: .warning,
-                    message: "Usage settlement failed for \(endpoint): \(error.localizedDescription)"
+                    message: "Usage settlement failed for \(endpoint): \(error.localizedDescription)",
+                    category: .usage,
+                    method: nil,
+                    path: endpoint,
+                    remoteAddress: nil,
+                    statusCode: nil,
+                    context: await billingStore.metadata(
+                        for: clientContext,
+                        modelID: modelID
+                    )
                 )
             )
         }
