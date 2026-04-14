@@ -898,7 +898,7 @@ final class ChatStore: ObservableObject {
         let purchasePreparation = try await relayAccountService.preparePurchase()
         let products = try await Product.products(for: [plan.productID])
         guard let product = products.first(where: { $0.id == plan.productID }) else {
-            throw RelayAPIError.invalidResponse
+            throw RelayAPIError.storeKitProductUnavailable(productID: plan.productID)
         }
 
         let result = try await product.purchase(
@@ -2420,7 +2420,7 @@ final class ChatStore: ObservableObject {
 
         if let error = error as? RelayAPIError {
             switch error {
-            case .missingConfiguration, .truncated:
+            case .missingConfiguration, .truncated, .storeKitProductUnavailable:
                 return false
             case .invalidResponse, .remote, .emptyResponse, .incompleteResponse:
                 return true

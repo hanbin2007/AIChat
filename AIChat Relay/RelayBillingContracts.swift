@@ -841,6 +841,7 @@ nonisolated struct RelayOfflineExchangeRequest: Codable, Equatable, Sendable {
         case allowedModelIDs
         case allowedModelIDsConverted = "allowedModelIds"
         case allowedModelIDsSnake = "allowed_model_ids"
+        case allowedModelIDsSnakeBuggy = "allowed_model_i_ds"
         case activationFingerprint
         case activationFingerprintSnake = "activation_fingerprint"
     }
@@ -876,7 +877,7 @@ nonisolated struct RelayOfflineExchangeRequest: Codable, Equatable, Sendable {
         creditsTotal = try container.decodeIfPresentFirst(Int.self, forKeys: [.creditsTotal, .creditsTotalSnake])
         creditsRemaining = try container.decodeIfPresentFirst(Int.self, forKeys: [.creditsRemaining, .creditsRemainingSnake])
         validUntil = try container.decodeIfPresentFirst(Date.self, forKeys: [.validUntil, .validUntilSnake])
-        allowedModelIDs = try container.decodeIfPresentFirst([String].self, forKeys: [.allowedModelIDs, .allowedModelIDsConverted, .allowedModelIDsSnake])
+        allowedModelIDs = try container.decodeIfPresentFirst([String].self, forKeys: [.allowedModelIDs, .allowedModelIDsConverted, .allowedModelIDsSnake, .allowedModelIDsSnakeBuggy])
         activationFingerprint = try container.decodeIfPresentFirst(String.self, forKeys: [.activationFingerprint, .activationFingerprintSnake])
     }
 

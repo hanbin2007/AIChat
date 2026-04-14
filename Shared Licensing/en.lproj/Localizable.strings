@@ -68,6 +68,7 @@
 "error.relay.missing_configuration" = "Relay settings are missing.";
 "error.relay.invalid_response" = "Relay returned an invalid response.";
 "error.relay.empty_response" = "Relay returned an empty reply.";
+"error.relay.storekit_product_unavailable" = "App Store can't find product %@. Verify the product is live in App Store Connect, or provide a StoreKit configuration file for the simulator.";
 "error.relay.incomplete_finish" = "Relay reported incomplete finish (%@).";
 "error.transcription.unavailable" = "Voice transcription isn't available in the current setup.";
 "error.transcription.invalid_audio" = "The recorded audio couldn't be prepared for transcription.";

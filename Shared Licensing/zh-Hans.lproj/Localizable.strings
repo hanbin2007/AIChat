@@ -68,6 +68,7 @@
 "error.relay.missing_configuration" = "缺少 Relay 配置。";
 "error.relay.invalid_response" = "Relay 返回了无效响应。";
 "error.relay.empty_response" = "Relay 返回了空回复。";
+"error.relay.storekit_product_unavailable" = "App Store 找不到商品 %@。请确认产品已在 App Store Connect 上架，或为模拟器配置 StoreKit 测试文件。";
 "error.relay.incomplete_finish" = "Relay 返回了未完成的结束状态（%@）。";
 "error.transcription.unavailable" = "当前配置下暂时无法使用语音转录。";
 "error.transcription.invalid_audio" = "录音文件无法用于转录。";

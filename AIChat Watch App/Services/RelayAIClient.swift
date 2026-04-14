@@ -14,6 +14,7 @@ enum RelayAPIError: LocalizedError, Equatable {
     case emptyResponse
     case incompleteResponse
     case truncated
+    case storeKitProductUnavailable(productID: String)
 
     var errorDescription: String? {
         switch self {
@@ -29,6 +30,8 @@ enum RelayAPIError: LocalizedError, Equatable {
             return L10n.tr("error.reply.incomplete")
         case .truncated:
             return L10n.tr("error.reply.truncated")
+        case .storeKitProductUnavailable(let productID):
+            return String(format: L10n.tr("error.relay.storekit_product_unavailable"), productID)
         }
     }
 }
