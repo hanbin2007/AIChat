@@ -415,8 +415,8 @@ final class ChatStore: ObservableObject {
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
-    @Published private(set) var syncStatus: CompanionSyncStatus
-    @Published private(set) var syncStatusDescription: String
+    var syncStatus: CompanionSyncStatus { syncCoordinator.syncStatus }
+    var syncStatusDescription: String { syncCoordinator.syncStatusDescription }
     var activationState: OfflineActivationState? { activationBilling.activationState }
     var relayAccountStatus: RelayAccountStatusResponse? { activationBilling.relayAccountStatus }
     var relayCatalog: RelayCatalogResponse? { activationBilling.relayCatalog }
@@ -449,20 +449,18 @@ final class ChatStore: ObservableObject {
     private let memoryMaintenanceService: any AIMemoryMaintenanceService
     private let syncBridge: CompanionSyncBridge
     private let replyPersistenceController: any ReplyPersistenceControlling
-    private let cloudSyncService: ICloudConversationSyncService?
     private let activationRepository: ActivationRepository
     let activationBilling: ActivationBillingService
+    let syncCoordinator: ConversationSyncCoordinator
     private var activationBillingCancellable: AnyCancellable?
     private var activationStateRebuildCancellable: AnyCancellable?
+    private var syncCoordinatorCancellable: AnyCancellable?
     private let defaults: UserDefaults
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
     private var conversationIndexByID: [UUID: Int] = [:]
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
-    private var deletedConversationTombstones: [UUID: Date] = [:]
-    private var lastPushedSyncSummaryDigest: String?
-    private var lastBootstrapRequestAt: Date?
 
     init(
         repository: ConversationRepository,
@@ -491,7 +489,6 @@ final class ChatStore: ObservableObject {
         self.configuration = configuration
         self.syncBridge = syncBridge
         self.replyPersistenceController = replyPersistenceController ?? DeviceReplyPersistenceController()
-        self.cloudSyncService = cloudSyncService
         self.activationRepository = resolvedActivationRepository
         self.deviceIdentity = deviceIdentity ??
             WatchDeviceIdentityProvider.current(activationRepository: resolvedActivationRepository)
@@ -506,11 +503,15 @@ final class ChatStore: ObservableObject {
             relayAccessRepository: resolvedRelayAccessRepository,
             syncBridge: syncBridge
         )
+        self.syncCoordinator = ConversationSyncCoordinator(
+            syncBridge: syncBridge,
+            cloudSyncService: cloudSyncService,
+            repository: repository,
+            activationBilling: self.activationBilling
+        )
         self.defaults = resolvedDefaults
         self.sendRetryDelayNanoseconds = sendRetryDelayNanoseconds
         self.storageDescription = repository.storageDescription
-        self.syncStatus = syncBridge.currentStatus
-        self.syncStatusDescription = syncBridge.currentStatus.description
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
         self.isGlobalAutoScrollEnabled = Self.loadGlobalAutoScrollEnabled(from: resolvedDefaults)
         self.defaultConversationConfiguration = Self.loadDefaultConversationConfiguration(
@@ -524,53 +525,56 @@ final class ChatStore: ObservableObject {
         self.transcriptionCustomPrompt = Self.loadTranscriptionCustomPrompt(from: resolvedDefaults)
         self.transcriptionIncludesContext = Self.loadTranscriptionIncludesContext(from: resolvedDefaults)
 
-        syncBridge.setStatusHandler { [weak self] status in
-            guard let self else {
-                return
-            }
-
-            self.syncStatus = status
-            self.syncStatusDescription = status.description
-
-            Task { @MainActor [weak self] in
-                await self?.handleSyncStatusChange(status)
-            }
+        // Wire sync coordinator callbacks
+        syncCoordinator.onUpsertConversation = { [weak self] conversation, allowResurrection in
+            self?.upsertConversation(conversation, allowResurrectionFromDeletedState: allowResurrection)
         }
-
-        syncBridge.setSnapshotProvider { [weak self] in
+        syncCoordinator.onPersistConversation = { [weak self] conversation, sync, allowResurrection in
+            await self?.persist(conversation, sync: sync, allowResurrectionFromDeletedState: allowResurrection)
+        }
+        syncCoordinator.onDeleteConversation = { [weak self] id, deletedAt, sync in
+            await self?.deleteConversation(id: id, deletedAt: deletedAt, sync: sync)
+        }
+        syncCoordinator.onApplySyncStoreState = { [weak self] state in
+            self?.applySyncStoreState(state)
+        }
+        syncCoordinator.conversationsProvider = { [weak self] in
             self?.conversations ?? []
         }
-
-        let attachmentsDirectoryURL = repository.attachmentsDirectoryURL
-        syncBridge.setAttachmentFileURLProvider { blobFilename in
-            attachmentsDirectoryURL.appendingPathComponent(blobFilename, isDirectory: false)
+        syncCoordinator.conversationProvider = { [weak self] id in
+            self?.conversation(id: id)
         }
-
-        syncBridge.setDeletedConversationTombstonesProvider { [weak self] in
-            self?.deletedConversationTombstones.map {
-                CompanionDeletedConversationTombstone(id: $0.key, deletedAt: $0.value)
-            } ?? []
-        }
-
-        syncBridge.setGlobalPinnedMemoriesProvider { [weak self] in
+        syncCoordinator.globalPinnedMemoriesProvider = { [weak self] in
             self?.globalPinnedMemories ?? []
         }
-
-        syncBridge.setPromptPresetsProvider { [weak self] in
+        syncCoordinator.onSetGlobalPinnedMemories = { [weak self] items in
+            self?.globalPinnedMemories = items
+        }
+        syncCoordinator.onPersistGlobalPinnedMemories = { [weak self] sync in
+            await self?.persistGlobalPinnedMemories(sync: sync)
+        }
+        syncCoordinator.promptPresetsProvider = { [weak self] in
             self?.promptPresets ?? PromptPreset.builtInPresets
         }
-
-        syncBridge.setSyncSummaryProvider { [weak self] in
-            self?.currentSyncStoreState().summary
+        syncCoordinator.onSetPromptPresets = { [weak self] presets in
+            self?.promptPresets = presets
         }
-
-        syncBridge.setEventHandler { [weak self] event in
-            Task { @MainActor in
-                await self?.handleSyncEvent(event)
-            }
+        syncCoordinator.onPersistPromptPresets = { [weak self] sync in
+            await self?.persistPromptPresets(sync: sync)
         }
+        syncCoordinator.onStartupError = { [weak self] message in
+            self?.startupError = message
+        }
+        syncCoordinator.hasLoadedConversationsProvider = { [weak self] in
+            self?.hasLoadedConversations ?? false
+        }
+        syncCoordinator.wireSyncBridge()
 
         activationBillingCancellable = activationBilling.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+
+        syncCoordinatorCancellable = syncCoordinator.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
 
@@ -615,9 +619,9 @@ final class ChatStore: ObservableObject {
             }
             globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
             promptPresets = PromptPreset.resolvedLibrary(from: try await repository.loadPromptPresets())
-            await reconcileRemoteStores(requestBootstrap: false)
-            syncBridge.requestBootstrapIfPossible()
-            pushCurrentSyncSummary(force: true)
+            await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
+            syncCoordinator.requestBootstrapIfPossible()
+            syncCoordinator.pushCurrentSyncSummary(force: true)
         } catch {
             startupError = error.localizedDescription
         }
@@ -1564,14 +1568,14 @@ final class ChatStore: ObservableObject {
         do {
             let storedConversation = try await repository.save(conversation)
             mergeStoredAttachmentMetadata(from: storedConversation)
-            if deletedConversationTombstones.removeValue(forKey: conversation.id) != nil {
-                try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
+            if syncCoordinator.removeTombstone(for: conversation.id) {
+                try await syncCoordinator.saveTombstones()
             }
-            await reconcileRemoteStores(requestBootstrap: false)
+            await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
             if sync {
-                syncBridge.pushConversation(storedConversation)
+                syncCoordinator.pushConversation(storedConversation)
             }
-            pushCurrentSyncSummary()
+            syncCoordinator.pushCurrentSyncSummary()
         } catch {
             startupError = error.localizedDescription
         }
@@ -1580,11 +1584,11 @@ final class ChatStore: ObservableObject {
     private func persistGlobalPinnedMemories(sync: Bool) async {
         do {
             try await repository.saveGlobalPinnedMemories(globalPinnedMemories)
-            await reconcileRemoteStores(requestBootstrap: false)
+            await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
             if sync {
-                syncBridge.pushGlobalPinnedMemories(globalPinnedMemories)
+                syncCoordinator.pushGlobalPinnedMemories(globalPinnedMemories)
             }
-            pushCurrentSyncSummary()
+            syncCoordinator.pushCurrentSyncSummary()
         } catch {
             startupError = error.localizedDescription
         }
@@ -1593,11 +1597,11 @@ final class ChatStore: ObservableObject {
     private func persistPromptPresets(sync: Bool) async {
         do {
             try await repository.savePromptPresets(promptPresets)
-            await reconcileRemoteStores(requestBootstrap: false)
+            await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
             if sync {
-                syncBridge.pushPromptPresets(promptPresets)
+                syncCoordinator.pushPromptPresets(promptPresets)
             }
-            pushCurrentSyncSummary()
+            syncCoordinator.pushCurrentSyncSummary()
         } catch {
             startupError = error.localizedDescription
         }
@@ -1613,15 +1617,15 @@ final class ChatStore: ObservableObject {
         transcribingConversationIDs.remove(id)
 
         do {
-            let deletedAt = max(deletedConversationTombstones[id] ?? .distantPast, candidateDeletedAt ?? .now)
-            deletedConversationTombstones[id] = deletedAt
-            try await repository.saveDeletedConversationTombstones(deletedConversationTombstones)
+            let deletedAt = candidateDeletedAt ?? .now
+            syncCoordinator.recordDeletion(id: id, deletedAt: deletedAt)
+            try await syncCoordinator.saveTombstones()
             try await repository.deleteConversation(id: id)
-            await reconcileRemoteStores(requestBootstrap: false)
+            await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
             if sync {
-                syncBridge.pushDeletion(conversationID: id, deletedAt: deletedAt)
+                syncCoordinator.pushDeletion(conversationID: id, deletedAt: deletedAt)
             }
-            pushCurrentSyncSummary()
+            syncCoordinator.pushCurrentSyncSummary()
         } catch {
             startupError = error.localizedDescription
         }
@@ -1799,13 +1803,8 @@ final class ChatStore: ObservableObject {
         )
     }
 
-    private func currentSyncStoreState() -> ConversationSyncStoreState {
-        ConversationSyncStoreState(
-            conversations: conversations,
-            deletedConversationTombstones: deletedConversationTombstones,
-            globalPinnedMemories: globalPinnedMemories,
-            promptPresets: promptPresets
-        )
+    private var deletedConversationTombstones: [UUID: Date] {
+        get { syncCoordinator.deletedConversationTombstones }
     }
 
     private func applySyncStoreState(_ state: ConversationSyncStoreState) {
@@ -1828,137 +1827,17 @@ final class ChatStore: ObservableObject {
     }
 
     private func reconcileRemoteStores(requestBootstrap: Bool) async {
-        if let cloudSyncService {
-            do {
-                let mergedState = try await cloudSyncService.reconcile(localState: currentSyncStoreState())
-                applySyncStoreState(mergedState)
-            } catch {
-                startupError = error.localizedDescription
-            }
-        }
-
-        if requestBootstrap {
-            requestBootstrapIfNeeded()
-        }
-
-        pushCurrentSyncSummary()
-    }
-
-    private func handleSyncStatusChange(_ status: CompanionSyncStatus) async {
-        guard hasLoadedConversations else {
-            return
-        }
-
-        switch status {
-        case .reachable:
-            await reconcileRemoteStores(requestBootstrap: true)
-        case .idle:
-            pushCurrentSyncSummary()
-        case .unavailable, .notPaired, .companionMissing:
-            return
-        }
-    }
-
-    private func handleRemoteSyncSummary(_ summary: ConversationSyncSummary) {
-        guard hasLoadedConversations else {
-            return
-        }
-
-        let localSummary = currentSyncStoreState().summary
-        guard localSummary != summary else {
-            return
-        }
-
-        requestBootstrapIfNeeded()
-    }
-
-    private func requestBootstrapIfNeeded() {
-        let now = Date.now
-        if let lastBootstrapRequestAt,
-           now.timeIntervalSince(lastBootstrapRequestAt) < 1
-        {
-            return
-        }
-
-        lastBootstrapRequestAt = now
-        syncBridge.requestBootstrapIfPossible()
-    }
-
-    private func pushCurrentSyncSummary(force: Bool = false) {
-        let summary = currentSyncStoreState().summary
-        if force == false, lastPushedSyncSummaryDigest == summary.digest {
-            return
-        }
-
-        lastPushedSyncSummaryDigest = summary.digest
-        syncBridge.pushSyncSummary(summary)
+        await syncCoordinator.reconcileRemoteStores(requestBootstrap: requestBootstrap)
     }
 
     private func shouldAllowConversationMutation(
         for conversation: ConversationThread,
         allowResurrectionFromDeletedState: Bool
     ) -> Bool {
-        guard deletedConversationTombstones[conversation.id] != nil else {
-            return true
-        }
-
-        if conversations.contains(where: { $0.id == conversation.id }) {
-            return true
-        }
-
-        return false
-    }
-
-    func mergeRemoteConversation(_ conversation: ConversationThread) async {
-        guard shouldAcceptRemoteConversation(conversation) else {
-            return
-        }
-
-        let normalizedConversation = normalizedConversationForStorage(conversation)
-        let hydratedConversation = await repository.hydrateAttachments(in: normalizedConversation)
-        upsertConversation(
-            hydratedConversation,
-            allowResurrectionFromDeletedState: true
+        syncCoordinator.shouldAllowConversationMutation(
+            for: conversation,
+            allowResurrectionFromDeletedState: allowResurrectionFromDeletedState
         )
-        await persist(
-            hydratedConversation,
-            sync: false,
-            allowResurrectionFromDeletedState: true
-        )
-    }
-
-    func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
-        for remoteConversation in remoteConversations {
-            guard shouldAcceptRemoteConversation(remoteConversation) else {
-                continue
-            }
-
-            if let localConversation = conversation(id: remoteConversation.id),
-               localConversation.updatedAt > remoteConversation.updatedAt {
-                syncBridge.pushConversation(localConversation)
-                continue
-            }
-
-            let normalizedConversation = normalizedConversationForStorage(remoteConversation)
-            let hydratedConversation = await repository.hydrateAttachments(in: normalizedConversation)
-            upsertConversation(
-                hydratedConversation,
-                allowResurrectionFromDeletedState: true
-            )
-            await persist(
-                hydratedConversation,
-                sync: false,
-                allowResurrectionFromDeletedState: true
-            )
-        }
-    }
-
-    func mergeRemoteDeletedConversationTombstones(
-        _ incomingTombstones: [CompanionDeletedConversationTombstone]
-    ) async {
-        for tombstone in mergedDeletedConversationTombstones(incomingTombstones) {
-            await deleteConversation(id: tombstone.id, deletedAt: tombstone.deletedAt, sync: false)
-        }
     }
 
     private func mutateConversation(id: UUID, mutation: (inout ConversationThread) -> Void) {
@@ -2684,175 +2563,11 @@ final class ChatStore: ObservableObject {
         DraftTextComposer.appended(existing: existing, addition: addition)
     }
 
-    private func handleSyncEvent(_ event: CompanionSyncEvent) async {
-        switch event {
-        case .upsert(let conversation):
-            await mergeRemoteConversation(conversation)
-        case .delete(let conversationID, let deletedAt):
-            await mergeRemoteDeletedConversationTombstones([
-                CompanionDeletedConversationTombstone(id: conversationID, deletedAt: deletedAt)
-            ])
-        case .deletedConversationTombstones(let tombstones):
-            await mergeRemoteDeletedConversationTombstones(tombstones)
-        case .snapshot(let conversations):
-            await mergeRemoteConversationSnapshot(conversations)
-        case .syncSummary(let summary):
-            handleRemoteSyncSummary(summary)
-        case .attachmentBlob(let incomingBlob):
-            await mergeIncomingAttachmentBlob(incomingBlob)
-        case .globalPinnedMemories(let items):
-            await mergeGlobalPinnedMemories(items, syncMergedState: true)
-        case .promptPresets(let presets):
-            await replacePromptPresets(presets, syncMergedState: false)
-        case .activationRequestCode, .activationCodeImport, .relayPairingToken:
-            await activationBilling.handleActivationSyncEvent(event)
-        }
-    }
-
-    private func mergeIncomingAttachmentBlob(_ incomingBlob: CompanionIncomingAttachmentBlob) async {
-        let blobData: Data
-
-        do {
-            blobData = try await repository.importAttachmentBlob(
-                from: incomingBlob.temporaryFileURL,
-                as: incomingBlob.blobFilename
-            )
-        } catch {
-            startupError = error.localizedDescription
-            return
-        }
-
-        guard var conversation = conversation(id: incomingBlob.conversationID) else {
-            return
-        }
-
-        var didChange = false
-
-        for messageIndex in conversation.messages.indices {
-            guard conversation.messages[messageIndex].id == incomingBlob.messageID else {
-                continue
-            }
-
-            for attachmentIndex in conversation.messages[messageIndex].attachments.indices {
-                guard conversation.messages[messageIndex].attachments[attachmentIndex].id == incomingBlob.attachmentID else {
-                    continue
-                }
-
-                conversation.messages[messageIndex].attachments[attachmentIndex].blobFilename = incomingBlob.blobFilename
-                conversation.messages[messageIndex].attachments[attachmentIndex].data = blobData
-                didChange = true
-            }
-        }
-
-        guard didChange else {
-            return
-        }
-
-        upsertConversation(
-            conversation,
-            allowResurrectionFromDeletedState: true
-        )
-        await persist(
-            conversation,
-            sync: false,
-            allowResurrectionFromDeletedState: true
-        )
-    }
-
-    private func shouldAcceptRemoteConversation(_ conversation: ConversationThread) -> Bool {
-        deletedConversationTombstones[conversation.id] == nil
-    }
-
-    private func mergedDeletedConversationTombstones(
-        _ incomingTombstones: [CompanionDeletedConversationTombstone]
-    ) -> [CompanionDeletedConversationTombstone] {
-        var latestTombstoneByID: [UUID: Date] = [:]
-
-        for tombstone in incomingTombstones {
-            let latestDeletedAt = max(
-                max(
-                    deletedConversationTombstones[tombstone.id] ?? .distantPast,
-                    latestTombstoneByID[tombstone.id] ?? .distantPast
-                ),
-                tombstone.deletedAt
-            )
-            latestTombstoneByID[tombstone.id] = latestDeletedAt
-        }
-
-        return latestTombstoneByID.map {
-            CompanionDeletedConversationTombstone(id: $0.key, deletedAt: $0.value)
-        }
-        .sorted { lhs, rhs in
-            if lhs.deletedAt == rhs.deletedAt {
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
-
-            return lhs.deletedAt > rhs.deletedAt
-        }
-    }
-
     private func reconcileLoadedConversations(
         _ loadedConversations: [ConversationThread],
         with tombstones: [UUID: Date]
     ) -> (conversations: [ConversationThread], tombstones: [UUID: Date], tombstonesChanged: Bool) {
-        var visibleConversations: [ConversationThread] = []
-
-        for conversation in loadedConversations {
-            if tombstones[conversation.id] != nil {
-                continue
-            }
-
-            visibleConversations.append(conversation)
-        }
-
-        return (
-            visibleConversations.sorted(by: ConversationThread.sortsByMostRecentFirst),
-            tombstones,
-            false
-        )
-    }
-
-    private func mergeGlobalPinnedMemories(
-        _ incomingItems: [PinnedMemoryItem],
-        syncMergedState: Bool
-    ) async {
-        var itemsByID = Dictionary(uniqueKeysWithValues: globalPinnedMemories.map { ($0.id, $0) })
-
-        for item in incomingItems {
-            if let existing = itemsByID[item.id], existing.updatedAt >= item.updatedAt {
-                continue
-            }
-
-            itemsByID[item.id] = item
-        }
-
-        let mergedItems = itemsByID.values.sorted { lhs, rhs in
-            if lhs.updatedAt == rhs.updatedAt {
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
-
-            return lhs.updatedAt > rhs.updatedAt
-        }
-
-        guard mergedItems != globalPinnedMemories else {
-            return
-        }
-
-        globalPinnedMemories = mergedItems
-        await persistGlobalPinnedMemories(sync: syncMergedState)
-    }
-
-    private func replacePromptPresets(
-        _ incomingPresets: [PromptPreset],
-        syncMergedState: Bool
-    ) async {
-        let resolvedPresets = PromptPreset.resolvedLibrary(from: incomingPresets)
-        guard resolvedPresets != promptPresets else {
-            return
-        }
-
-        promptPresets = resolvedPresets
-        await persistPromptPresets(sync: syncMergedState)
+        syncCoordinator.reconcileLoadedConversations(loadedConversations, with: tombstones)
     }
 
     private func requestConversation(from conversation: ConversationThread) -> ConversationThread {
