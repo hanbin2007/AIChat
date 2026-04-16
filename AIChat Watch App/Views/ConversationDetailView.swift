@@ -48,11 +48,6 @@ private enum ConversationScrollLayout {
     }
 }
 
-private enum VoiceCaptureMode {
-    case transcribe
-    case directSend
-}
-
 private enum ConversationRendering {
     static let prewarmedRenderBudget = 10
     static let initialRenderBudget = 32
@@ -65,11 +60,6 @@ private enum ConversationRendering {
 private final class ScrollGeometryTracker {
     var viewportHeight: CGFloat = 0
     var distanceFromBottom: CGFloat = 0
-}
-
-private struct ToolSettingsDraft: Equatable {
-    var usesGoogleSearch: Bool
-    var usesCodeExecution: Bool
 }
 
 struct ConversationDetailView: View {
@@ -618,7 +608,7 @@ struct ConversationDetailView: View {
             (canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "Send")
         let voiceButtonLabel =
             voiceRecorder.isRecording ?
-            (voiceCaptureMode == .directSend ? "Stop & Send" : "Stop & Transcribe") :
+            (voiceCaptureMode == .direct ? "Stop & Send" : "Stop & Transcribe") :
             "Voice"
         let voiceButtonDisabled =
             voiceRecorder.isRecording == false &&
@@ -739,7 +729,7 @@ struct ConversationDetailView: View {
                 )
                 .accessibilityLabel(
                     voiceRecorder.isRecording ?
-                    (voiceCaptureMode == .directSend ? "Stop recording and send audio" : "Stop recording and transcribe") :
+                    (voiceCaptureMode == .direct ? "Stop recording and send audio" : "Stop recording and transcribe") :
                     "Record voice message"
                 )
                 .accessibilityHint("Long press to send the recorded audio directly.")
@@ -974,7 +964,7 @@ struct ConversationDetailView: View {
         }
 
         suppressedVoiceTapUntil = Date.now.addingTimeInterval(0.75)
-        toggleVoiceRecording(startMode: .directSend)
+        toggleVoiceRecording(startMode: .direct)
     }
 
     private func toggleVoiceRecording(startMode: VoiceCaptureMode) {
@@ -1001,7 +991,7 @@ struct ConversationDetailView: View {
             switch captureMode {
             case .transcribe:
                 await chatStore.sendRecordedAudio(attachment, in: conversationID)
-            case .directSend:
+            case .direct:
                 collapseComposer()
                 await chatStore.sendRecordedAudioDirectly(attachment, in: conversationID)
             }
@@ -1552,7 +1542,7 @@ struct ConversationDetailView: View {
 
     private func recordingStatusTitle() -> String {
         let duration = L10n.format("conversation.recording", voiceRecorder.elapsedTimeText)
-        guard voiceCaptureMode == .directSend else {
+        guard voiceCaptureMode == .direct else {
             return duration
         }
 
