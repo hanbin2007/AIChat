@@ -169,7 +169,10 @@ struct CompanionConversationDetailView: View {
                                 conversationID: conversationID,
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
-                                forceExpandedContent: latestMessageID == message.id
+                                forceExpandedContent: latestMessageID == message.id,
+                                onPinMessage: { messageID, convoID, scope in
+                                    await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
+                                }
                             )
                                 .equatable()
                                 .id(message.id)

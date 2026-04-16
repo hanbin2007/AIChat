@@ -259,7 +259,10 @@ struct ConversationDetailView: View {
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
                                 forceExpandedContent: latestMessageID == message.id,
-                                isLatestReplyAnchorTarget: latestMessageID == message.id && message.role == .assistant
+                                isLatestReplyAnchorTarget: latestMessageID == message.id && message.role == .assistant,
+                                onPinMessage: { messageID, convoID, scope in
+                                    await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
+                                }
                             )
                                 .equatable()
                                 .id(message.id)

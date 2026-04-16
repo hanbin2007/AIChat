@@ -16,13 +16,12 @@ private enum MessageBubbleInteraction {
 }
 
 struct ChatBubbleView: View, Equatable {
-    @EnvironmentObject private var chatStore: ChatStore
-
     let conversationID: UUID
     let message: ChatMessage
     let suspendStreamingRender: Bool
     let forceExpandedContent: Bool
     let isLatestReplyAnchorTarget: Bool
+    var onPinMessage: ((UUID, UUID, PinnedMemoryScope) async -> Void)?
 
     @State private var isShowingMessageActions = false
     @State private var didTriggerStreamingStartHaptics = false
@@ -39,13 +38,15 @@ struct ChatBubbleView: View, Equatable {
         message: ChatMessage,
         suspendStreamingRender: Bool = false,
         forceExpandedContent: Bool = false,
-        isLatestReplyAnchorTarget: Bool = false
+        isLatestReplyAnchorTarget: Bool = false,
+        onPinMessage: ((UUID, UUID, PinnedMemoryScope) async -> Void)? = nil
     ) {
         self.conversationID = conversationID
         self.message = message
         self.suspendStreamingRender = suspendStreamingRender
         self.forceExpandedContent = forceExpandedContent
         self.isLatestReplyAnchorTarget = isLatestReplyAnchorTarget
+        self.onPinMessage = onPinMessage
         _renderedText = State(initialValue: message.cleanedText)
         _renderedThoughtSummary = State(initialValue: message.cleanedThoughtSummary)
     }
@@ -343,24 +344,16 @@ struct ChatBubbleView: View, Equatable {
 
     @ViewBuilder
     private var messageActions: some View {
-        if canPinMessage {
+        if canPinMessage, let onPinMessage {
             Button("Pin to This Chat") {
                 Task {
-                    await chatStore.pinMessage(
-                        id: message.id,
-                        from: conversationID,
-                        scope: .conversation
-                    )
+                    await onPinMessage(message.id, conversationID, .conversation)
                 }
             }
 
             Button("Pin Globally") {
                 Task {
-                    await chatStore.pinMessage(
-                        id: message.id,
-                        from: conversationID,
-                        scope: .global
-                    )
+                    await onPinMessage(message.id, conversationID, .global)
                 }
             }
         }
@@ -737,22 +730,14 @@ private struct StreamingReplyStatusView: View {
                 let trailingCoreWidth = max(trackWidth * 0.12, 12)
 
                 if animatesTrack {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
-                        let cycle = context.date.timeIntervalSinceReferenceDate
-                            .truncatingRemainder(dividingBy: 1.65) / 1.65
-                        let easedPhase = 0.5 - 0.5 * cos(cycle * .pi * 2)
-                        let travel = max(trackWidth - leadingCoreWidth, 0)
-                        let glowOffset = travel * easedPhase
-
-                        statusTrack(
-                            trackWidth: trackWidth,
-                            leadingCoreWidth: leadingCoreWidth,
-                            trailingCoreWidth: trailingCoreWidth,
-                            leadingOffset: glowOffset,
-                            trailingOffset: max(glowOffset - trackWidth * 0.18, 0),
-                            glowOpacity: 0.96
-                        )
-                    }
+                    StreamingTrackAnimator(
+                        trackWidth: trackWidth,
+                        leadingCoreWidth: leadingCoreWidth,
+                        trailingCoreWidth: trailingCoreWidth,
+                        statusTint: statusTint,
+                        highlightTint: highlightTint,
+                        trackHeight: trackHeight
+                    )
                 } else {
                     statusTrack(
                         trackWidth: trackWidth,
@@ -812,7 +797,11 @@ private struct StreamingReplyStatusView: View {
                 .frame(width: glowWidth)
                 .offset(x: leadingOffset - glowWidth * 0.24)
                 .opacity(glowOpacity)
+                #if os(watchOS)
+                .opacity(0.7)
+                #else
                 .blur(radius: 7)
+                #endif
 
             Capsule(style: .continuous)
                 .fill(
@@ -846,6 +835,105 @@ private struct StreamingReplyStatusView: View {
                 .offset(x: trailingOffset)
         }
         .clipShape(Capsule(style: .continuous))
+    }
+}
+
+/// Uses a repeating SwiftUI animation instead of 30fps TimelineView to drive
+/// the streaming glow track — cheaper on watchOS where TimelineView + blur
+/// consumes significant GPU budget.
+private struct StreamingTrackAnimator: View {
+    let trackWidth: CGFloat
+    let leadingCoreWidth: CGFloat
+    let trailingCoreWidth: CGFloat
+    let statusTint: Color
+    let highlightTint: Color
+    let trackHeight: CGFloat
+
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        let travel = max(trackWidth - leadingCoreWidth, 0)
+        let glowOffset = travel * phase
+        let glowWidth = min(trackWidth * 0.56, 72)
+
+        ZStack(alignment: .leading) {
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.05),
+                            Color.white.opacity(0.10),
+                            Color.white.opacity(0.06)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.clear,
+                            statusTint.opacity(0.08),
+                            statusTint.opacity(0.42),
+                            highlightTint.opacity(0.90),
+                            statusTint.opacity(0.26),
+                            Color.clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: glowWidth)
+                .offset(x: glowOffset - glowWidth * 0.24)
+                .opacity(0.96)
+                #if os(watchOS)
+                .opacity(0.7)
+                #else
+                .blur(radius: 7)
+                #endif
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            statusTint.opacity(0.14),
+                            statusTint.opacity(0.65),
+                            highlightTint.opacity(0.95)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: leadingCoreWidth)
+                .offset(x: glowOffset)
+                .shadow(color: statusTint.opacity(0.28), radius: 8, y: 0)
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            statusTint.opacity(0.08),
+                            statusTint.opacity(0.34),
+                            highlightTint.opacity(0.32)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: trailingCoreWidth)
+                .offset(x: max(glowOffset - trackWidth * 0.18, 0))
+        }
+        .clipShape(Capsule(style: .continuous))
+        .onAppear {
+            withAnimation(
+                .easeInOut(duration: 1.65)
+                .repeatForever(autoreverses: true)
+            ) {
+                phase = 1
+            }
+        }
     }
 }
 
@@ -967,15 +1055,19 @@ private struct AttachmentThumbnailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.zeroFormattingBehavior = [.pad]
+        return formatter
+    }()
+
     private func formattedDuration(for durationSeconds: Double?) -> String? {
         guard let durationSeconds, durationSeconds > 0 else {
             return nil
         }
 
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.zeroFormattingBehavior = [.pad]
-        return formatter.string(from: durationSeconds)
+        return Self.durationFormatter.string(from: durationSeconds)
     }
 }
 
