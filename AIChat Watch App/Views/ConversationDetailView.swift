@@ -61,6 +61,12 @@ private enum ConversationRendering {
     static let initialLoadDelayNanoseconds: UInt64 = 120_000_000
 }
 
+/// Holds high-frequency scroll position values without triggering view invalidation.
+private final class ScrollGeometryTracker {
+    var viewportHeight: CGFloat = 0
+    var distanceFromBottom: CGFloat = 0
+}
+
 private struct ToolSettingsDraft: Equatable {
     var usesGoogleSearch: Bool
     var usesCodeExecution: Bool
@@ -86,8 +92,11 @@ struct ConversationDetailView: View {
     @State private var completedAutoScrollReplyMessageID: UUID?
     @State private var pendingHistoryAnchorMessageID: UUID?
     @State private var scrollInterruptionsSuppressedUntil = Date.distantPast
-    @State private var messagesViewportHeight: CGFloat = 0
-    @State private var currentDistanceFromBottom: CGFloat = 0
+    /// Reference-type holder for scroll geometry values that update at high
+    /// frequency (every scroll frame). Using @State here would trigger body
+    /// re-evaluation on every frame — the reference wrapper avoids this since
+    /// mutating properties on the class instance doesn't change the @State reference.
+    @State private var scrollGeometry = ScrollGeometryTracker()
     @State private var voiceCaptureMode: VoiceCaptureMode = .transcribe
     @State private var suppressedVoiceTapUntil = Date.distantPast
     @State private var renderedMessageBudget = ConversationRendering.prewarmedRenderBudget
@@ -329,7 +338,7 @@ struct ConversationDetailView: View {
             }
 
             .onPreferenceChange(ConversationViewportHeightPreferenceKey.self) { height in
-                messagesViewportHeight = height
+                scrollGeometry.viewportHeight = height
             }
             .onPreferenceChange(ConversationBottomAnchorMaxYPreferenceKey.self) { maxY in
                 handleBottomAnchorPositionChange(
@@ -346,7 +355,7 @@ struct ConversationDetailView: View {
                 suspendedStreamingRenderMessageID = nil
                 completedAutoScrollReplyMessageID = nil
                 pendingHistoryAnchorMessageID = nil
-                currentDistanceFromBottom = 0
+                scrollGeometry.distanceFromBottom = 0
                 autoScrollInvocationCount = 0
                 streamingRenderResumeTask?.cancel()
                 streamingRenderResumeTask = nil
@@ -1207,13 +1216,13 @@ struct ConversationDetailView: View {
         autoScrollSessionMessageID: UUID?,
         streamingMessageID: UUID? = nil
     ) {
-        guard messagesViewportHeight > 0 else {
+        guard scrollGeometry.viewportHeight > 0 else {
             return
         }
 
-        let distanceFromBottom = maxY - messagesViewportHeight
-        let previousDistance = currentDistanceFromBottom
-        currentDistanceFromBottom = max(distanceFromBottom, 0)
+        let distanceFromBottom = maxY - scrollGeometry.viewportHeight
+        let previousDistance = scrollGeometry.distanceFromBottom
+        scrollGeometry.distanceFromBottom = max(distanceFromBottom, 0)
 
         // Detect user scrolling away from bottom even during the suppression
         // window — replaces the removed DragGesture's pauseStreamingRefresh.
@@ -1491,7 +1500,7 @@ struct ConversationDetailView: View {
             "locked=\(interruptedAutoScrollSessionMessageID?.uuidString ?? "nil")",
             "interrupted=\(isAutoScrollInterrupted ? 1 : 0)",
             "streaming=\(streamingMessageID?.uuidString ?? "nil")",
-            "distance=\(Int(currentDistanceFromBottom.rounded()))",
+            "distance=\(Int(scrollGeometry.distanceFromBottom.rounded()))",
             "count=\(autoScrollInvocationCount)"
         ].joined(separator: ";")
     }
@@ -1926,15 +1935,19 @@ private struct DraftAttachmentPill: View {
         }
     }
 
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.zeroFormattingBehavior = [.pad]
+        return formatter
+    }()
+
     private var formattedDuration: String? {
         guard let durationSeconds = attachment.durationSeconds, durationSeconds > 0 else {
             return nil
         }
 
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.minute, .second]
-        formatter.zeroFormattingBehavior = [.pad]
-        return formatter.string(from: durationSeconds)
+        return Self.durationFormatter.string(from: durationSeconds)
     }
 }
 

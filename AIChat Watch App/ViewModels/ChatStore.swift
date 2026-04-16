@@ -1658,7 +1658,8 @@ final class ChatStore: ObservableObject {
 
     private func upsertConversation(
         _ conversation: ConversationThread,
-        allowResurrectionFromDeletedState: Bool = false
+        allowResurrectionFromDeletedState: Bool = false,
+        skipListItemUpdate: Bool = false
     ) {
         guard shouldAllowConversationMutation(
             for: conversation,
@@ -1669,6 +1670,22 @@ final class ChatStore: ObservableObject {
 
         let existingConversationIndex = conversationIndexByID[conversation.id]
         let existingConversation = existingConversationIndex.map { conversations[$0] }
+
+        // Fast path: in-place mutation when the conversation stays at the same
+        // index. Avoids copying the entire array and rebuilding the index.
+        if let existingConversationIndex,
+           let existingConversation,
+           conversationInsertionIndex(for: conversation, in: conversations.filter { $0.id != conversation.id }) == existingConversationIndex {
+            guard existingConversation != conversation else {
+                return
+            }
+            conversations[existingConversationIndex] = conversation
+            if skipListItemUpdate == false {
+                upsertConversationListItem(for: conversation, atConversationIndex: existingConversationIndex)
+            }
+            return
+        }
+
         var updatedConversations = conversations
 
         if let existingConversationIndex {
@@ -1684,7 +1701,9 @@ final class ChatStore: ObservableObject {
 
         conversations = updatedConversations
         rebuildConversationIndex()
-        upsertConversationListItem(for: conversation, atConversationIndex: insertionIndex)
+        if skipListItemUpdate == false {
+            upsertConversationListItem(for: conversation, atConversationIndex: insertionIndex)
+        }
     }
 
     private func setConversations(_ updatedConversations: [ConversationThread]) {
@@ -1840,13 +1859,17 @@ final class ChatStore: ObservableObject {
         )
     }
 
-    private func mutateConversation(id: UUID, mutation: (inout ConversationThread) -> Void) {
+    private func mutateConversation(
+        id: UUID,
+        skipListItemUpdate: Bool = false,
+        mutation: (inout ConversationThread) -> Void
+    ) {
         guard var conversation = conversation(id: id) else {
             return
         }
 
         mutation(&conversation)
-        upsertConversation(conversation)
+        upsertConversation(conversation, skipListItemUpdate: skipListItemUpdate)
     }
 
     private func upsertAssistantMessage(
@@ -1872,7 +1895,10 @@ final class ChatStore: ObservableObject {
             )
         )
 
-        mutateConversation(id: conversationID) { conversation in
+        mutateConversation(
+            id: conversationID,
+            skipListItemUpdate: status == .streaming
+        ) { conversation in
             conversation.upsertMessage(
                 ChatMessage(
                     id: normalizedMessage.id,
