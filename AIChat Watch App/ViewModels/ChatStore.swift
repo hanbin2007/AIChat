@@ -613,7 +613,7 @@ final class ChatStore: ObservableObject {
                 with: loadedDeletedConversationTombstones
             )
             setConversations(reconciledState.conversations)
-            deletedConversationTombstones = reconciledState.tombstones
+            // Tombstones already set inside reconcileLoadedConversations via syncCoordinator
             if reconciledState.tombstonesChanged {
                 try await repository.saveDeletedConversationTombstones(reconciledState.tombstones)
             }
@@ -634,6 +634,16 @@ final class ChatStore: ObservableObject {
         }
 
         await reconcileRemoteStores(requestBootstrap: true)
+    }
+
+    func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
+        await syncCoordinator.mergeRemoteConversationSnapshot(remoteConversations)
+    }
+
+    func mergeRemoteDeletedConversationTombstones(
+        _ incomingTombstones: [CompanionDeletedConversationTombstone]
+    ) async {
+        await syncCoordinator.mergeRemoteDeletedConversationTombstones(incomingTombstones)
     }
 
     func refreshActivationState() async {
@@ -1840,7 +1850,7 @@ final class ChatStore: ObservableObject {
         }
 
         setConversations(state.conversations)
-        deletedConversationTombstones = state.deletedConversationTombstones
+        // Tombstones owned by syncCoordinator — already updated before this callback
         globalPinnedMemories = state.globalPinnedMemories
         promptPresets = PromptPreset.resolvedLibrary(from: state.promptPresets)
     }

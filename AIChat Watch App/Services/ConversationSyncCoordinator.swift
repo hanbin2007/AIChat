@@ -282,7 +282,7 @@ final class ConversationSyncCoordinator: ObservableObject {
         await onPersistConversation?(hydratedConversation, false, true)
     }
 
-    private func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
+    func mergeRemoteConversationSnapshot(_ remoteConversations: [ConversationThread]) async {
         for remoteConversation in remoteConversations {
             guard shouldAcceptRemoteConversation(remoteConversation) else {
                 continue
@@ -301,7 +301,7 @@ final class ConversationSyncCoordinator: ObservableObject {
         }
     }
 
-    private func mergeRemoteDeletedConversationTombstones(
+    func mergeRemoteDeletedConversationTombstones(
         _ incomingTombstones: [CompanionDeletedConversationTombstone]
     ) async {
         for tombstone in mergedDeletedConversationTombstones(incomingTombstones) {
