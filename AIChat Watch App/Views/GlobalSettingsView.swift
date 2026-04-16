@@ -3,285 +3,377 @@
 //  GlobalSettingsView.swift
 //  AIChat Watch App
 //
-//  Created by Codex on 2026/3/9.
+//  Redesigned 2026/4/15 — top-level navigation list with focused detail screens.
 //
 
 import SwiftUI
 
 struct GlobalSettingsView: View {
     @EnvironmentObject private var chatStore: ChatStore
-    @State private var isShowingConversationPresetPicker = false
-    @State private var isShowingTranscriptionPresetPicker = false
 
     var body: some View {
         NavigationStack {
             List {
-                Section("New Chats") {
-                    Picker("Model", selection: defaultModelBinding()) {
-                        ForEach(chatStore.availableModelOptions()) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-
-                    Picker("Thinking", selection: defaultThinkingBinding()) {
-                        ForEach(chatStore.availableDefaultThinkingIntensities()) { intensity in
-                            Text(intensity.displayName).tag(intensity)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Default System Prompt")
-                            .font(.headline)
-
-                        TextField(
-                            "Use the built-in prompt",
-                            text: defaultSystemPromptBinding(),
-                            axis: .vertical
+                Section(L10n.tr("settings.section.ai")) {
+                    NavigationLink {
+                        AISettingsDetailView()
+                            .environmentObject(chatStore)
+                    } label: {
+                        SettingsRow(
+                            icon: "sparkles",
+                            tint: .purple,
+                            title: L10n.tr("settings.ai.title"),
+                            detail: chatStore.defaultConversationConfiguration.model
                         )
-
-                        Button(L10n.tr("prompt_preset.pick")) {
-                            isShowingConversationPresetPicker = true
-                        }
-                        .disabled(chatStore.promptPresets(of: .conversation).isEmpty)
-
-                        Text("This prompt is applied to newly created conversations. Leave it empty to keep using the built-in system prompt.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
-                Section("Voice Recognition") {
-                    Picker("Voice Model", selection: transcriptionModelBinding()) {
-                        ForEach(chatStore.availableTranscriptionModelOptions()) { option in
-                            Text(option.title).tag(option.id)
-                        }
-                    }
-
-                    Toggle("Include Context", isOn: transcriptionContextBinding())
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Custom Prompt")
-                            .font(.headline)
-
-                        TextField(
-                            "Optional transcription hint",
-                            text: transcriptionPromptBinding(),
-                            axis: .vertical
+                Section(L10n.tr("settings.section.voice")) {
+                    NavigationLink {
+                        VoiceSettingsDetailView()
+                            .environmentObject(chatStore)
+                    } label: {
+                        SettingsRow(
+                            icon: "waveform",
+                            tint: .orange,
+                            title: L10n.tr("settings.voice.title"),
+                            detail: chatStore.selectedTranscriptionModel
                         )
-
-                        Button(L10n.tr("prompt_preset.pick")) {
-                            isShowingTranscriptionPresetPicker = true
-                        }
-                        .disabled(chatStore.promptPresets(of: .transcription).isEmpty)
-
-                        Text("Use this to add names, jargon, or style hints for speech recognition.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
-                Section("Requests") {
-                    Toggle("Auto Scroll", isOn: globalAutoScrollBinding())
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Auto Retry")
-                                .font(.headline)
-
-                            Text(L10n.format("settings.retry.watch", chatStore.sendFailureRetryLimit))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        HStack(spacing: 10) {
-                            retryAdjustmentButton(
-                                systemImage: "minus",
-                                action: {
-                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit - 1)
-                                }
-                            )
-                            .disabled(chatStore.sendFailureRetryLimit <= ChatStore.minimumSendFailureRetryLimit)
-
-                            Spacer(minLength: 0)
-
-                            Text("\(chatStore.sendFailureRetryLimit)")
-                                .font(.system(.title3, design: .rounded).weight(.semibold))
-                                .monospacedDigit()
-                                .frame(minWidth: 36)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(Color.white.opacity(0.08))
-                                )
-
-                            Spacer(minLength: 0)
-
-                            retryAdjustmentButton(
-                                systemImage: "plus",
-                                action: {
-                                    chatStore.updateSendFailureRetryLimit(chatStore.sendFailureRetryLimit + 1)
-                                }
-                            )
-                            .disabled(chatStore.sendFailureRetryLimit >= ChatStore.maximumSendFailureRetryLimit)
-                        }
+                Section(L10n.tr("settings.section.behavior")) {
+                    NavigationLink {
+                        BehaviorSettingsDetailView()
+                            .environmentObject(chatStore)
+                    } label: {
+                        SettingsRow(
+                            icon: "slider.horizontal.3",
+                            tint: .blue,
+                            title: L10n.tr("settings.behavior.title"),
+                            detail: chatStore.isGlobalAutoScrollEnabled
+                                ? L10n.tr("common.on")
+                                : L10n.tr("common.off")
+                        )
                     }
+                }
 
-                    Text("控制所有对话在收到新回复时是否自动跟随到底部。关闭后保留手动滚动位置。")
+                Section(L10n.tr("settings.section.memory")) {
+                    NavigationLink {
+                        PinnedMemorySettingsDetailView()
+                            .environmentObject(chatStore)
+                    } label: {
+                        SettingsRow(
+                            icon: "pin.fill",
+                            tint: .pink,
+                            title: L10n.tr("settings.memory.title"),
+                            detail: L10n.format(
+                                "settings.memory.count",
+                                chatStore.globalPinnedMemories.count
+                            )
+                        )
+                    }
+                }
+
+                Section(L10n.tr("settings.section.about")) {
+                    LabeledContent(
+                        L10n.tr("settings.about.version"),
+                        value: chatStore.appVersionDescription
+                    )
+                }
+            }
+            .navigationTitle(L10n.tr("settings.title"))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+// MARK: - Row Component
+
+private struct SettingsRow: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let detail: String?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(tint.opacity(0.20))
+                    .frame(width: 26, height: 26)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.callout)
+                if let detail, detail.isEmpty == false {
+                    Text(detail)
                         .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - AI Detail
+
+private struct AISettingsDetailView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+    @State private var isShowingPresetPicker = false
+
+    var body: some View {
+        List {
+            Section {
+                Picker(L10n.tr("settings.ai.default_model"), selection: modelBinding) {
+                    ForEach(chatStore.availableModelOptions()) { option in
+                        Text(option.title).tag(option.id)
+                    }
+                }
+
+                Picker(L10n.tr("settings.ai.thinking"), selection: thinkingBinding) {
+                    ForEach(chatStore.availableDefaultThinkingIntensities()) { intensity in
+                        Text(intensity.displayName).tag(intensity)
+                    }
+                }
+            }
+
+            Section {
+                TextField(
+                    L10n.tr("settings.ai.system_prompt.placeholder"),
+                    text: systemPromptBinding,
+                    axis: .vertical
+                )
+
+                Button(L10n.tr("prompt_preset.pick")) {
+                    isShowingPresetPicker = true
+                }
+                .disabled(chatStore.promptPresets(of: .conversation).isEmpty)
+            } header: {
+                Text(L10n.tr("settings.ai.system_prompt"))
+            } footer: {
+                Text(L10n.tr("settings.ai.system_prompt.footnote"))
+            }
+        }
+        .navigationTitle(L10n.tr("settings.ai.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingPresetPicker) {
+            PromptPresetPickerView(
+                kind: .conversation,
+                title: L10n.tr("prompt_preset.library.title"),
+                onSelect: { preset in
+                    chatStore.updateDefaultConversationSystemPrompt(preset.content)
+                }
+            )
+        }
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(
+            get: { chatStore.defaultConversationConfiguration.model },
+            set: { chatStore.updateDefaultConversationModel($0) }
+        )
+    }
+
+    private var thinkingBinding: Binding<AIThinkingIntensity> {
+        Binding(
+            get: { chatStore.defaultConversationConfiguration.thinkingIntensity },
+            set: { chatStore.updateDefaultConversationThinkingIntensity($0) }
+        )
+    }
+
+    private var systemPromptBinding: Binding<String> {
+        Binding(
+            get: { chatStore.defaultConversationSystemPrompt },
+            set: { chatStore.updateDefaultConversationSystemPrompt($0) }
+        )
+    }
+}
+
+// MARK: - Voice Detail
+
+private struct VoiceSettingsDetailView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+    @State private var isShowingPresetPicker = false
+
+    var body: some View {
+        List {
+            Section {
+                Picker(L10n.tr("settings.voice.model"), selection: modelBinding) {
+                    ForEach(chatStore.availableTranscriptionModelOptions()) { option in
+                        Text(option.title).tag(option.id)
+                    }
+                }
+            }
+
+            Section {
+                Toggle(L10n.tr("settings.voice.include_context"), isOn: contextBinding)
+            } footer: {
+                Text(L10n.tr("settings.voice.include_context.footnote"))
+            }
+
+            Section {
+                TextField(
+                    L10n.tr("settings.voice.custom_prompt.placeholder"),
+                    text: promptBinding,
+                    axis: .vertical
+                )
+
+                Button(L10n.tr("prompt_preset.pick")) {
+                    isShowingPresetPicker = true
+                }
+                .disabled(chatStore.promptPresets(of: .transcription).isEmpty)
+            } header: {
+                Text(L10n.tr("settings.voice.custom_prompt"))
+            } footer: {
+                Text(L10n.tr("settings.voice.custom_prompt.footnote"))
+            }
+        }
+        .navigationTitle(L10n.tr("settings.voice.title"))
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingPresetPicker) {
+            PromptPresetPickerView(
+                kind: .transcription,
+                title: L10n.tr("prompt_preset.library.title"),
+                onSelect: { preset in
+                    chatStore.updateTranscriptionCustomPrompt(preset.content)
+                }
+            )
+        }
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(
+            get: { chatStore.selectedTranscriptionModel },
+            set: { chatStore.updateTranscriptionModel($0) }
+        )
+    }
+
+    private var contextBinding: Binding<Bool> {
+        Binding(
+            get: { chatStore.isTranscriptionContextEnabled },
+            set: { chatStore.updateTranscriptionIncludesContext($0) }
+        )
+    }
+
+    private var promptBinding: Binding<String> {
+        Binding(
+            get: { chatStore.selectedTranscriptionCustomPrompt },
+            set: { chatStore.updateTranscriptionCustomPrompt($0) }
+        )
+    }
+}
+
+// MARK: - Behavior Detail
+
+private struct BehaviorSettingsDetailView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(L10n.tr("settings.behavior.auto_scroll"), isOn: autoScrollBinding)
+            } footer: {
+                Text(L10n.tr("settings.behavior.auto_scroll.footnote"))
+            }
+
+            Section {
+                Stepper(value: retryBinding, in: retryRange) {
+                    HStack {
+                        Text(L10n.tr("settings.behavior.retry_limit"))
+                        Spacer()
+                        Text("\(chatStore.sendFailureRetryLimit)")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } footer: {
+                Text(L10n.format("settings.retry.watch", chatStore.sendFailureRetryLimit))
+            }
+        }
+        .navigationTitle(L10n.tr("settings.behavior.title"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var autoScrollBinding: Binding<Bool> {
+        Binding(
+            get: { chatStore.isGlobalAutoScrollEnabled },
+            set: { chatStore.updateGlobalAutoScrollEnabled($0) }
+        )
+    }
+
+    private var retryBinding: Binding<Int> {
+        Binding(
+            get: { chatStore.sendFailureRetryLimit },
+            set: { chatStore.updateSendFailureRetryLimit($0) }
+        )
+    }
+
+    private var retryRange: ClosedRange<Int> {
+        ChatStore.minimumSendFailureRetryLimit...ChatStore.maximumSendFailureRetryLimit
+    }
+}
+
+// MARK: - Pinned Memory Detail
+
+private struct PinnedMemorySettingsDetailView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+
+    var body: some View {
+        List {
+            if chatStore.globalPinnedMemories.isEmpty {
+                Section {
+                    Text(L10n.tr("settings.memory.empty"))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            } else {
+                Section {
+                    ForEach(chatStore.globalPinnedMemories) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.text)
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                Section("Global Memory") {
-                    if chatStore.globalPinnedMemories.isEmpty {
-                        Text("No global pinned memory yet. Pin a message globally to make it reusable across conversations.")
+                            Text(
+                                L10n.format(
+                                    "settings.memory.updated",
+                                    item.updatedAt.formatted(date: .abbreviated, time: .shortened)
+                                )
+                            )
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        ForEach(chatStore.globalPinnedMemories) { item in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(item.text)
-                                    .font(.body)
-                                    .fixedSize(horizontal: false, vertical: true)
-
-                                Text(item.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-
-                                if chatStore.isReadOnlyMode == false {
-                                    Button("Remove", role: .destructive) {
-                                        Task {
-                                            await chatStore.removeGlobalPinnedMemory(id: item.id)
-                                        }
+                        }
+                        .padding(.vertical, 2)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if chatStore.isReadOnlyMode == false {
+                                Button(role: .destructive) {
+                                    Task {
+                                        await chatStore.removeGlobalPinnedMemory(id: item.id)
                                     }
-                                    .font(.caption2)
+                                } label: {
+                                    Label(
+                                        L10n.tr("settings.memory.remove"),
+                                        systemImage: "trash"
+                                    )
                                 }
                             }
-                            .padding(.vertical, 2)
                         }
                     }
                 }
-
-                Section("About") {
-                    LabeledContent("Version", value: chatStore.appVersionDescription)
-                }
-            }
-            .navigationTitle("Global Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $isShowingConversationPresetPicker) {
-                PromptPresetPickerView(
-                    kind: .conversation,
-                    title: L10n.tr("prompt_preset.library.title"),
-                    onSelect: { preset in
-                        chatStore.updateDefaultConversationSystemPrompt(preset.content)
-                    }
-                )
-            }
-            .sheet(isPresented: $isShowingTranscriptionPresetPicker) {
-                PromptPresetPickerView(
-                    kind: .transcription,
-                    title: L10n.tr("prompt_preset.library.title"),
-                    onSelect: { preset in
-                        chatStore.updateTranscriptionCustomPrompt(preset.content)
-                    }
-                )
             }
         }
-    }
-
-    private func defaultModelBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.defaultConversationConfiguration.model
-            },
-            set: { newValue in
-                chatStore.updateDefaultConversationModel(newValue)
-            }
-        )
-    }
-
-    private func globalAutoScrollBinding() -> Binding<Bool> {
-        Binding(
-            get: {
-                chatStore.isGlobalAutoScrollEnabled
-            },
-            set: { newValue in
-                chatStore.updateGlobalAutoScrollEnabled(newValue)
-            }
-        )
-    }
-
-    private func defaultThinkingBinding() -> Binding<AIThinkingIntensity> {
-        Binding(
-            get: {
-                chatStore.defaultConversationConfiguration.thinkingIntensity
-            },
-            set: { newValue in
-                chatStore.updateDefaultConversationThinkingIntensity(newValue)
-            }
-        )
-    }
-
-    private func defaultSystemPromptBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.defaultConversationSystemPrompt
-            },
-            set: { newValue in
-                chatStore.updateDefaultConversationSystemPrompt(newValue)
-            }
-        )
-    }
-
-    private func transcriptionModelBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.selectedTranscriptionModel
-            },
-            set: { newValue in
-                chatStore.updateTranscriptionModel(newValue)
-            }
-        )
-    }
-
-    private func transcriptionPromptBinding() -> Binding<String> {
-        Binding(
-            get: {
-                chatStore.selectedTranscriptionCustomPrompt
-            },
-            set: { newValue in
-                chatStore.updateTranscriptionCustomPrompt(newValue)
-            }
-        )
-    }
-
-    private func transcriptionContextBinding() -> Binding<Bool> {
-        Binding(
-            get: {
-                chatStore.isTranscriptionContextEnabled
-            },
-            set: { newValue in
-                chatStore.updateTranscriptionIncludesContext(newValue)
-            }
-        )
-    }
-
-    private func retryAdjustmentButton(systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .frame(width: 34, height: 34)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.10))
-                )
-        }
-        .buttonStyle(.plain)
+        .navigationTitle(L10n.tr("settings.memory.title"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 #endif

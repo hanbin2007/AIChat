@@ -118,6 +118,8 @@
 "error.retry.failure_with_operation" = "%@ failed after %d retries: %@";
 "error.retry.failure" = "Still failed after %d retries: %@";
 "common.all" = "All";
+"common.on" = "On";
+"common.off" = "Off";
 "common.unlimited" = "Unlimited";
 "common.duration.30m" = "30 min";
 "list.separator" = ", ";
@@ -166,6 +168,36 @@
 "conversation.microphone.preparing.zh" = "Mic...";
 "settings.retry.watch" = "Retry failed sends and voice transcriptions up to %d times.";
 "settings.retry.ios" = "Retry sends and voice transcriptions up to %d times, max 10.";
+"settings.title" = "Settings";
+"settings.section.ai" = "AI";
+"settings.section.voice" = "Voice";
+"settings.section.behavior" = "Behavior";
+"settings.section.memory" = "Memory";
+"settings.section.about" = "About";
+"settings.ai.title" = "AI";
+"settings.ai.default_model" = "Default Model";
+"settings.ai.thinking" = "Thinking";
+"settings.ai.system_prompt" = "System Prompt";
+"settings.ai.system_prompt.placeholder" = "Use built-in prompt";
+"settings.ai.system_prompt.footnote" = "Applied to newly created conversations. Leave empty to keep the built-in prompt.";
+"settings.voice.title" = "Voice";
+"settings.voice.model" = "Voice Model";
+"settings.voice.include_context" = "Include Context";
+"settings.voice.include_context.footnote" = "Lets transcription reference recent messages for better accuracy.";
+"settings.voice.custom_prompt" = "Transcription Hint";
+"settings.voice.custom_prompt.placeholder" = "Optional vocabulary or style hint";
+"settings.voice.custom_prompt.footnote" = "Use this to add names, jargon, or style hints for speech recognition.";
+"settings.behavior.title" = "Behavior";
+"settings.behavior.auto_scroll" = "Auto-follow bottom";
+"settings.behavior.auto_scroll.footnote" = "Automatically scroll to the bottom on new replies. Keeps manual scroll position when off.";
+"settings.behavior.retry_limit" = "Retry Attempts";
+"settings.memory.title" = "Pinned Memory";
+"settings.memory.empty" = "No pinned memory yet. Pin a message globally to reuse it across conversations.";
+"settings.memory.updated" = "Updated %@";
+"settings.memory.remove" = "Remove";
+"settings.memory.count" = "%d items";
+"settings.about.title" = "About";
+"settings.about.version" = "Version";
 "conversation.count.ios" = "%d msgs";
 
 /* Watch */
