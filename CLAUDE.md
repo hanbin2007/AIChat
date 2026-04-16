@@ -15,10 +15,10 @@ xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS Sim
 xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build
 
 # Run watch unit tests
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 10 (46mm)" test
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)" test
 
 # Run watch UI tests
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 10 (46mm)" -only-testing:"AIChat Watch AppUITests" test
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)" -only-testing:"AIChat Watch AppUITests" test
 ```
 
 **Important: Always verify changes compile before finishing. Run relevant tests when modifying testable code. Fix all build errors and test failures before considering work complete.**

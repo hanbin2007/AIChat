@@ -768,11 +768,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
             repeating: """
             ## 推导
             - 列出条件
-            - 公式：$$x^2 + y^2 = z^2$$
+            - 公式：`f(x) = x^2 + 1`
             """,
             count: 40
         ).joined(separator: "\n")
 
+        // Long markdown without math falls back to plain for perf, but
+        // expanded mode still returns markdown for full rendering.
         XCTAssertEqual(text.preferredAssistantMessageTextRenderingMode, .plain)
         XCTAssertEqual(
             AssistantMessageTextRenderingDecider.expandedMode(for: text),
@@ -2140,6 +2142,23 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge(),
             defaults: defaults
+        )
+
+        // Activate so isReadOnlyMode is false and createConversation succeeds.
+        store.activationBilling.setActivationStateForPreview(
+            OfflineActivationState(
+                license: OfflineActivationLicense(
+                    deviceToken: store.deviceIdentity.deviceToken,
+                    requestIssuedAt: .now,
+                    validFrom: .distantPast,
+                    validUntil: .distantFuture,
+                    messageLimit: nil,
+                    modelMask: 0xFFFF
+                ),
+                activationCodeFingerprint: "test-fingerprint",
+                activatedAt: .now,
+                usedMessageCount: 0
+            )
         )
 
         store.updateDefaultConversationModel("gemini-3.1-pro-preview")
