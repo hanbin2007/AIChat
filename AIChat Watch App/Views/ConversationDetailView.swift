@@ -259,6 +259,7 @@ struct ConversationDetailView: View {
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
                                 forceExpandedContent: latestMessageID == message.id,
                                 isLatestReplyAnchorTarget: latestMessageID == message.id && message.role == .assistant,
+                                streamingPacer: chatStore.streamingPacer,
                                 onPinMessage: { messageID, convoID, scope in
                                     await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
                                 }

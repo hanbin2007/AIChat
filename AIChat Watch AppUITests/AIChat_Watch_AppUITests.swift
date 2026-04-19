@@ -844,6 +844,40 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
     }
 
+    /// High-pressure streaming: ~66 tokens/s × 6s + long thought summary +
+    /// aggressive scroll loop, watchOS hang monitor enabled. If the pacer
+    /// or the 1 Hz checkpoint path regresses to touch `@Published
+    /// conversations` per-token again, the hang monitor trips here first.
+    @MainActor
+    func testStreamingStressWithHangMonitor() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_stress"
+        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
+        app.launch()
+
+        let scrollView = app.scrollViews["conversation.messages.scroll"]
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
+
+        // Let the stream start (service fires after 2s bootstrap delay,
+        // plus a short amount of thought summary before the answer flood).
+        RunLoop.current.run(until: Date().addingTimeInterval(3))
+
+        // Eight rounds of back-to-back swipes with NO settle pause between
+        // opposite swipes. The previous perf test inserts 0.3s between
+        // each swipe — this one deliberately doesn't, to stress the
+        // scroll-gesture suppression machinery.
+        for _ in 1...8 {
+            app.swipeUp()
+            app.swipeDown()
+        }
+
+        // Wait for the full answer flood (400 chunks × 15ms ≈ 6s plus margin).
+        RunLoop.current.run(until: Date().addingTimeInterval(8))
+
+        assertZeroDetectedHangs(in: app, context: "streaming-stress")
+        attachScreenshot(app, named: "streaming-stress-finish")
+    }
+
     @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.

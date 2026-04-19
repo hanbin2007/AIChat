@@ -332,74 +332,6 @@ private struct AssistantReplyStreamingSnapshot: Sendable {
     var attachments: [ChatAttachment] = []
 }
 
-private nonisolated func collectAssistantReplyStream(
-    from stream: AsyncThrowingStream<AIStreamEvent, Error>,
-    flushInterval: TimeInterval,
-    persistenceInterval: TimeInterval,
-    onFlush: @escaping @MainActor (_ snapshot: AssistantReplyStreamingSnapshot, _ shouldPersist: Bool) async -> Void
-) async throws -> AssistantReplyStreamingSnapshot {
-    var snapshot = AssistantReplyStreamingSnapshot()
-    var lastFlushAt = Date.distantPast
-    var lastPersistAt = Date.distantPast
-    var hasFlushedVisibleContent = false
-    var hasPersistedStreamingProgress = false
-
-    func flushIfNeeded(force: Bool = false) async {
-        let now = Date.now
-        let shouldFlushVisibleContent =
-            force ||
-            hasFlushedVisibleContent == false ||
-            now.timeIntervalSince(lastFlushAt) >= flushInterval
-        let shouldPersistStreamingProgress =
-            force ||
-            hasPersistedStreamingProgress == false ||
-            now.timeIntervalSince(lastPersistAt) >= persistenceInterval
-
-        guard shouldFlushVisibleContent || shouldPersistStreamingProgress else {
-            return
-        }
-
-        await onFlush(snapshot, shouldPersistStreamingProgress)
-
-        if shouldFlushVisibleContent {
-            lastFlushAt = now
-            hasFlushedVisibleContent = true
-        }
-
-        if shouldPersistStreamingProgress {
-            lastPersistAt = now
-            hasPersistedStreamingProgress = true
-        }
-    }
-
-    for try await event in stream {
-        try Task.checkCancellation()
-
-        switch event {
-        case .answerDelta(let delta):
-            snapshot.text.append(delta)
-        case .thoughtDelta(let delta):
-            snapshot.thoughtSummary.append(delta)
-        case .modelResponseParts(let modelResponseParts):
-            snapshot.modelResponseParts = modelResponseParts
-        case .attachment(let attachment):
-            guard snapshot.attachments.contains(where: {
-                $0.mimeType == attachment.mimeType && $0.data == attachment.data
-            }) == false else {
-                continue
-            }
-
-            snapshot.attachments.append(attachment)
-        }
-
-        await flushIfNeeded(force: hasFlushedVisibleContent == false)
-    }
-
-    await flushIfNeeded(force: true)
-
-    return snapshot
-}
-
 @MainActor
 final class ChatStore: ObservableObject {
     static let defaultSendFailureRetryLimit = 3
@@ -432,11 +364,18 @@ final class ChatStore: ObservableObject {
     @Published private(set) var globalPinnedMemories: [PinnedMemoryItem] = []
     @Published private(set) var promptPresets: [PromptPreset] = PromptPreset.builtInPresets
 
-    /// When `true`, streaming UI flushes are suppressed — the data keeps
-    /// accumulating in the `collectAssistantReplyStream` snapshot but no
-    /// `@Published` mutations reach SwiftUI, keeping the main thread free
-    /// for scroll rendering.
+    /// When `true`, the 1 Hz in-memory checkpoint inside the streaming
+    /// loop is suppressed — the per-attempt snapshot keeps accumulating
+    /// and the pacer keeps buffering, but no `@Published conversations`
+    /// mutation or disk write fires. Used to stay out of the main thread
+    /// during active scroll gestures.
     private(set) var isStreamingFlushSuppressed = false
+
+    /// Drives per-token reveal at ~30Hz inside the streaming bubble only.
+    /// Observing this instance is scoped — the rest of the view tree stays
+    /// completely quiet during streaming, avoiding the per-flush cascade
+    /// that the old 120ms `@Published conversations` mutation caused.
+    let streamingPacer = StreamingTextPacer()
 
     let configuration: AppConfiguration
     let storageDescription: String
@@ -1135,13 +1074,14 @@ final class ChatStore: ObservableObject {
         defaults.set(enabled, forKey: DefaultsKeys.globalAutoScrollEnabled)
     }
 
-    /// Toggle streaming flush suppression.  When suppressed, the
-    /// `collectAssistantReplyStream` `onFlush` callback becomes a
-    /// no-op, keeping the main thread free for scroll rendering.
-    /// The streaming snapshot keeps accumulating and will be pushed
-    /// on the next unsuppressed flush.
+    /// Toggle streaming flush suppression. Suppressed → the 1 Hz
+    /// in-memory checkpoint becomes a no-op AND the pacer's reveal
+    /// ticker pauses, so neither the main thread nor the streaming
+    /// bubble subtree is invalidated during the gesture. Buffered text
+    /// drains on the next unsuppressed tick.
     func setStreamingFlushSuppressed(_ suppressed: Bool) {
         isStreamingFlushSuppressed = suppressed
+        streamingPacer.setPaused(suppressed)
     }
 
     func updateDefaultConversationModel(_ model: String) {
@@ -2382,6 +2322,11 @@ final class ChatStore: ObservableObject {
         for attempt in 0...maximumRetryCount {
             attemptCount = attempt + 1
 
+            // Declared at attempt scope so the catch can read accumulated
+            // partial content without doing a round-trip through @Published
+            // conversations state (which is no longer touched per-token).
+            var snapshot = AssistantReplyStreamingSnapshot()
+
             do {
                 if attempt > 0 {
                     upsertAssistantMessage(
@@ -2403,41 +2348,77 @@ final class ChatStore: ObservableObject {
 
                 try Task.checkCancellation()
 
-                let streamedSnapshot = try await collectAssistantReplyStream(
-                    from: aiService.streamReply(for: requestConversation),
-                    flushInterval: 0.12,
-                    persistenceInterval: Self.streamingProgressPersistenceInterval
-                ) { snapshot, shouldPersist in
-                    guard self.isStreamingFlushSuppressed == false else {
-                        return
+                streamingPacer.begin(messageID: assistantMessageID)
+
+                var lastPersistAt = Date.distantPast
+                var hasPersistedStreamingProgress = false
+
+                for try await event in aiService.streamReply(for: requestConversation) {
+                    try Task.checkCancellation()
+
+                    switch event {
+                    case .answerDelta(let delta):
+                        snapshot.text.append(delta)
+                        streamingPacer.appendAnswer(delta)
+                    case .thoughtDelta(let delta):
+                        snapshot.thoughtSummary.append(delta)
+                        streamingPacer.appendThoughtSummary(delta)
+                    case .modelResponseParts(let modelResponseParts):
+                        snapshot.modelResponseParts = modelResponseParts
+                    case .attachment(let attachment):
+                        guard snapshot.attachments.contains(where: {
+                            $0.mimeType == attachment.mimeType && $0.data == attachment.data
+                        }) == false else {
+                            break
+                        }
+                        snapshot.attachments.append(attachment)
                     }
 
-                    self.upsertAssistantMessage(
-                        id: assistantMessageID,
-                        in: conversationID,
-                        text: snapshot.text,
-                        thoughtSummary: snapshot.thoughtSummary,
-                        modelResponseParts: snapshot.modelResponseParts,
-                        attachments: snapshot.attachments,
-                        status: .streaming,
-                        fallbackCreatedAt: assistantMessageCreatedAt
-                    )
+                    let now = Date.now
+                    let shouldPersistStreamingProgress =
+                        hasPersistedStreamingProgress == false ||
+                        now.timeIntervalSince(lastPersistAt) >= Self.streamingProgressPersistenceInterval
 
-                    if shouldPersist,
-                       let streamingConversation = self.conversation(id: conversationID) {
-                        await self.persist(streamingConversation, sync: false)
+                    if shouldPersistStreamingProgress, isStreamingFlushSuppressed == false {
+                        // 1 Hz in-memory + disk checkpoint. Keeps the test
+                        // contract (conversation(id:).messages.last.text
+                        // reflects streaming progress) and provides crash-
+                        // recovery. Per-token reveal is handled by the pacer
+                        // — this path stays cold during normal streaming.
+                        upsertAssistantMessage(
+                            id: assistantMessageID,
+                            in: conversationID,
+                            text: snapshot.text,
+                            thoughtSummary: snapshot.thoughtSummary,
+                            modelResponseParts: snapshot.modelResponseParts,
+                            attachments: snapshot.attachments,
+                            status: .streaming,
+                            fallbackCreatedAt: assistantMessageCreatedAt
+                        )
+
+                        if let streamingConversation = conversation(id: conversationID) {
+                            await persist(streamingConversation, sync: false)
+                        }
+
+                        lastPersistAt = now
+                        hasPersistedStreamingProgress = true
                     }
                 }
 
                 try Task.checkCancellation()
 
+                // Pixels catch up with the final snapshot before the bubble
+                // flips out of streaming mode — avoids a last-frame glitch
+                // where the markdown renderer swaps in with stale plain text.
+                await streamingPacer.finalize()
+
                 upsertAssistantMessage(
                     id: assistantMessageID,
                     in: conversationID,
-                    text: streamedSnapshot.text,
-                    thoughtSummary: streamedSnapshot.thoughtSummary,
-                    modelResponseParts: streamedSnapshot.modelResponseParts,
-                    attachments: streamedSnapshot.attachments,
+                    text: snapshot.text,
+                    thoughtSummary: snapshot.thoughtSummary,
+                    modelResponseParts: snapshot.modelResponseParts,
+                    attachments: snapshot.attachments,
                     status: .sent,
                     fallbackCreatedAt: assistantMessageCreatedAt
                 )
@@ -2454,23 +2435,12 @@ final class ChatStore: ObservableObject {
                 }
                 return
             } catch {
+                streamingPacer.cancel()
                 finalError = error
-                finalStreamedText = conversation(id: conversationID)?
-                    .messages
-                    .first(where: { $0.id == assistantMessageID })?
-                    .text ?? ""
-                finalStreamedThoughtSummary = conversation(id: conversationID)?
-                    .messages
-                    .first(where: { $0.id == assistantMessageID })?
-                    .thoughtSummary ?? ""
-                finalStreamedModelResponseParts = conversation(id: conversationID)?
-                    .messages
-                    .first(where: { $0.id == assistantMessageID })?
-                    .modelResponseParts
-                finalStreamedAttachments = conversation(id: conversationID)?
-                    .messages
-                    .first(where: { $0.id == assistantMessageID })?
-                    .attachments ?? []
+                finalStreamedText = snapshot.text
+                finalStreamedThoughtSummary = snapshot.thoughtSummary
+                finalStreamedModelResponseParts = snapshot.modelResponseParts
+                finalStreamedAttachments = snapshot.attachments
 
                 let hasRemainingRetries = attempt < maximumRetryCount
                 guard hasRemainingRetries, shouldRetrySend(after: error) else {

@@ -21,6 +21,10 @@ struct ChatBubbleView: View, Equatable {
     let suspendStreamingRender: Bool
     let forceExpandedContent: Bool
     let isLatestReplyAnchorTarget: Bool
+    /// Scoped publisher for streaming text reveal. Only the currently-streaming
+    /// bubble subscribes to it (via `StreamingAssistantBodyView`) so other
+    /// bubbles and the surrounding detail view stay untouched per-token.
+    let streamingPacer: StreamingTextPacer?
     var onPinMessage: ((UUID, UUID, PinnedMemoryScope) async -> Void)?
 
     @State private var isShowingMessageActions = false
@@ -39,6 +43,7 @@ struct ChatBubbleView: View, Equatable {
         suspendStreamingRender: Bool = false,
         forceExpandedContent: Bool = false,
         isLatestReplyAnchorTarget: Bool = false,
+        streamingPacer: StreamingTextPacer? = nil,
         onPinMessage: ((UUID, UUID, PinnedMemoryScope) async -> Void)? = nil
     ) {
         self.conversationID = conversationID
@@ -46,6 +51,7 @@ struct ChatBubbleView: View, Equatable {
         self.suspendStreamingRender = suspendStreamingRender
         self.forceExpandedContent = forceExpandedContent
         self.isLatestReplyAnchorTarget = isLatestReplyAnchorTarget
+        self.streamingPacer = streamingPacer
         self.onPinMessage = onPinMessage
         _renderedText = State(initialValue: message.cleanedText)
         _renderedThoughtSummary = State(initialValue: message.cleanedThoughtSummary)
@@ -194,42 +200,58 @@ struct ChatBubbleView: View, Equatable {
                 AttachmentGridView(attachments: message.attachments)
             }
 
-            if isUser == false, let thoughtSummary = displayedThoughtSummary {
-                ThoughtSummaryCard(
-                    thoughtSummary: thoughtSummary,
-                    isStreaming: message.status == .streaming,
-                    toggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
-                    stateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier
+            if isStreamingAssistant, let pacer = streamingPacer {
+                // Pacer-scoped rendering. Only this subtree reacts to
+                // per-token reveal; ChatBubbleView itself does not subscribe.
+                // Fallbacks are the @State `renderedText` / `renderedThoughtSummary`
+                // which track `message.text` via `.compatibleOnChange`. If this
+                // bubble is NOT the pacer's current target (i.e. user has a
+                // second stream running in another conversation), those
+                // fallbacks render the last-checkpointed text instead of
+                // blanking — critical for the multi-stream navigation case.
+                StreamingAssistantBodyView(
+                    pacer: pacer,
+                    messageID: message.id,
+                    fallbackText: renderedText,
+                    fallbackThoughtSummary: renderedThoughtSummary,
+                    forceExpandedContent: forceExpandedContent,
+                    isLatestReplyAnchorTarget: isLatestReplyAnchorTarget,
+                    thoughtSummaryToggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
+                    thoughtSummaryStateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier,
+                    messageBodyAccessibilityIdentifier: messageBodyAccessibilityIdentifier,
+                    expandButtonAccessibilityIdentifier: messageExpandButtonAccessibilityIdentifier,
+                    latestReplyStartAnchorID: latestReplyStartAnchorID,
+                    latestReplyStartAccessibilityIdentifier: latestReplyStartAccessibilityIdentifier
                 )
-            }
-
-            if message.status == .streaming, displayedText.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.white.opacity(0.8))
-                    Text(displayedThoughtSummary == nil ? "Thinking" : "Replying")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-            } else if message.status == .failed, displayedText.isEmpty {
-                Text("Stopped")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.8))
-            } else if displayedText.isEmpty == false {
-                if isUser == false, isLatestReplyAnchorTarget {
-                    MessageAnchorMarker(
-                        anchorID: latestReplyStartAnchorID,
-                        accessibilityIdentifier: latestReplyStartAccessibilityIdentifier
+            } else {
+                if isUser == false, let thoughtSummary = displayedThoughtSummary {
+                    ThoughtSummaryCard(
+                        thoughtSummary: thoughtSummary,
+                        isStreaming: message.status == .streaming,
+                        toggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
+                        stateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier
                     )
                 }
 
-                messageTextContent
+                if message.status == .failed, displayedText.isEmpty {
+                    Text("Stopped")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                } else if displayedText.isEmpty == false {
+                    if isUser == false, isLatestReplyAnchorTarget {
+                        MessageAnchorMarker(
+                            anchorID: latestReplyStartAnchorID,
+                            accessibilityIdentifier: latestReplyStartAccessibilityIdentifier
+                        )
+                    }
+
+                    messageTextContent
+                }
             }
 
             if isStreamingAssistant {
                 StreamingReplyStatusView(
-                    title: isStreamingPaused ? "Pause" : (displayedText.isEmpty ? (displayedThoughtSummary == nil ? "Thinking" : "Replying") : "Live"),
+                    title: isStreamingPaused ? "Pause" : "Replying",
                     animatesTrack: suspendStreamingRender == false,
                     isPaused: isStreamingPaused
                 )
@@ -276,7 +298,7 @@ struct ChatBubbleView: View, Equatable {
         .contentShape(bubbleShape)
         .overlay(
             bubbleShape
-                .stroke(Color.white.opacity(isUser ? 0.16 : 0.08), lineWidth: 1)
+                .stroke(isUser ? DS.Bubble.userStroke : DS.Bubble.assistantStroke, lineWidth: 1)
         )
         .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
         #if os(watchOS)
@@ -463,20 +485,15 @@ struct ChatBubbleView: View, Equatable {
     }
 
     private var bubbleBackground: AnyShapeStyle {
+        // Both user + assistant now source from the central design system
+        // so one place controls the app's chat material language. The
+        // assistant gradient replaces a flat `black.opacity(0.38)` fill
+        // that read as dead space against watchOS black — a faint
+        // vertical gradient adds depth without fighting the text.
         if isUser {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.0, green: 0.56, blue: 0.70),
-                        Color(red: 0.0, green: 0.39, blue: 0.56)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            return AnyShapeStyle(DS.Bubble.userFill)
         }
-
-        return AnyShapeStyle(Color.black.opacity(0.38))
+        return AnyShapeStyle(DS.Bubble.assistantFill)
     }
 }
 
@@ -694,6 +711,89 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(accessibilityIdentifier)
         .accessibilityValue(expansionStateAccessibilityValue)
+    }
+}
+
+/// Scoped streaming render body for the assistant bubble.
+///
+/// Observes `StreamingTextPacer` directly so that per-token reveals only
+/// invalidate this small subtree — the enclosing `ChatBubbleView` does not
+/// subscribe. This is the counterpart to the removed 120ms flush throttle:
+/// visible text now arrives frame-by-frame at ~30Hz from the pacer rather
+/// than in 120ms chunks through `@Published conversations`.
+///
+/// `fallbackText` / `fallbackThoughtSummary` cover the multi-stream case:
+/// when the user has two conversations streaming concurrently, the pacer's
+/// target is whichever stream began most recently. The other conversation's
+/// bubble falls back to `message.text` (updated ≥1 Hz via the streaming
+/// checkpoint), so its partial reply never disappears when the user
+/// navigates between them.
+private struct StreamingAssistantBodyView: View {
+    @ObservedObject var pacer: StreamingTextPacer
+
+    let messageID: UUID
+    let fallbackText: String
+    let fallbackThoughtSummary: String?
+    let forceExpandedContent: Bool
+    let isLatestReplyAnchorTarget: Bool
+    let thoughtSummaryToggleAccessibilityIdentifier: String
+    let thoughtSummaryStateAccessibilityIdentifier: String
+    let messageBodyAccessibilityIdentifier: String
+    let expandButtonAccessibilityIdentifier: String
+    let latestReplyStartAnchorID: String
+    let latestReplyStartAccessibilityIdentifier: String
+
+    private var isTargetingThisMessage: Bool {
+        pacer.targetMessageID == messageID
+    }
+
+    private var revealedText: String {
+        isTargetingThisMessage ? pacer.revealedText : fallbackText
+    }
+
+    private var revealedThoughtSummary: String {
+        if isTargetingThisMessage {
+            return pacer.revealedThoughtSummary
+        }
+        return fallbackThoughtSummary ?? ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if revealedThoughtSummary.isEmpty == false {
+                ThoughtSummaryCard(
+                    thoughtSummary: revealedThoughtSummary,
+                    isStreaming: true,
+                    toggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
+                    stateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier
+                )
+            }
+
+            if revealedText.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white.opacity(0.8))
+                    Text(revealedThoughtSummary.isEmpty ? "Thinking" : "Replying")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            } else {
+                if isLatestReplyAnchorTarget {
+                    MessageAnchorMarker(
+                        anchorID: latestReplyStartAnchorID,
+                        accessibilityIdentifier: latestReplyStartAccessibilityIdentifier
+                    )
+                }
+
+                MessageBodyTextView(
+                    text: revealedText,
+                    forceExpanded: forceExpandedContent,
+                    accessibilityIdentifier: messageBodyAccessibilityIdentifier,
+                    expandButtonAccessibilityIdentifier: expandButtonAccessibilityIdentifier
+                )
+            }
+        }
     }
 }
 

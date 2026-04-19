@@ -284,6 +284,8 @@ private struct UITestBootstrap {
             return makeLatestThoughtSummaryCollapsedBootstrap()
         case "conversation_streaming_scroll_performance":
             return makeStreamingScrollPerformanceBootstrap()
+        case "conversation_streaming_stress":
+            return makeStreamingStressBootstrap()
         default:
             return nil
         }
@@ -745,6 +747,71 @@ private struct UITestBootstrap {
         )
     }
 
+    /// Stress scenario: high-rate streaming (≈66 tokens/s for 6s → ~12KB
+    /// total) + long thought summary. Exercises the pacer's adaptive
+    /// chars-per-tick drain and the scroll-suppression gate under
+    /// sustained pressure. If the pacer's main-thread accounting
+    /// regresses (e.g., re-introduced @Published churn per token), the
+    /// watchOS hang monitor will fire during the paired UI test's
+    /// aggressive swipe loop.
+    private static func makeStreamingStressBootstrap() -> UITestBootstrap {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000409") ?? UUID()
+        let seededDate = Date(timeIntervalSince1970: 1_762_404_000)
+        var messages: [ChatMessage] = []
+
+        for index in 1...6 {
+            let baseDate = seededDate.addingTimeInterval(Double(index * 60))
+            messages.append(
+                ChatMessage(role: .user, text: "Stress question \(index)", createdAt: baseDate)
+            )
+            messages.append(
+                ChatMessage(
+                    role: .assistant,
+                    text: """
+                    Stress answer \(index)
+                    Padding so the transcript is tall enough to swipe.
+                    Additional filler line kept deterministic.
+                    """,
+                    createdAt: baseDate.addingTimeInterval(10)
+                )
+            )
+        }
+
+        messages.append(
+            ChatMessage(
+                role: .user,
+                text: "Emit a very long stream so I can stress the pacer and scroll concurrently.",
+                createdAt: seededDate.addingTimeInterval(700)
+            )
+        )
+
+        let conversation = ConversationThread(
+            id: conversationID,
+            title: "Streaming Stress",
+            createdAt: seededDate,
+            updatedAt: seededDate.addingTimeInterval(700),
+            isFavorite: false,
+            messages: messages
+        )
+
+        let store = ChatStore.previewStore(
+            conversations: [conversation],
+            aiService: UITestStreamingStressStreamingService(),
+            completionFeedbackProvider: NoopCompletionFeedbackProvider()
+        )
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await store.retryLatestReply(in: conversationID)
+        }
+
+        return UITestBootstrap(
+            store: store,
+            initialConversationID: nil,
+            launchDestination: .conversationDetail(conversationID)
+        )
+    }
+
     private static func makeLongCollapsibleUITestReply(
         prefix: String,
         hiddenTailMarker: String,
@@ -1100,6 +1167,50 @@ private struct UITestStreamingScrollStreamingService: AIStreamingService {
                     continuation.yield(
                         .answerDelta(
                             "Streaming chunk \(index): padding text that grows the bubble while the UI test scrolls up and down to measure hitch ratio.\n"
+                        )
+                    )
+                }
+
+                continuation.finish()
+            }
+        }
+    }
+}
+
+/// Stress-test streaming service. Emits ~66 tokens/sec for ~6s with a
+/// leading thought summary. Designed to reveal regressions in the
+/// pacer's adaptive drain and in the 1 Hz checkpoint gate under
+/// sustained high-rate input + concurrent scroll.
+private struct UITestStreamingStressStreamingService: AIStreamingService {
+    static let thoughtChunkCount = 12
+    static let answerChunkCount = 400
+    static let answerChunkSleepNanoseconds: UInt64 = 15_000_000
+
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                for index in 1...Self.thoughtChunkCount {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                    continuation.yield(
+                        .thoughtDelta(
+                            "Thought \(index): exercising the pacer's thought-track drain under pressure. "
+                        )
+                    )
+                }
+
+                for index in 1...Self.answerChunkCount {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: Self.answerChunkSleepNanoseconds)
+                    continuation.yield(
+                        .answerDelta(
+                            "Stress chunk \(index): padding keeps the bubble growing so the reveal pacer has to drain continuously while the UI test scrolls aggressively. "
                         )
                     )
                 }

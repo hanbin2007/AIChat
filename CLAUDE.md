@@ -14,12 +14,17 @@ xcodebuild -scheme "AIChat Watch App" -destination "generic/platform=watchOS Sim
 # macOS Relay app
 xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build
 
-# Run watch unit tests
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)" test
+# Run watch unit tests (use the paired simulator by ID — `name=` is ambiguous
+# on machines with multiple Apple Watch Series 11 46mm runtimes installed)
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test
 
 # Run watch UI tests
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,name=Apple Watch Series 11 (46mm)" -only-testing:"AIChat Watch AppUITests" test
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" -only-testing:"AIChat Watch AppUITests" test
 ```
+
+**Known-good simulator (verified 2026-04-19):**
+- Apple Watch Series 11 (46mm), watchOS 26.0, UDID `93A83695-2859-4388-B337-957616D03F55`, paired with iPhone 17 UDID `471F8F79-1922-43C8-A613-168B1E4C15CA`. Other installed watchOS simulators are not reliably usable (unpaired / name collisions across 26.0 and 26.2 runtimes).
+- Write tests as `async throws` even when the logic is synchronous — watchOS 26 has a test-runner launch race that segfaults the first sync `@MainActor` test per process.
 
 **Important: Always verify changes compile before finishing. Run relevant tests when modifying testable code. Fix all build errors and test failures before considering work complete.**
 
