@@ -1,7 +1,7 @@
 #include? "Secrets.xcconfig"
 
 APP_MARKETING_VERSION = 2.1
-APP_BUILD_VERSION = 3B
+APP_BUILD_VERSION = 4
 
 AI_BACKEND_MODE = relay
 GEMINI_MODEL = gemini-3-flash-preview

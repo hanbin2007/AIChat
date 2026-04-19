@@ -12,7 +12,7 @@ struct AIChatRelayApp: App {
     @StateObject private var controller = RelayServerController()
 
     var body: some Scene {
-        WindowGroup {
+        Window("AIChat Relay", id: "relay-dashboard") {
             RelayDashboardView(controller: controller)
                 .frame(minWidth: 1120, minHeight: 860)
                 .task {
@@ -21,5 +21,11 @@ struct AIChatRelayApp: App {
         }
         .defaultSize(width: 1320, height: 920)
         .windowResizability(.contentMinSize)
+        .commands {
+            RelayAppCommands()
+            RelayServerCommands()
+            RelayViewCommands()
+            RelayConsoleCommands()
+        }
     }
 }
