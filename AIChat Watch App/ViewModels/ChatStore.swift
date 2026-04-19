@@ -398,6 +398,7 @@ final class ChatStore: ObservableObject {
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
+    private var initialLoadTask: Task<Void, Never>?
     private var conversationIndexByID: [UUID: Int] = [:]
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -532,15 +533,30 @@ final class ChatStore: ObservableObject {
     var activationAllowedModelIDs: Set<String>? { activationBilling.activationAllowedModelIDs }
 
     func loadConversationsIfNeeded() async {
-        guard hasLoadedConversations == false else {
+        if hasLoadedConversations { return }
+        if let inFlight = initialLoadTask {
+            await inFlight.value
             return
         }
 
-        hasLoadedConversations = true
-        isInitialConversationLoadInProgress = true
-        defer {
-            isInitialConversationLoadInProgress = false
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performInitialLoad()
         }
+        initialLoadTask = task
+        await task.value
+        initialLoadTask = nil
+    }
+
+    /// Actual initial-load body. Splitting this out lets `loadConversationsIfNeeded`
+    /// de-duplicate concurrent callers via `initialLoadTask`, and — crucially —
+    /// lets us flip `hasLoadedConversations = true` only after the load fully
+    /// succeeds. A transient failure (cold disk I/O, tombstone decode glitch,
+    /// sync-startup contention) used to set the flag first and leave the UI
+    /// blank forever; now it leaves the flag false so the next caller retries.
+    private func performInitialLoad() async {
+        isInitialConversationLoadInProgress = true
+        defer { isInitialConversationLoadInProgress = false }
         await refreshActivationState()
 
         do {
@@ -558,6 +574,7 @@ final class ChatStore: ObservableObject {
             }
             globalPinnedMemories = try await repository.loadGlobalPinnedMemories()
             promptPresets = PromptPreset.resolvedLibrary(from: try await repository.loadPromptPresets())
+            hasLoadedConversations = true
             await syncCoordinator.reconcileRemoteStores(requestBootstrap: false)
             syncCoordinator.requestBootstrapIfPossible()
             syncCoordinator.pushCurrentSyncSummary(force: true)
@@ -1777,6 +1794,22 @@ final class ChatStore: ObservableObject {
     }
 
     private func applySyncStoreState(_ state: ConversationSyncStoreState) {
+        // Safety net: a merged sync state with zero conversations AND zero
+        // tombstones, while we hold non-empty local data, is never a legitimate
+        // outcome — a real "user deleted everything" merge still carries the
+        // tombstones. Refusing to apply it prevents any latent sync/merge bug
+        // from silently wiping the user's history. Non-conversation fields
+        // still flow through so presets/memories can converge normally.
+        let isSuspiciousEmptyWipe = state.conversations.isEmpty
+            && state.deletedConversationTombstones.isEmpty
+            && conversations.isEmpty == false
+        if isSuspiciousEmptyWipe {
+            startupError = "Refused a sync update that would erase all local conversations."
+            globalPinnedMemories = state.globalPinnedMemories
+            promptPresets = PromptPreset.resolvedLibrary(from: state.promptPresets)
+            return
+        }
+
         let removedConversationIDs = Set(conversations.map(\.id))
             .subtracting(state.conversations.map(\.id))
 

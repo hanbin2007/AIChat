@@ -35,7 +35,7 @@ final class SettingsServiceTests: XCTestCase {
     // MARK: - Send Failure Retry Limit
 
     @MainActor
-    func testDefaultSendFailureRetryLimitIsThree() {
+    func testDefaultSendFailureRetryLimitIsThree() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -43,7 +43,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testSendFailureRetryLimitClampsToSupportedBounds() {
+    func testSendFailureRetryLimitClampsToSupportedBounds() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -55,7 +55,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testSendFailureRetryLimitPersistsAcrossRestart() {
+    func testSendFailureRetryLimitPersistsAcrossRestart() async throws {
         let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -79,7 +79,7 @@ final class SettingsServiceTests: XCTestCase {
     // MARK: - Default Conversation Configuration
 
     @MainActor
-    func testDefaultConversationModelPersistsAcrossRestart() {
+    func testDefaultConversationModelPersistsAcrossRestart() async throws {
         let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -101,7 +101,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultConversationThinkingIntensityNormalizesForModel() {
+    func testDefaultConversationThinkingIntensityNormalizesForModel() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -117,7 +117,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultConversationSystemPromptTrimsWhitespace() {
+    func testDefaultConversationSystemPromptTrimsWhitespace() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -128,7 +128,7 @@ final class SettingsServiceTests: XCTestCase {
     // MARK: - Global Auto Scroll
 
     @MainActor
-    func testGlobalAutoScrollEnabledDefaultsToTrue() {
+    func testGlobalAutoScrollEnabledDefaultsToTrue() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -136,7 +136,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testGlobalAutoScrollEnabledPersistsToggle() {
+    func testGlobalAutoScrollEnabledPersistsToggle() async throws {
         let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -160,7 +160,7 @@ final class SettingsServiceTests: XCTestCase {
     // MARK: - Transcription
 
     @MainActor
-    func testTranscriptionModelPersists() {
+    func testTranscriptionModelPersists() async throws {
         let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -182,7 +182,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testTranscriptionCustomPromptPersists() {
+    func testTranscriptionCustomPromptPersists() async throws {
         let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -204,7 +204,7 @@ final class SettingsServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testTranscriptionIncludesContextDefaultsToTrue() {
+    func testTranscriptionIncludesContextDefaultsToTrue() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
@@ -214,7 +214,7 @@ final class SettingsServiceTests: XCTestCase {
     // MARK: - objectWillChange
 
     @MainActor
-    func testObjectWillChangeFiresOnPropertyUpdate() {
+    func testObjectWillChangeFiresOnPropertyUpdate() async throws {
         let (service, defaults, suiteName) = makeService()
         defer { cleanUp(suiteName: suiteName, defaults: defaults) }
 
