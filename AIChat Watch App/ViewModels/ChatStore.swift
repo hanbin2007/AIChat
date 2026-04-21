@@ -2412,6 +2412,14 @@ final class ChatStore: ObservableObject {
                 // where the markdown renderer swaps in with stale plain text.
                 await streamingPacer.finalize()
 
+                // Prewarm the markdown cache BEFORE flipping status to .sent
+                // so that when ChatBubbleView swaps to AssistantMessageMarkdownView
+                // the prepared MarkdownContent is already available and the view
+                // skips the loading placeholder. Without this, a race between the
+                // status flip and the view's .task(id: text) can leave the bubble
+                // stuck on plain text. (Fixes #1)
+                await AssistantMessageMarkdownView.prewarmIfNeeded(for: snapshot.text)
+
                 upsertAssistantMessage(
                     id: assistantMessageID,
                     in: conversationID,
