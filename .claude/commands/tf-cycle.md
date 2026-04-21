@@ -219,5 +219,44 @@ Always end with:
 ## Edge cases
 
 - **iMessage channel events**: this loop no longer relies on iMessage. If user happens to send messages through any channel, just treat them as normal user input to the session; they don't replace GitHub as the canonical review surface.
-- **Rate limits**: gh CLI uses personal token, 5000 req/h. At 1-tick-per-minute with ~10 api calls per tick = 600/h, very safe.
+- **Rate limits**: gh CLI uses personal token, 5000 req/h. At 1-tick-per-minute with ~10 api calls per tick = 600/h, very safe. Event-driven mode (default) uses even less.
 - **Stale state**: if `tf-state.json` gets corrupted, delete it and let next tick rebuild from current time.
+
+---
+
+## Deployment — event-driven `/loop` (current architecture)
+
+The per-minute cron was replaced with a webhook-driven dynamic loop. The orchestrator wakes on actual GitHub activity plus a 30-min idle heartbeat. Infrastructure:
+
+**Always-on daemon (launchd)** — `~/Library/LaunchAgents/com.user.aichat.gh-webhook.plist` (template committed at `fastlane/gh-webhook.plist.template`). Runs `smee-client` connecting to a smee.io channel, writes stdout+stderr to `/tmp/aichat-gh-events.log`. `RunAtLoad=true` + `KeepAlive=true` so it survives reboots and crashes.
+
+**GitHub webhook** — registered once on `hanbin2007/AIChat`, events `issues|issue_comment|pull_request`, target URL = the smee channel. `config.content_type=json`.
+
+**Monitor (per session)** — when a session starts the orchestrator:
+1. Checks `launchctl list | grep aichat.gh-webhook` (launchd alive?).
+2. Arms Monitor: `tail -n 0 -f /tmp/aichat-gh-events.log | grep --line-buffered -E "ECONNREFUSED 127.0.0.1:3000|EVENT "`. `persistent: true`. Each GitHub webhook delivery produces one new line in the log, which wakes the session and invokes `/tf-cycle`.
+3. `ScheduleWakeup` 1800s — fallback heartbeat if Monitor ever misses (clock skew, smee dropout, etc.).
+
+**Invariants**:
+- Do not add a per-minute `CronCreate` — it'd just burn context and the Monitor already covers activity.
+- Each tick re-queries GitHub via `gh` anyway (Phase 0 scans `updated:>=last_scan_iso`), so a missed Monitor event is recoverable at the next tick.
+- The ECONNREFUSED line in the log is a *feature*, not a bug — the receiver-less setup means smee fails to POST to 127.0.0.1:3000, logs the error, and that error line is the signal. No HTTP server is required.
+
+**Setup for a fresh machine** (one-time):
+```
+npm install -g smee-client
+SMEE_URL=$(curl -sI https://smee.io/new | awk -F': ' '/^location:/ {print $2}' | tr -d '\r')
+# Edit the template to bake SMEE_URL in, place under ~/Library/LaunchAgents/com.user.aichat.gh-webhook.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.aichat.gh-webhook.plist
+gh api -X POST repos/hanbin2007/AIChat/hooks \
+  -f name=web -F active=true \
+  -f "events[]=issues" -f "events[]=issue_comment" -f "events[]=pull_request" \
+  -f "config[url]=$SMEE_URL" -f "config[content_type]=json"
+```
+
+**Teardown**:
+```
+gh api -X DELETE repos/hanbin2007/AIChat/hooks/<HOOK_ID>   # id from `gh api /repos/...hooks`
+launchctl bootout gui/$(id -u)/com.user.aichat.gh-webhook
+rm ~/Library/LaunchAgents/com.user.aichat.gh-webhook.plist
+```
