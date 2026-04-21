@@ -42,6 +42,11 @@ struct RelayAIClient: AIStreamingService {
     var maxContextMessages: Int = 12
     var maxCharacterBudget: Int = 12_000
     var maxInlineAttachmentBytes: Int = 4_000_000
+    /// Optional bridge that reports `connecting` / `online` /
+    /// `offline(reason:)` transitions back to `ChatStore`. Left nil when
+    /// the service is constructed outside relay mode (e.g. previews)
+    /// or in isolation for unit tests that do not care about status.
+    var statusHandler: RelayConnectionStatusHandler?
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -62,9 +67,12 @@ struct RelayAIClient: AIStreamingService {
                 encoder.keyEncodingStrategy = .convertToSnakeCase
                 request.httpBody = try encoder.encode(makeRelayRequest(for: conversation))
 
+                statusHandler?.report(.connecting)
+
                 let delegate = RelayStreamDelegate(
                     continuation: continuation,
-                    configuration: configuration
+                    configuration: configuration,
+                    statusHandler: statusHandler
                 )
                 let streamSession = makeRelayStreamingSession(
                     configuration: configuration,
@@ -78,6 +86,7 @@ struct RelayAIClient: AIStreamingService {
                     delegate.cancel()
                 }
             } catch {
+                statusHandler?.report(.offline(reason: relayOfflineReason(for: error)))
                 continuation.finish(throwing: error)
             }
         }
@@ -390,6 +399,17 @@ func relayClientError(from data: Data) -> Error {
     return RelayAPIError.invalidResponse
 }
 
+/// Translates a relay request failure into a short, user-facing reason
+/// string for the connection-status indicator. Intentionally avoids
+/// logging or returning anything that could include a bearer token.
+func relayOfflineReason(for error: Error) -> String {
+    if let localized = (error as? LocalizedError)?.errorDescription, localized.isEmpty == false {
+        return localized
+    }
+
+    return (error as NSError).localizedDescription
+}
+
 func makeRelayURLSession(
     configuration: AppConfiguration,
     fallback: URLSession
@@ -459,17 +479,21 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
     private var latestModelResponseParts: [GeminiPartPayload]?
     private var accumulatedAttachments: [ChatAttachment] = []
     private var didReceiveDoneEvent = false
+    private var didReportOnline = false
     private var finishReason: String?
     private weak var task: URLSessionDataTask?
     private weak var session: URLSession?
+    private let statusHandler: RelayConnectionStatusHandler?
 
     init(
         continuation: AsyncThrowingStream<AIStreamEvent, Error>.Continuation,
-        configuration: AppConfiguration
+        configuration: AppConfiguration,
+        statusHandler: RelayConnectionStatusHandler? = nil
     ) {
         self.continuation = continuation
         self.allowsInsecureTLS = configuration.relayAllowsInsecureTLS
         self.allowedHost = configuration.relayBaseURL?.host?.nonEmptyTrimmed?.lowercased()
+        self.statusHandler = statusHandler
     }
 
     func attach(task: URLSessionDataTask, session: URLSession) {
@@ -526,6 +550,11 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
         if let statusCode = responseStatusCode, (200...299).contains(statusCode) == false {
             responseBody.append(data)
             return
+        }
+
+        if didReportOnline == false {
+            didReportOnline = true
+            statusHandler?.report(.online)
         }
 
         pendingLineData.append(data)
@@ -593,8 +622,16 @@ private final class RelayStreamDelegate: NSObject, URLSessionDataDelegate {
         }
 
         if let error {
+            statusHandler?.report(.offline(reason: relayOfflineReason(for: error)))
             continuation.finish(throwing: error)
         } else {
+            // If the stream closed normally without us ever observing a
+            // data chunk (edge case: 200 with zero body), treat the
+            // stream as online so the dot doesn't stay amber forever.
+            if didReportOnline == false {
+                didReportOnline = true
+                statusHandler?.report(.online)
+            }
             continuation.finish()
         }
 

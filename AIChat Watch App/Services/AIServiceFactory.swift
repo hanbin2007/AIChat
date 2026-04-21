@@ -51,12 +51,19 @@ protocol AITranscriptionService {
 }
 
 enum AIServiceFactory {
-    static func makeService(configuration: AppConfiguration) -> AIStreamingService {
+    static func makeService(
+        configuration: AppConfiguration,
+        relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil
+    ) -> AIStreamingService {
         switch configuration.backendMode {
         case .direct:
+            // Direct mode never observes or emits relay connection
+            // status — the handler is ignored on this path by design.
             return GeminiAPIClient(configuration: configuration)
         case .relay:
-            return RelayAIClient(configuration: configuration)
+            var client = RelayAIClient(configuration: configuration)
+            client.statusHandler = relayConnectionStatusHandler
+            return client
         }
     }
 

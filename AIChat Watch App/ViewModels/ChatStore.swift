@@ -347,6 +347,16 @@ final class ChatStore: ObservableObject {
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
+    /// Live relay-backend connectivity indicator. Only mutated when the
+    /// active configuration runs in relay mode — `.direct` callers keep
+    /// it at `.unknown` and the UI layer hides the dot entirely.
+    @Published private(set) var relayConnectionStatus: RelayConnectionStatus = .unknown
+    /// Timestamp of the last successful relay round-trip. Surfaced in
+    /// the status detail sheet for the tester.
+    @Published private(set) var relayLastSuccessAt: Date?
+    /// Timestamp of the last failed relay round-trip. Surfaced in the
+    /// status detail sheet for the tester.
+    @Published private(set) var relayLastFailureAt: Date?
     var syncStatus: CompanionSyncStatus { syncCoordinator.syncStatus }
     var syncStatusDescription: String { syncCoordinator.syncStatusDescription }
     var activationState: OfflineActivationState? { activationBilling.activationState }
@@ -395,6 +405,7 @@ final class ChatStore: ObservableObject {
     private var activationStateRebuildCancellable: AnyCancellable?
     private var syncCoordinatorCancellable: AnyCancellable?
     private let defaults: UserDefaults
+    private let relayConnectionStatusHandler: RelayConnectionStatusHandler?
     private let sendRetryDelayNanoseconds: @Sendable (Int) -> UInt64
     @Published private var drafts: [UUID: ConversationDraft] = [:]
     private var hasLoadedConversations = false
@@ -415,6 +426,7 @@ final class ChatStore: ObservableObject {
         activationRepository: ActivationRepository? = nil,
         deviceIdentity: WatchDeviceIdentity? = nil,
         defaults: UserDefaults? = nil,
+        relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil,
         sendRetryDelayNanoseconds: @escaping @Sendable (Int) -> UInt64 = ChatStore.defaultSendRetryDelayNanoseconds
     ) {
         let resolvedDefaults = defaults ?? Self.makeDefaults(configuration: configuration)
@@ -450,6 +462,7 @@ final class ChatStore: ObservableObject {
             activationBilling: self.activationBilling
         )
         self.defaults = resolvedDefaults
+        self.relayConnectionStatusHandler = relayConnectionStatusHandler
         self.sendRetryDelayNanoseconds = sendRetryDelayNanoseconds
         self.storageDescription = repository.storageDescription
         self.sendFailureRetryLimit = Self.loadSendFailureRetryLimit(from: resolvedDefaults)
@@ -523,6 +536,57 @@ final class ChatStore: ObservableObject {
             .sink { [weak self] _ in
                 self?.rebuildConversationListCaches()
             }
+
+        // Relay-mode only. In direct mode there is no handler attached
+        // and `relayConnectionStatus` stays at `.unknown` — the UI layer
+        // hides the indicator entirely by gating on `backendMode`.
+        if configuration.backendMode == .relay, let relayConnectionStatusHandler {
+            relayConnectionStatusHandler.setOnChange { [weak self] status in
+                self?.applyRelayConnectionStatus(status)
+            }
+        }
+    }
+
+    /// Applies a status transition from the relay client to the
+    /// published state. Called only in relay mode.
+    fileprivate func applyRelayConnectionStatus(_ status: RelayConnectionStatus) {
+        relayConnectionStatus = status
+        switch status {
+        case .online:
+            relayLastSuccessAt = Date()
+        case .offline:
+            relayLastFailureAt = Date()
+        case .unknown, .connecting:
+            break
+        }
+    }
+
+    /// Manually retries the latest assistant reply whose relay request
+    /// failed. Called from the status detail sheet's "Retry" button.
+    /// Safe to call in any backend mode — in direct mode the detail
+    /// sheet never appears, so this is effectively relay-only.
+    func retryLatestRelayFailure() async {
+        guard configuration.backendMode == .relay else {
+            return
+        }
+
+        // Prefer the most recently updated conversation whose last
+        // assistant reply is in the `.failed` state. Keeps scope tight
+        // — we don't track a per-request identifier.
+        let candidate = conversations
+            .sorted(by: ConversationThread.sortsByMostRecentFirst)
+            .first { conversation in
+                conversation.messages.last { $0.role == .assistant }?.status == .failed
+            }
+
+        guard let candidate else {
+            // No known failure — emit a connecting probe so the dot
+            // reflects the retry attempt anyway.
+            relayConnectionStatusHandler?.report(.connecting)
+            return
+        }
+
+        await retryLatestReply(in: candidate.id)
     }
 
     var activationStatus: OfflineActivationStatus { activationBilling.activationStatus }

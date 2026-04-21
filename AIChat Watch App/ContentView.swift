@@ -77,6 +77,15 @@ struct ContentView: View {
                         .accessibilityLabel(L10n.tr("prompt_preset.create"))
                     }
                 }
+
+                // Relay-only connectivity dot. Direct mode never renders
+                // this indicator; the compile-time gate is the runtime
+                // `backendMode == .relay` check on the parent store.
+                if navigationPath.isEmpty && chatStore.configuration.backendMode == .relay {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        RelayStatusDot()
+                    }
+                }
             }
             .navigationDestination(for: UUID.self) { conversationID in
                 ConversationDetailView(conversationID: conversationID)
