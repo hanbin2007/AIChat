@@ -53,16 +53,37 @@ Log one line ("disk cleanup: freed X GB, removed Y worktrees") so the tick summa
 ```
 cd /Users/zhb/Documents/aichat
 git fetch origin main --quiet
-# Only fast-forward if local main is a direct ancestor of origin/main.
-# If there's a real divergence (someone committed locally), don't force — flag it in the summary.
-if git merge-base --is-ancestor main origin/main; then
-  git merge --ff-only origin/main 2>/dev/null || true
+LOCAL=$(git rev-parse main)
+REMOTE=$(git rev-parse origin/main)
+if [ "$LOCAL" = "$REMOTE" ]; then
+  :  # already in sync
+elif git merge-base --is-ancestor main origin/main; then
+  # Local strictly behind. Attempt ff. If the working tree has changes that
+  # overlap incoming, ff-only will refuse — capture stderr, flag in summary.
+  FF_OUT=$(git merge --ff-only origin/main 2>&1)
+  FF_RC=$?
+  if [ $FF_RC -ne 0 ]; then
+    # Do NOT swallow. Flag and stop syncing — something is dirty in a way that needs user attention.
+    echo "WARN: ff-only failed, local main stays at $LOCAL. stderr: $FF_OUT"
+    SYNC_STATUS="ff-blocked"
+  else
+    SYNC_STATUS="fast-forwarded"
+  fi
+elif git merge-base --is-ancestor origin/main main; then
+  # Local is ahead (has unpushed commits). Don't auto-push; flag.
+  SYNC_STATUS="local-ahead ($(git rev-list origin/main..main | wc -l) unpushed)"
+else
+  # Real divergence — both sides have commits the other doesn't.
+  SYNC_STATUS="diverged"
 fi
 ```
 
-Don't rebase — that rewrites history unnecessarily. Only fast-forward. If local main has diverged (user committed locally, or a previous tick stashed work), leave it and note "local main diverged from origin" in the summary so the next commit attempt knows to stash/rebase explicitly.
+Surface `SYNC_STATUS` in the tick summary line. Never rebase automatically. Never force-push. Never stash-and-merge silently. The whole point: tick-time sync is conservative — when in doubt, leave things alone and let the human or the next deliberate action sort it out.
 
-Uncommitted changes in the main worktree are fine — `git fetch` doesn't touch them, and `git merge --ff-only` works cleanly as long as HEAD moves to an ancestor.
+**Long-running agents on stale base** (risk #2): when you spawn a Phase 2 agent, the worktree starts at whatever `origin/main` was at spawn time. If origin/main advances before the agent's PR merges, GitHub will mark the PR `BEHIND`. `gh pr merge --squash --auto` handles most cases (auto-merges when the base is updated). If the agent's branch has actual conflicts with new commits on main, re-merge fails and the PR sits open with a `conflicts` indicator. At that point Phase 2A should:
+- Detect via `gh pr view <PR#> --json mergeStateStatus` → `DIRTY`
+- Post `@hanbin2007 PR #<N> now conflicts with main after rebase. Leaving for manual resolution.` on the issue
+- Leave `in_flight[<N>]` with `phase="pr_conflicted"` until human clears it
 
 1. Read `~/Documents/aichat/.claude/commands/tf-state.json` (create `{"cursors":{},"last_scan_iso":"<24h ago>","last_ship_iso":""}` if missing).
 
