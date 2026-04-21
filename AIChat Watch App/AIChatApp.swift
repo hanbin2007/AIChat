@@ -32,7 +32,14 @@ struct AIChat_Watch_AppApp: App {
 
         let configuration = AppConfiguration.load()
         let repository = ConversationRepository(configuration: configuration)
-        let service = AIServiceFactory.makeService(configuration: configuration)
+        // Only allocate the handler when relay mode is active. In
+        // direct mode the ChatStore ignores it entirely.
+        let relayConnectionStatusHandler: RelayConnectionStatusHandler? =
+            configuration.backendMode == .relay ? RelayConnectionStatusHandler() : nil
+        let service = AIServiceFactory.makeService(
+            configuration: configuration,
+            relayConnectionStatusHandler: relayConnectionStatusHandler
+        )
         let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
         let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
         let syncBridge = CompanionSyncBridge()
@@ -45,7 +52,8 @@ struct AIChat_Watch_AppApp: App {
                 memoryMaintenanceService: memoryMaintenanceService,
                 configuration: configuration,
                 syncBridge: syncBridge,
-                cloudSyncService: cloudSyncService
+                cloudSyncService: cloudSyncService,
+                relayConnectionStatusHandler: relayConnectionStatusHandler
             )
         )
         initialConversationID = nil
