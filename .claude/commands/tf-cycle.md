@@ -20,7 +20,7 @@ Every agent — Phase 1 triage writer, Phase 2 autofix — must hold to these. S
 
 3. **Concurrency and failure paths.** Call out `@MainActor` boundaries, `Task` lifetimes, `async` re-entrancy, cancellation, and what happens on: cold launch, low memory, bg→fg, iCloud latency, network timeout, empty input, storage corruption. If the bug exists because one of these wasn't considered, name it.
 
-4. **Tests pin the invariant.** Production fixes ship with a regression test that would have caught the bug. watchOS 26 test runners require `async throws` (see CLAUDE.md).
+4. **Tests pin the invariant, and they must pass strictly.** Production fixes ship with a regression test that would have caught the bug. watchOS 26 test runners require `async throws` (see CLAUDE.md). Every relevant scheme's tests must go green — no flaky-retry acceptance, no "known failure" suppression. However, **tests are a means, not the end** — the actual goal is that the tester's real-world problem is resolved. If an existing test is itself buggy (wrong expectation, racy setup, stale invariant, broken fixture) and blocks a legitimate fix, the agent may edit or delete the test as part of the change, but must explain the reason in the commit message and PR body. Do not silence a test just to pass CI; the bar is that the user's complaint actually stops happening.
 
 5. **No dead code, no unused feature flags, no half-refactors.** Don't leave commented-out old code. Don't introduce abstractions "for future use."
 
