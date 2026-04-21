@@ -300,6 +300,11 @@ struct ChatBubbleView: View, Equatable {
             bubbleShape
                 .stroke(isUser ? DS.Bubble.userStroke : DS.Bubble.assistantStroke, lineWidth: 1)
         )
+        // Redact message content (user text, assistant answer, thought summary,
+        // attachments) during watchOS Always-On Display. The system injects
+        // `.privacy` into `\.redactionReasons` for AOD when the watch app
+        // opts into AOD via `WKSupportsAlwaysOnDisplay` in Info.plist.
+        .privacySensitive()
         .accessibilityIdentifier("message.bubble.\(message.id.uuidString)")
         #if os(watchOS)
         .confirmationDialog(

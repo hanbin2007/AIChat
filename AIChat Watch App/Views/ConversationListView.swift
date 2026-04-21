@@ -462,6 +462,12 @@ struct ConversationRowView: View, Equatable {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+        // Conversation titles + preview snippets are user-authored content
+        // and can leak secrets on AOD. Redact the whole row (including the
+        // meta line) via `.privacySensitive()`; meta is boring icons+counts
+        // but a blanket modifier is safer than a partial one. Applied here so
+        // both `ConversationListView` and `FavoritesView` inherit the rule.
+        .privacySensitive()
     }
 
     @ViewBuilder
