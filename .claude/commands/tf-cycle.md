@@ -49,6 +49,21 @@ Check free disk on `/` with `df -h / | awk 'NR==2 {print $4}'`. If under 10 GB, 
 
 Log one line ("disk cleanup: freed X GB, removed Y worktrees") so the tick summary can mention it. Never prompt — this is routine hygiene. Blocked `xcodebuild` (ENOSPC) is the most common failure mode of the whole loop; proactive cleanup avoids it.
 
+**After cleanup, sync local main with origin:**
+```
+cd /Users/zhb/Documents/aichat
+git fetch origin main --quiet
+# Only fast-forward if local main is a direct ancestor of origin/main.
+# If there's a real divergence (someone committed locally), don't force — flag it in the summary.
+if git merge-base --is-ancestor main origin/main; then
+  git merge --ff-only origin/main 2>/dev/null || true
+fi
+```
+
+Don't rebase — that rewrites history unnecessarily. Only fast-forward. If local main has diverged (user committed locally, or a previous tick stashed work), leave it and note "local main diverged from origin" in the summary so the next commit attempt knows to stash/rebase explicitly.
+
+Uncommitted changes in the main worktree are fine — `git fetch` doesn't touch them, and `git merge --ff-only` works cleanly as long as HEAD moves to an ancestor.
+
 1. Read `~/Documents/aichat/.claude/commands/tf-state.json` (create `{"cursors":{},"last_scan_iso":"<24h ago>","last_ship_iso":""}` if missing).
 
 2. Query issues updated since `last_scan_iso`:
