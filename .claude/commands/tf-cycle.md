@@ -10,6 +10,28 @@ Run phases below in order; end with a one-line summary.
 
 ---
 
+## Production-Quality Contract (applies to every investigation and fix)
+
+Every agent — Phase 1 triage writer, Phase 2 autofix — must hold to these. Surface-level patches that only silence the immediate symptom are not acceptable.
+
+1. **Root-cause, not symptom.** Trace why the bug happens, which invariant got violated, which state transition was unguarded. A fix that "makes this crash go away" without explaining the mechanism gets rejected.
+
+2. **Cross-platform audit.** AIChat has four targets: `AIChat Watch App` (watchOS primary), `AIChat iOS App` (companion), `AIChat Relay` (macOS server), `Shared Licensing` (cross-platform). Any change to shared code, `ChatStore`, models, or services must be verified against every target that compiles it — build all affected schemes. UI work must call out sizing/input-modality adaptation (Digital Crown, 46mm screen, touch vs pointer).
+
+3. **Concurrency and failure paths.** Call out `@MainActor` boundaries, `Task` lifetimes, `async` re-entrancy, cancellation, and what happens on: cold launch, low memory, bg→fg, iCloud latency, network timeout, empty input, storage corruption. If the bug exists because one of these wasn't considered, name it.
+
+4. **Tests pin the invariant.** Production fixes ship with a regression test that would have caught the bug. watchOS 26 test runners require `async throws` (see CLAUDE.md).
+
+5. **No dead code, no unused feature flags, no half-refactors.** Don't leave commented-out old code. Don't introduce abstractions "for future use."
+
+6. **Observability when the failure was invisible.** If the user saw a silent bad state (blank list, unrendered text, wrong status), the fix considers whether a log or assertion would have shortened next diagnosis.
+
+7. **Security where relevant.** Tokens, keys, user data, IPC — never widen access, never log secrets, never trust relay client input on the server side.
+
+These are non-negotiable. Phase 1 writes them into the 建议方案 section. Phase 2 agents re-verify before commit.
+
+---
+
 ## Phase 0 — REACT (process user interactions first, highest priority)
 
 1. Read `~/Documents/aichat/.claude/commands/tf-state.json` (create `{"cursors":{},"last_scan_iso":"<24h ago>","last_ship_iso":""}` if missing).
@@ -28,7 +50,9 @@ Run phases below in order; end with a one-line summary.
    - Contains `approve` (case-insensitive) + optional scheme letter `A`/`B`/`C`/`D` → add label `auto-fix-approved`. Store chosen scheme in issue body (append `<!-- scheme:X -->` via `gh issue edit --body`).
    - Contains `defer` → add label `defer`, remove `needs-fix` and `needs-review`.
    - Contains `dismiss` → close the issue.
-   - Contains any other text → treat as refinement. Read the comment carefully. Respond by editing the issue body (update "我的理解" / "建议方案" section per their guidance) AND posting a `gh issue comment` saying "Got it. Updated plan: <1-2 sentences>. Reply `approve A` to proceed or comment further." Keep `needs-review` label.
+   - Contains any other text → treat as refinement. Read the comment carefully. Respond by editing the issue body (update "我的理解" / "建议方案" section per their guidance) AND posting a `gh issue comment` saying "@hanbin2007 Got it. Updated plan: <1-2 sentences>. Reply `approve A` to proceed or comment further." Keep `needs-review` label.
+
+**Every reply comment you post must start with `@hanbin2007 `** — this is how the owner gets the GitHub push notification on mobile. Applies to refinement replies, approval acks, autofix-started/succeeded/failed comments, ship notifications — all of them.
 
 5. For each label change owner made (e.g., they added `auto-fix-approved` directly without comment), just proceed — label alone is a valid approval signal.
 
@@ -52,9 +76,9 @@ Run phases below in order; end with a one-line summary.
    - Read relevant code files to understand context (use Glob/Grep/Read; spawn Explore agent if investigation is non-trivial)
    - Write an issue body with these sections:
      - `## 原文` — exact feedback text + metadata (build/device/os/locale)
-     - `## 我的理解` — your interpretation of what the tester actually wants
-     - `## 涉及文件` — concrete file:line references
-     - `## 建议方案` — 2-4 approaches (A/B/C/D) with trade-offs, mark recommended one
+     - `## 我的理解` — your interpretation of the tester's intent, written under the Production-Quality Contract above: what state transition failed, which invariant was violated, which concurrency/platform assumption broke. Do NOT stop at "X doesn't show" — explain mechanism.
+     - `## 涉及文件` — concrete file:line references. **Every target that compiles the touched code must be listed** (Watch App / iOS App / Relay / Shared Licensing). If only one target is affected, say why the others aren't.
+     - `## 建议方案` — 2-4 approaches (A/B/C/D) with trade-offs, mark recommended one. Each approach specifies: code change, cross-platform impact (which targets rebuild, what to verify on each), new/changed test(s), observability addition if any, concurrency considerations. Recommended approach must meet the full Production-Quality Contract.
      - `## 等你回应` — options: `auto-fix-approved` + scheme letter / `defer` / close / natural language
    - Create with `gh issue create --title "[TF <kind>] <summary> [hash:<12>]" --label "tf-<kind>,source:testflight-api,needs-review<,needs-fix if bug>"`
 
@@ -91,7 +115,7 @@ For each `<N> -> entry` in `in_flight`:
 
 Compute `approved_set = {open issues with auto-fix-approved label}` minus `in_flight.keys()`.
 
-**Concurrency cap**: at most 2 agents running simultaneously. If `len(in_flight) >= 2`, skip until next tick.
+**Concurrency cap**: at most 3 agents running simultaneously. If `len(in_flight) >= 3`, skip until next tick.
 
 For each issue `<N>` in `approved_set` (up to the cap):
 
@@ -114,12 +138,22 @@ For each issue `<N>` in `approved_set` (up to the cap):
 >
 > Start: `gh issue view <N> --repo hanbin2007/AIChat --json body -q .body` to read the full issue.
 >
-> Constraints: minimal changes, no refactoring unrelated code, respect CLAUDE.md. watchOS 26 tests must be `async throws` (first-run @MainActor segfault race).
+> You are held to the **Production-Quality Contract** in `.claude/commands/tf-cycle.md`:
+> - Fix the root cause, not the symptom. If the scheme description is surface-level, go deeper before committing.
+> - Audit every target that compiles the touched code (Watch App / iOS App / Relay / Shared Licensing). Build each one that's affected.
+> - Consider concurrency, @MainActor boundaries, async re-entrancy, cancellation, and failure paths.
+> - Ship a regression test (async throws for watchOS 26).
+> - No dead code, no commented-out blocks, no unused flags.
+> - Add a log or assertion if the failure was silent.
+> Re-read the Contract before your FINAL commit and verify each item applies.
 >
-> Attempts: up to 3. After each attempt:
-> - If Watch code changed: build + `xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test`
-> - If iOS code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat iOS App" -destination "generic/platform=iOS" build`
-> - If Relay code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build`
+> Constraints: stay within scope (the issue's approved scheme). Don't refactor unrelated code. Respect CLAUDE.md.
+>
+> Attempts: up to 3. After each attempt, build **every affected target** and run tests on the relevant ones:
+> - Watch code changed: build + `xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test`
+> - iOS code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat iOS App" -destination "generic/platform=iOS" build`
+> - Relay code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build`
+> - Shared Licensing changed: build all three above (it compiles into each).
 >
 > On success: `git checkout -b autofix/issue-<N>`; commit `fix: <summary> (Fixes #<N>)`; `git push -u origin autofix/issue-<N>`. Return EXACTLY:
 > ```
