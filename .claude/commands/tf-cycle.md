@@ -64,32 +64,88 @@ Run phases below in order; end with a one-line summary.
 
 ---
 
-## Phase 2 — FIX (run autofix on approved issues)
+## Phase 2 — FIX (parallel autofix on approved issues)
 
-For each open issue with `auto-fix-approved` AND without `auto-fix-in-progress`:
+**State shape**: `tf-state.json.in_flight` is a dict keyed by issue number:
+```
+"in_flight": {
+  "1": {"agent_id": "...", "phase": "agent_running"|"test_running"|"pr_queued", "worktree": "...", "started": "ISO"},
+  "3": {...}
+}
+```
+
+Each tick runs these three sub-steps IN ORDER:
+
+### 2A. Advance in-flight entries (non-blocking)
+
+For each `<N> -> entry` in `in_flight`:
+
+- Phase `agent_running`: call `TaskOutput(task_id=entry.agent_id, block=false, timeout=0)`.
+  - `status=running` → skip.
+  - `status=completed` with SUCCESS block → parse branch + SHA, create PR (`gh pr create ...`), queue auto-merge (`gh pr merge <PR#> --squash --auto`), swap labels on issue (`auto-fix-in-progress` off, `auto-fix-ready` on), comment `Attempt succeeded → PR #<PR#> queued for merge.`, move entry.phase to `pr_queued` (or delete entry if PR already merged).
+  - `status=completed` with FAILED block → remove `auto-fix-in-progress` and `auto-fix-approved`, add `auto-fix-failed`, comment the failure report, delete entry.
+
+- Phase `pr_queued`: check if PR merged. If yes, delete entry (Phase 3 will handle ship separately).
+
+### 2B. Start new agents for newly approved issues
+
+Compute `approved_set = {open issues with auto-fix-approved label}` minus `in_flight.keys()`.
+
+**Concurrency cap**: at most 2 agents running simultaneously. If `len(in_flight) >= 2`, skip until next tick.
+
+For each issue `<N>` in `approved_set` (up to the cap):
 
 1. Add label `auto-fix-in-progress` (prevents double-scheduling).
+2. Parse scheme from body (`<!-- scheme:X -->`); default to A.
+3. Spawn agent with `run_in_background: true`:
+   ```
+   Agent(
+     subagent_type: "general-purpose",
+     isolation: "worktree",
+     run_in_background: true,
+     description: "autofix #<N>",
+     prompt: "<full prompt — see template below>"
+   )
+   ```
+4. Record entry: `in_flight[<N>] = {agent_id, phase:"agent_running", worktree, started: now()}`.
 
-2. Parse chosen scheme from issue body (`<!-- scheme:X -->`). Default to scheme "A" (the recommended one) if not specified.
+**Agent prompt template** (inline, no var substitution ambiguity — construct in Python):
+> Fix issue #<N> in hanbin2007/AIChat using scheme <X> as described in the issue's "建议方案" section.
+>
+> Start: `gh issue view <N> --repo hanbin2007/AIChat --json body -q .body` to read the full issue.
+>
+> Constraints: minimal changes, no refactoring unrelated code, respect CLAUDE.md. watchOS 26 tests must be `async throws` (first-run @MainActor segfault race).
+>
+> Attempts: up to 3. After each attempt:
+> - If Watch code changed: build + `xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test`
+> - If iOS code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat iOS App" -destination "generic/platform=iOS" build`
+> - If Relay code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build`
+>
+> On success: `git checkout -b autofix/issue-<N>`; commit `fix: <summary> (Fixes #<N>)`; `git push -u origin autofix/issue-<N>`. Return EXACTLY:
+> ```
+> SUCCESS
+> branch: autofix/issue-<N>
+> sha: <short>
+> changelog: <under 80 chars>
+> files_changed: <comma list>
+> ```
+>
+> On 3 failures: do NOT commit. Return EXACTLY:
+> ```
+> FAILED
+> attempts: 3
+> last_error: |
+>   <last 30 lines of failing output>
+> what_i_tried:
+>   - ...
+> next_suggestion: <one line>
+> ```
 
-3. Spawn Background Agent (`Agent` tool, `subagent_type: "general-purpose"`, `isolation: "worktree"`):
+### 2C. Invariants
 
-   > Fix issue #<N> in hanbin2007/AIChat using scheme <X> as described in the issue's "建议方案" section. Read the issue body first — it tells you what to change and where.
-   >
-   > Constraints: minimal changes, no refactoring unrelated code, respect CLAUDE.md test/build procedures.
-   >
-   > Attempts: up to 3. After each attempt run:
-   > - If Watch code changed: `xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test`
-   > - If iOS code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat iOS App" -destination "generic/platform=iOS" build`
-   > - If Relay code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build`
-   >
-   > On attempt success: commit `fix: <summary> (Fixes #<N>)` on branch `autofix/issue-<N>`, push, return branch name + short SHA + changelog (<80 chars).
-   >
-   > On 3 failures: do NOT commit; return a detailed report of what you tried + the failing outputs.
-
-4. On agent return:
-   - **Success**: `gh pr create --base main --head autofix/issue-<N> --title "fix(tf): <summary> (#<N>)" --body "..."`. Then `gh pr merge <PR#> --squash --auto` to queue auto-merge. Remove `auto-fix-in-progress`, add `auto-fix-ready`. Comment on issue: `Attempt succeeded → PR #<PR#> queued for merge.`
-   - **Failure**: remove `auto-fix-in-progress` and `auto-fix-approved`, add `auto-fix-failed`, comment the failure report on issue. User can comment further guidance and re-approve.
+- A single issue can be in `in_flight` at most once.
+- A worktree is created per agent by the `isolation: "worktree"` option; never shared across agents.
+- If the conversation dies mid-flight, the in_flight dict points to orphaned agent IDs — next tick should call `TaskOutput` on each; if it reports `not_found`, delete the entry and revert labels (`auto-fix-in-progress` off, `auto-fix-approved` back on if you want re-triage).
 
 ---
 
