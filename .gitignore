@@ -12,3 +12,26 @@ AIChat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 Config/Secrets.xcconfig
 Secrets.xcconfig
 .env.local
+
+# fastlane artifacts / secrets
+fastlane/report.xml
+fastlane/README.md
+fastlane/.env*
+fastlane/AuthKey_*.p8
+*.mobileprovision
+/build/fastlane/
+
+# ASC API key — never commit
+AuthKey_*.p8
+
+# Claude routine work files
+.claude/routines/state/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/commands/tf-state.json
+
+# Nightly launchd logs
+fastlane/nightly.launchd.out.log
+fastlane/nightly.launchd.err.log
+fastlane/nightly.log
+

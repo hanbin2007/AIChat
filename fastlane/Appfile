@@ -1,0 +1,5 @@
+app_identifier("hanbin.AIChat")
+team_id("NCLY9ZGRMZ")
+itc_team_id("383f4ced-8d8f-4be9-898c-09037b94241b")
+
+# apple_id intentionally omitted — we use ASC API key (JWT) auth, not Apple ID login.

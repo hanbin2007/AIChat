@@ -1,0 +1,86 @@
+default_platform(:ios)
+
+TESTFLIGHT_EXTERNAL_GROUP = ENV["TESTFLIGHT_EXTERNAL_GROUP"] || "PBTestGroup"
+
+platform :ios do
+  desc "Build and upload to TestFlight → distribute to external group"
+  lane :beta do |options|
+    app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      duration: 1200,
+      in_house: false
+    )
+
+    # Read current build number from the project and increment by 1.
+    # The bump is committed + pushed after successful upload (below) so the
+    # next run starts from the new value.
+    increment_build_number(xcodeproj: "AIChat.xcodeproj")
+
+    build_app(
+      project: "AIChat.xcodeproj",
+      scheme: "AIChat iOS App",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: "build/fastlane",
+      silent: false
+    )
+
+    changelog = options[:changelog] || "Auto upload #{Time.now.utc.iso8601}"
+
+    # Upload + wait for processing + submit for Beta App Review + distribute to external group.
+    upload_to_testflight(
+      distribute_external: true,
+      groups: [TESTFLIGHT_EXTERNAL_GROUP],
+      changelog: changelog,
+      notify_external_testers: true,
+      skip_waiting_for_build_processing: false,
+      reject_build_waiting_for_review: true,
+
+      # Export compliance — HTTPS-only via URLSession is exempt encryption.
+      # Without this Apple gates every build behind a manual "uses encryption?" question.
+      uses_non_exempt_encryption: false,
+
+      # Beta App Review info — shown to Apple's reviewer on the first build of a new
+      # version string. Subsequent builds same version auto-approve without review.
+      beta_app_review_info: {
+        contact_email: "thebestzhq@outlook.com",
+        contact_first_name: "Hanbin",
+        contact_last_name: "Zhang",
+        contact_phone: "+86 13358169179",
+        demo_account_required: false,
+        notes: <<~NOTES
+          AI chat app for Apple Watch. Primary target is the watchOS app; iOS companion is for activation key registration only. Uses Gemini API (direct) or a macOS relay server for LLM requests. No special test account needed.
+
+          Changes in this build:
+          #{changelog}
+        NOTES
+      },
+
+      # Localized What-to-Test text shown inside TestFlight app.
+      localized_build_info: {
+        "default" => {
+          whats_new: changelog
+        },
+        "zh-Hans" => {
+          whats_new: changelog
+        }
+      }
+    )
+
+    # Persist the bumped build number so next run starts from it.
+    new_build = get_build_number(xcodeproj: "AIChat.xcodeproj")
+    commit_version_bump(
+      xcodeproj: "AIChat.xcodeproj",
+      message: "chore: bump build to #{new_build} [skip ci]",
+      force: true
+    )
+    push_to_git_remote(
+      local_branch: "main",
+      remote_branch: "main",
+      force: false
+    )
+  end
+end
