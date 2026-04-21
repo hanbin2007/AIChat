@@ -164,6 +164,16 @@ For each issue `<N>` in `approved_set` (up to the cap):
 >
 > Constraints: stay within scope (the issue's approved scheme). Don't refactor unrelated code. Respect CLAUDE.md.
 >
+> **Progress reporting (required):** post a short `@hanbin2007`-prefixed comment on issue #<N> at these moments so the owner sees progress from GitHub notifications on mobile:
+> 1. **Start**: one line naming the approach ("Starting: <one sentence on what I'm changing>, <which targets will rebuild>").
+> 2. **After each build/test run** (pass or fail): one line with the outcome — e.g. `Attempt 1 build ✅, tests 🟡 (2 flaky), iterating` or `Attempt 2 build ❌ (ChatStore type mismatch), investigating`.
+> 3. **Scope or approach pivot**: if you decide mid-attempt to change strategy (e.g. swap scheme, skip a target, drop a buggy test), comment `Pivoting: <why + what now>` BEFORE acting.
+> 4. **Stuck > 15 min without build/test progress**: post one line summarizing where you're stuck (`Stuck on: <symptom>. Trying: <next hypothesis>. Ask if you'd rather I swap to scheme <X>.`).
+>
+> Rules: terse (< 200 chars), always `@hanbin2007` prefix, no code blocks in progress comments (save those for the final SUCCESS/FAILED block). Under 6 total progress comments — collapse if needed. Never post progress from a scratch buffer; only post after you have a real signal (build exit code, test result, decision point). The final SUCCESS/FAILED comment posted by the orchestrator is separate from these.
+>
+> Use: `gh issue comment <N> --repo hanbin2007/AIChat --body "@hanbin2007 <message>"`
+>
 > Attempts: up to 3. After each attempt, build **every affected target** and run tests on the relevant ones:
 > - Watch code changed: build + `xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test`
 > - iOS code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat iOS App" -destination "generic/platform=iOS" build`
