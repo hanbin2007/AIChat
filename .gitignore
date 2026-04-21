@@ -9,6 +9,7 @@ Packages/*/.swiftpm/
 AIChat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 *.xcuserstate
 *.xcuserdata/
+xcuserdata/
 Config/Secrets.xcconfig
 Secrets.xcconfig
 .env.local
