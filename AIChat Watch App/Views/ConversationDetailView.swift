@@ -675,6 +675,10 @@ struct ConversationDetailView: View {
                 .frame(maxWidth: .infinity, minHeight: inputRowHeight, alignment: .leading)
                 .accessibilityLabel("Compose message")
                 .disabled(voiceRecorder.isRecording || isTranscribing)
+                // Draft text the user has typed/dictated is content. Redact
+                // it on Always-On Display so an unlocked watch lying on a
+                // table doesn't leak an unsent prompt to whoever walks by.
+                .privacySensitive()
 
                 Button {
                     if isSendingReply {
