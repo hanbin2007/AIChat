@@ -173,11 +173,25 @@ For each issue `<N>` in `approved_set` (up to the cap):
 > 4. **Stuck > 15 min without progress**: post a specific question or options — `Stuck on: <symptom>. Option A: <>. Option B: <>. Going with A unless you say otherwise within this attempt.`
 > 5. **Ambiguous decision**: any time you're choosing between two reasonable paths, ask — don't silently pick.
 >
-> *Owner → you (direction):* at the start of every attempt AND before `git commit`, run:
-> ```
-> gh issue view <N> --repo hanbin2007/AIChat --json comments -q '[.comments[] | select(.author.login=="hanbin2007")] | .[-3:]'
-> ```
-> Read the last 3 owner comments. If any are newer than your last progress comment and contain direction (scope change, approach preference, stop, different scheme), **adapt and reply** `@hanbin2007 Got it — <what I'm doing differently>`. Never silently ignore. Never wait/block — if you posted a question and there's no reply yet, proceed with your best interpretation and say so in a comment.
+> *Owner → you (direction):* poll `gh issue view <N> --repo hanbin2007/AIChat --json comments -q '[.comments[] | select(.author.login=="hanbin2007")] | .[-3:]'` at **all** of these moments:
+>
+> 1. **Start of every attempt** (before touching files).
+> 2. **Before `git commit`** (last chance to catch late direction).
+> 3. **Periodically during long waits.** When you're waiting on a long `xcodebuild` run (>2 min), don't sit in a pure `sleep` loop. Use a polling pattern that also checks GitHub every 60–90 s:
+>    ```
+>    while <test still running>; do
+>      sleep 60
+>      new=$(gh issue view <N> --json comments -q '[.comments[] | select(.author.login=="hanbin2007" and (.createdAt > $LAST_CHECK))]' --arg LAST_CHECK "$LAST_CHECK")
+>      if [ -n "$new" ]; then
+>        # new comment → decide: kill current work, or acknowledge + keep going
+>        ...
+>      fi
+>      LAST_CHECK=<now>
+>    done
+>    ```
+>    Rule: if a new owner comment tells you to **stop / pivot / change scope**, kill the in-flight xcodebuild (`kill <pid>` or TaskStop), post an ack comment, and act on the new direction.
+>
+> If any poll finds owner comments newer than your last progress comment and containing direction (scope change, approach preference, stop, different scheme), **adapt and reply** `@hanbin2007 Got it — <what I'm doing differently>`. Never silently ignore. Never wait/block — if you posted a question and there's no reply yet, proceed with your best interpretation and say so.
 >
 > *Rules:* terse (<200 chars), always `@hanbin2007` prefix, no code blocks in conversation comments (save those for the final SUCCESS/FAILED block). Under ~8 total comments per agent lifetime. Never post from a scratch buffer — only after a real signal (build exit code, test result, decision point, new owner comment). The final SUCCESS/FAILED comment posted by the orchestrator is separate.
 >
