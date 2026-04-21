@@ -34,6 +34,21 @@ These are non-negotiable. Phase 1 writes them into the 建议方案 section. Pha
 
 ## Phase 0 — REACT (process user interactions first, highest priority)
 
+**Before anything else (pre-phase 0, runs every tick):**
+
+Check free disk on `/` with `df -h / | awk 'NR==2 {print $4}'`. If under 10 GB, auto-clean in this order, stopping as soon as 20 GB is free:
+
+1. `rm -rf ~/Library/Developer/Xcode/DerivedData/*` — Xcode rebuilds, typically 2–50 GB reclaimed.
+2. Remove stale autofix worktrees under `/Users/zhb/Documents/AIChat/.claude/worktrees/agent-*` whose agent_id prefix is NOT in the current `in_flight` dict:
+   ```
+   git worktree remove -f -f <path>     # may need double -f for locked worktrees
+   rm -rf <path>                         # if worktree command fails (e.g. dangling lock)
+   ```
+   **Do NOT touch** `/Users/zhb/.codex/worktrees/...` or `/Users/zhb/Documents/AIChat/.claude/worktrees/{gallant-brattain,sharp-shirley,...}` — those are the user's own branches/sessions.
+3. Remove autofix PR branches that are already merged on origin: `git branch -D autofix/issue-<N>` for any `<N>` whose PR state is `MERGED`.
+
+Log one line ("disk cleanup: freed X GB, removed Y worktrees") so the tick summary can mention it. Never prompt — this is routine hygiene. Blocked `xcodebuild` (ENOSPC) is the most common failure mode of the whole loop; proactive cleanup avoids it.
+
 1. Read `~/Documents/aichat/.claude/commands/tf-state.json` (create `{"cursors":{},"last_scan_iso":"<24h ago>","last_ship_iso":""}` if missing).
 
 2. Query issues updated since `last_scan_iso`:
