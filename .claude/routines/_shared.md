@@ -48,9 +48,9 @@ pinned GitHub issue labeled `meta-state`, title
 
 ```json
 {
-  "tf_feedback_cursor": 123,
-  "last_triage_iso": "2026-04-23T00:00:00Z",
-  "last_ship_iso":   "2026-04-23T00:00:00Z"
+  "last_feedback_iso": "2026-04-23T00:00:00Z",
+  "last_triage_iso":   "2026-04-23T00:00:00Z",
+  "last_ship_iso":     "2026-04-23T00:00:00Z"
 }
 ```
 
@@ -70,8 +70,35 @@ If no `meta-state` issue exists yet, create one:
 gh issue create --repo hanbin2007/AIChat \
   --title "[meta] tf-cycle state — do not close" \
   --label meta-state \
-  --body '{"tf_feedback_cursor":0,"last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
+  --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
 ```
+
+## App Store Connect API access (shared by most routines)
+
+All Apple-side calls (TF feedback, Xcode Cloud build status, build
+logs) go through `.claude/routines/scripts/asc.py` — a Python helper
+that mints an ES256 JWT and wraps the REST API.
+
+```bash
+# Typical use from a routine:
+python3 .claude/routines/scripts/asc.py feedback --since "$SINCE"
+python3 .claude/routines/scripts/asc.py ship-latest --workflow "$ASC_SHIP_WORKFLOW_ID"
+python3 .claude/routines/scripts/asc.py build-log --run "$RUN_ID"
+
+# For ad-hoc curl:
+source .claude/routines/scripts/asc_helpers.sh
+asc_get "/v1/ciBuildRuns/$RUN_ID"
+```
+
+Required env vars on every routine that calls ASC (all marked secret
+in the Routines UI):
+- `ASC_KEY_ID` — 10-char key id
+- `ASC_ISSUER_ID` — issuer UUID
+- `ASC_PRIVATE_KEY` — full PEM contents of the `.p8` (including
+  `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----`)
+- `ASC_APP_ID` — `6760607040`
+- `ASC_PRODUCT_ID` — only on routines that talk to Xcode Cloud
+- `ASC_SHIP_WORKFLOW_ID` — only on `tf-ship` and `tf-sweep`
 
 ## Per-fix state (no state file needed)
 

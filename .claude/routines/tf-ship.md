@@ -59,19 +59,30 @@ routine does **not** invoke any build tooling.
    ```
    The push triggers Xcode Cloud's `Ship to TestFlight` workflow.
 
-5. **Wait for upload.** Mint ASC JWT (helper in
-   `.claude/routines/README.md`), then poll:
+5. **Wait for upload.** Poll ASC for the latest Ship run:
+   ```bash
+   while true; do
+     RUN=$(python3 .claude/routines/scripts/asc.py ship-latest \
+             --workflow "$ASC_SHIP_WORKFLOW_ID")
+     PROGRESS=$(echo "$RUN" | jq -r '.attributes.executionProgress')
+     STATUS=$(echo   "$RUN" | jq -r '.attributes.completionStatus')
+     RUN_NUMBER=$(echo "$RUN" | jq -r '.attributes.number')
+     [ "$PROGRESS" = "COMPLETE" ] && break
+     sleep 60
+     # Exit before hitting routine timeout (~60 min). tf-sweep will
+     # resume from here on its next hourly tick.
+     [ "$SECONDS" -gt 3300 ] && {
+       echo "ship DEFERRED — Xcode Cloud still running (run $RUN_NUMBER), handing off to tf-sweep"
+       exit 0
+     }
+   done
    ```
-   GET /v1/ciProducts/{PRODUCT_ID}/buildRuns?filter[workflow]=<SHIP_WORKFLOW_ID>&sort=-createdDate&limit=1
-   ```
-   Wait for `attributes.executionProgress == COMPLETE`.
-   Timeout 60 min (routine time budget; if hit, exit and let a
-   `tf-sweep` run finish the close-out).
 
-   - `completionStatus == SUCCEEDED`: continue to step 6.
-   - `completionStatus in {FAILED, ERRORED, CANCELED}`: on each
-     pending issue, comment
-     `@hanbin2007 Ship FAILED on Xcode Cloud run <runNumber>: <one line reason>. Details: <url>. Will retry next cycle.`
+   After the loop exits with `PROGRESS=COMPLETE`:
+   - `STATUS == SUCCEEDED`: continue to step 6.
+   - `STATUS in {FAILED, ERRORED, CANCELED}`: on each pending issue,
+     comment
+     `@hanbin2007 Ship FAILED on Xcode Cloud run <RUN_NUMBER>: <one line reason>. Details: <url>. Will retry next cycle.`
      Do **not** revert the main push. Exit with `ship FAILED`.
 
 6. **Close out.** For each referenced issue:
@@ -90,8 +101,15 @@ routine does **not** invoke any build tooling.
 
 ## Concurrency guard
 
-Two `tf-ship` runs should never be in flight at once. Before step 4,
-check: does the latest Xcode Cloud Ship run have
-`executionProgress != COMPLETE`? If yes, exit
-`ship DEFERRED — previous ship still uploading`. The deferred work
-gets picked up on the next merged-PR event or by `tf-sweep`.
+Two `tf-ship` runs should never be in flight at once. Before step 4:
+```bash
+PREV=$(python3 .claude/routines/scripts/asc.py ship-latest \
+         --workflow "$ASC_SHIP_WORKFLOW_ID" \
+         | jq -r '.attributes.executionProgress')
+if [ "$PREV" != "COMPLETE" ] && [ "$PREV" != "null" ]; then
+  echo "ship DEFERRED — previous ship still uploading ($PREV)"
+  exit 0
+fi
+```
+The deferred work gets picked up on the next merged-PR event or by
+`tf-sweep`.

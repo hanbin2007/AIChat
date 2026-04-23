@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""
+ASC helper — one tool for everything the tf-cycle routines need from
+App Store Connect: JWT minting, generic GET, TestFlight feedback
+listing, Xcode Cloud build-run polling.
+
+Usage (from a routine's bash):
+    python3 .claude/routines/scripts/asc.py jwt
+    python3 .claude/routines/scripts/asc.py get /v1/ciBuildRuns/<id>
+    python3 .claude/routines/scripts/asc.py feedback --since 2026-04-01T00:00:00Z
+    python3 .claude/routines/scripts/asc.py ship-latest --workflow <id>
+    python3 .claude/routines/scripts/asc.py build-log --run <id>
+
+Required env vars:
+    ASC_KEY_ID            10-char key id from ASC → Users & Access → Integrations
+    ASC_ISSUER_ID         issuer UUID from the same page
+    ASC_PRIVATE_KEY       full contents of the .p8 file (PEM, with BEGIN/END lines)
+    ASC_APP_ID            ASC app id (6760607040 for AIChat)
+    ASC_PRODUCT_ID        Xcode Cloud product id (only needed for ship-* / build-*)
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+# --- deps: auto-install on first run (Routines sandbox may be minimal) ---
+try:
+    import jwt  # PyJWT
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key  # noqa: F401
+except ImportError:
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-q", "pyjwt>=2.8", "cryptography>=41"]
+    )
+    import jwt
+
+BASE = "https://api.appstoreconnect.apple.com"
+
+
+def _env(name: str) -> str:
+    v = os.environ.get(name)
+    if not v:
+        sys.exit(f"asc.py: missing env var {name}")
+    return v
+
+
+def mint_jwt() -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": _env("ASC_ISSUER_ID"),
+            "iat": now,
+            "exp": now + 900,  # 15 min, well under Apple's 20 min cap
+            "aud": "appstoreconnect-v1",
+        },
+        _env("ASC_PRIVATE_KEY"),
+        algorithm="ES256",
+        headers={"kid": _env("ASC_KEY_ID"), "typ": "JWT"},
+    )
+
+
+def asc_get(path: str) -> dict:
+    url = BASE + path if path.startswith("/") else path
+    req = urllib.request.Request(
+        url, headers={"Authorization": f"Bearer {mint_jwt()}"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _paginated(path: str, *, cap: int = 500):
+    out = []
+    url = path
+    while url and len(out) < cap:
+        data = asc_get(url)
+        out.extend(data.get("data", []))
+        # Also pass through `included` merged with each page so callers can
+        # resolve relationships without a second trip.
+        inc = data.get("included", [])
+        for item in inc:
+            item["_included"] = True
+        out.extend(inc)
+        links = data.get("links", {})
+        url = links.get("next")
+        if url and url.startswith(BASE):
+            url = url[len(BASE):]
+    return out
+
+
+# ---------------- TestFlight feedback ----------------
+
+def _dedup_hash(kind: str, payload: str, build_ver: str) -> str:
+    h = hashlib.sha256(f"{payload}||{build_ver}".encode()).hexdigest()
+    return h[:12]
+
+
+def _resolve_build(included: list[dict], build_id: str) -> str:
+    for item in included:
+        if item.get("type") == "builds" and item.get("id") == build_id:
+            a = item.get("attributes", {})
+            return f"{a.get('version','?')}({a.get('buildNumber','?')})"
+    return build_id  # fall back to raw id if not included
+
+
+def list_feedback(since_iso: str) -> list[dict]:
+    """Merge screenshot + crash feedback from ASC, normalize, dedup-hash.
+    Returns items with `created > since_iso`, sorted ascending by created.
+    """
+    app_id = _env("ASC_APP_ID")
+    common_q = (
+        f"filter[app]={app_id}&limit=200&sort=-createdDate"
+        "&include=build,tester"
+    )
+
+    # --- screenshots ---
+    ss_raw = asc_get(
+        f"/v1/betaFeedbackScreenshotSubmissions?{common_q}"
+    )
+    ss_data = ss_raw.get("data", [])
+    ss_inc = ss_raw.get("included", [])
+
+    # --- crashes (include crashLog for stack frames) ---
+    cr_q = common_q + ",crashLog"
+    cr_raw = asc_get(f"/v1/betaFeedbackCrashSubmissions?{cr_q}")
+    cr_data = cr_raw.get("data", [])
+    cr_inc = cr_raw.get("included", [])
+
+    items = []
+
+    for d in ss_data:
+        created = d.get("attributes", {}).get("createdDate", "")
+        if created <= since_iso:
+            continue
+        attrs = d.get("attributes", {})
+        build_id = (d.get("relationships", {})
+                     .get("build", {})
+                     .get("data", {}) or {}).get("id", "")
+        build_ver = _resolve_build(ss_inc, build_id) if build_id else "unknown"
+        comment = attrs.get("comment") or ""
+        # If comment is empty, fall back to the first screenshot URL so the
+        # dedup hash is still stable.
+        image_url = ""
+        for s in attrs.get("screenshots") or []:
+            u = (s or {}).get("imageAssets", [{}])[0].get("url")
+            if u:
+                image_url = u
+                break
+        payload = comment or image_url
+        items.append({
+            "kind": "screenshot",
+            "id": d.get("id"),
+            "created": created,
+            "comment": comment,
+            "stack_head": "",
+            "build_version": build_ver,
+            "device_model": attrs.get("deviceModel"),
+            "device_family": attrs.get("deviceFamily"),
+            "os_version": attrs.get("osVersion"),
+            "locale": attrs.get("locale"),
+            "image_url": image_url,
+            "hash": _dedup_hash("screenshot", payload, build_ver),
+        })
+
+    # Crash log texts are in included[] as `betaFeedbackCrashLogs`.
+    def _crash_stack_head(crash_log_id: str) -> str:
+        for item in cr_inc:
+            if (item.get("type") == "betaFeedbackCrashLogs"
+                    and item.get("id") == crash_log_id):
+                text = item.get("attributes", {}).get("content", "") or ""
+                lines = [ln for ln in text.splitlines() if ln.strip()]
+                return "\n".join(lines[:5])
+        return ""
+
+    for d in cr_data:
+        created = d.get("attributes", {}).get("createdDate", "")
+        if created <= since_iso:
+            continue
+        attrs = d.get("attributes", {})
+        build_id = (d.get("relationships", {})
+                     .get("build", {})
+                     .get("data", {}) or {}).get("id", "")
+        build_ver = _resolve_build(cr_inc, build_id) if build_id else "unknown"
+        crash_log_id = (d.get("relationships", {})
+                         .get("crashLog", {})
+                         .get("data", {}) or {}).get("id", "")
+        stack_head = _crash_stack_head(crash_log_id) if crash_log_id else ""
+        items.append({
+            "kind": "crash",
+            "id": d.get("id"),
+            "created": created,
+            "comment": "",
+            "stack_head": stack_head,
+            "build_version": build_ver,
+            "device_model": attrs.get("deviceModel"),
+            "device_family": attrs.get("deviceFamily"),
+            "os_version": attrs.get("osVersion"),
+            "locale": attrs.get("locale"),
+            "image_url": "",
+            "hash": _dedup_hash("crash", stack_head, build_ver),
+        })
+
+    items.sort(key=lambda x: x["created"])
+    return items
+
+
+# ---------------- Xcode Cloud ----------------
+
+def latest_run(workflow_id: str) -> dict | None:
+    product = _env("ASC_PRODUCT_ID")
+    q = f"filter[workflow]={workflow_id}&sort=-createdDate&limit=1"
+    data = asc_get(f"/v1/ciProducts/{product}/buildRuns?{q}")
+    items = data.get("data", [])
+    return items[0] if items else None
+
+
+def build_log_urls(run_id: str) -> list[str]:
+    actions = asc_get(f"/v1/ciBuildRuns/{run_id}/actions").get("data", [])
+    urls = []
+    for a in actions:
+        status = a.get("attributes", {}).get("completionStatus")
+        if status not in ("FAILED", "ERRORED", None):
+            continue
+        arts = asc_get(f"/v1/ciBuildActions/{a['id']}/artifacts").get("data", [])
+        for art in arts:
+            ft = art.get("attributes", {}).get("fileType") or ""
+            if ft.upper() in ("LOG", "LOGARCHIVE"):
+                u = art.get("attributes", {}).get("downloadUrl")
+                if u:
+                    urls.append(u)
+    return urls
+
+
+# ---------------- CLI ----------------
+
+def main():
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("jwt", help="Print a fresh JWT")
+
+    g = sub.add_parser("get", help="GET an ASC endpoint, print JSON")
+    g.add_argument("path")
+
+    f = sub.add_parser("feedback", help="List normalized TF feedback")
+    f.add_argument("--since", required=True,
+                   help="ISO timestamp; items with created > since are returned")
+
+    sl = sub.add_parser("ship-latest",
+                        help="Print latest Xcode Cloud buildRun for workflow")
+    sl.add_argument("--workflow", required=True)
+
+    bl = sub.add_parser("build-log",
+                        help="Print downloadable log URLs for a buildRun")
+    bl.add_argument("--run", required=True)
+
+    args = p.parse_args()
+
+    if args.cmd == "jwt":
+        print(mint_jwt())
+    elif args.cmd == "get":
+        print(json.dumps(asc_get(args.path), indent=2, ensure_ascii=False))
+    elif args.cmd == "feedback":
+        print(json.dumps(list_feedback(args.since), indent=2, ensure_ascii=False))
+    elif args.cmd == "ship-latest":
+        r = latest_run(args.workflow)
+        print(json.dumps(r, indent=2, ensure_ascii=False) if r else "null")
+    elif args.cmd == "build-log":
+        for u in build_log_urls(args.run):
+            print(u)
+
+
+if __name__ == "__main__":
+    main()

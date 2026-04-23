@@ -26,73 +26,87 @@ supported).
 
 1. **Install the Claude GitHub App** on `hanbin2007/AIChat` from
    claude.com settings.
-2. **Create the 5 routines** at claude.ai/code/routines. For each:
+
+2. **Generate an App Store Connect API key.** In ASC → Users and
+   Access → Integrations → App Store Connect API → `+`. Role: Admin.
+   - Copy the **Key ID** (10 chars).
+   - Copy the **Issuer ID** (UUID) from the top of the page.
+   - Download the `.p8` file — you only get it **once**. Keep the
+     full file contents (including the `BEGIN`/`END` lines) for the
+     `ASC_PRIVATE_KEY` env var.
+
+3. **Find the Xcode Cloud product + ship workflow ids.** Once you've
+   set up Xcode Cloud (see `docs/xcode-cloud.md`), run these locally
+   or from a scratch routine:
+   ```bash
+   export ASC_KEY_ID=... ASC_ISSUER_ID=... ASC_PRIVATE_KEY="$(cat AuthKey_*.p8)"
+   python3 .claude/routines/scripts/asc.py get "/v1/ciProducts?filter[app]=6760607040" \
+     | jq '.data[] | {id, name: .attributes.name}'
+   # → note the product id
+
+   python3 .claude/routines/scripts/asc.py get "/v1/ciProducts/<PRODUCT_ID>/workflows" \
+     | jq '.data[] | {id, name: .attributes.name}'
+   # → note the "Ship to TestFlight" workflow id
+   ```
+
+4. **Create the 5 routines** at claude.ai/code/routines. For each:
    - Paste `_shared.md` content at the top of the prompt.
    - Append the routine file's content below.
    - Set the trigger per the table above.
-   - Attach MCP connectors:
-     - GitHub (built-in)
-     - `testflight-feedback` (custom MCP — your existing server)
-3. **Configure env vars** on each routine (Settings → Environment):
-   - `ASC_KEY_ID` — App Store Connect API key ID
-   - `ASC_ISSUER_ID` — ASC issuer ID
-   - `ASC_PRIVATE_KEY` — ES256 private key (the `.p8` contents
-     pasted as a single multi-line string). Mark as secret.
-   - `ASC_PRODUCT_ID` — Xcode Cloud product id (from
-     `GET /v1/ciProducts`)
-   - `ASC_SHIP_WORKFLOW_ID` — workflow id for `Ship to TestFlight`
-     (from `GET /v1/ciProducts/{id}/workflows`)
-4. **Create the state issue** (first `tf-triage` run will do this
-   automatically, but you can do it manually first):
-   ```
+   - Attach the built-in GitHub MCP connector.
+
+5. **Configure env vars** on each routine (Settings → Environment).
+   Mark all ASC vars secret:
+
+   | Var | Set on | Value |
+   |---|---|---|
+   | `ASC_KEY_ID` | all | from step 2 |
+   | `ASC_ISSUER_ID` | all | from step 2 |
+   | `ASC_PRIVATE_KEY` | all | full `.p8` PEM contents |
+   | `ASC_APP_ID` | `tf-triage` | `6760607040` |
+   | `ASC_PRODUCT_ID` | `tf-autofix`, `tf-ship`, `tf-sweep` | from step 3 |
+   | `ASC_SHIP_WORKFLOW_ID` | `tf-ship`, `tf-sweep` | from step 3 |
+
+6. **Seed the `meta-state` issue** (the first `tf-triage` run will
+   create it if missing; you can do it by hand too):
+   ```bash
    gh label create meta-state --color c5def5 --description "Routine state carrier"
    gh issue create --title "[meta] tf-cycle state — do not close" \
                    --label meta-state \
-                   --body '{"tf_feedback_cursor":0,"last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
+                   --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
    gh issue pin <N>
    ```
 
-## ASC JWT helper (for autofix log fetching and ship polling)
+## ASC API access
 
-Both `tf-autofix` (iterate mode) and `tf-ship` (polling) need to call
-the App Store Connect API. Use this bash snippet inside the routine
-(requires `jq` and `openssl`):
+All Apple-side calls go through `.claude/routines/scripts/asc.py`.
+It mints a short-lived ES256 JWT on every call (Apple's auth model
+requires this — static tokens aren't supported).
 
+Subcommands:
+
+| Command | Purpose | Used by |
+|---|---|---|
+| `asc.py jwt` | Print a fresh JWT (debug) | — |
+| `asc.py get <path>` | GET any ASC endpoint, print JSON | ad-hoc |
+| `asc.py feedback --since <iso>` | Normalized TF feedback list | `tf-triage` |
+| `asc.py ship-latest --workflow <id>` | Latest Xcode Cloud run for a workflow | `tf-ship`, `tf-sweep` |
+| `asc.py build-log --run <id>` | Log download URLs for a failed run | `tf-autofix` (iterate) |
+
+For one-shot `curl`-style access from bash:
 ```bash
-asc_jwt() {
-  local now=$(date +%s)
-  local exp=$((now + 900))
-  local header='{"alg":"ES256","kid":"'"$ASC_KEY_ID"'","typ":"JWT"}'
-  local payload='{"iss":"'"$ASC_ISSUER_ID"'","iat":'"$now"',"exp":'"$exp"',"aud":"appstoreconnect-v1"}'
-  local b64h=$(printf '%s' "$header"  | openssl base64 -A | tr '+/' '-_' | tr -d '=')
-  local b64p=$(printf '%s' "$payload" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
-  local msg="$b64h.$b64p"
-  local key_file=$(mktemp); printf '%s' "$ASC_PRIVATE_KEY" > "$key_file"
-  local sig=$(printf '%s' "$msg" | openssl dgst -sha256 -sign "$key_file" \
-              | openssl asn1parse -inform DER \
-              | awk '/INTEGER/ {gsub("0x","",$NF); printf "%s", $NF}' \
-              | xxd -r -p | openssl base64 -A | tr '+/' '-_' | tr -d '=')
-  rm -f "$key_file"
-  printf '%s.%s' "$msg" "$sig"
-}
-
-asc_get() {
-  curl -sSf -H "Authorization: Bearer $(asc_jwt)" \
-       "https://api.appstoreconnect.apple.com$1"
-}
+source .claude/routines/scripts/asc_helpers.sh
+asc_get /v1/ciBuildRuns/<id>
 ```
 
-Use:
-```bash
-asc_get "/v1/ciProducts/$ASC_PRODUCT_ID/buildRuns?filter[workflow]=$ASC_SHIP_WORKFLOW_ID&sort=-createdDate&limit=1" \
-  | jq -r '.data[0].attributes.executionProgress'
-```
+Dependencies: `pyjwt` + `cryptography`. `asc.py` auto-pip-installs
+them on first run if missing, so you don't need a pre-baked image.
 
 ## Event coverage caveat
 
-As of this writing, Claude Code Routines reliably supports
-`pull_request`, `issues`, `issue_comment`, and `release` events with
-label filters. If your Routines tier doesn't fire on `issues` with
+As of this writing, Claude Code Routines supports `pull_request`,
+`issues`, `issue_comment`, and `release` events, with label filters
+for `issues`. If your Routines tier doesn't fire on `issues` with
 label filters, `tf-sweep` at hourly cadence is the safety net — it
 re-checks state and forcibly re-dispatches by toggling labels.
 
@@ -102,18 +116,27 @@ is what `tf-autofix` continuation listens to).
 
 ## Migration from the old local orchestrator
 
-The old `.claude/commands/tf-cycle.md` is deprecated. Once these
-routines are live and have processed at least one full issue
+The old `.claude/commands/tf-cycle.md` is now a pointer stub. Once
+these routines are live and have processed at least one full issue
 end-to-end (TF feedback → autofix → ship), you can:
 
 1. `launchctl bootout gui/$(id -u)/com.user.aichat.gh-webhook` on
    the Mac (if it's still around)
 2. Delete the smee channel
-3. Remove the Mac's launchd nightly ship (`fastlane/nightly.sh`)
-4. Keep `fastlane/Fastfile` + `fastlane/.env` locally as a manual
-   emergency-ship escape hatch; they're not wired to anything
-   automated anymore.
+3. Keep `fastlane/Fastfile` + `fastlane/.env` locally as a manual
+   emergency-ship escape hatch. The `fastlane/nightly.sh` launchd
+   job can be removed entirely — nothing references it anymore.
 
 The `meta-state` issue replaces `tf-state.json`. The smee log
 (`/tmp/aichat-gh-events.log`) is no longer consulted by any routine
 — webhooks go directly from GitHub to the Claude GitHub App.
+
+## Why we dropped the testflight-feedback MCP
+
+Earlier drafts of these routines called `mcp__testflight-feedback__list_feedback`.
+That server ran on the user's local Mac (stdio transport via
+`claude mcp add`) and is unreachable from Anthropic's Routines
+sandbox. Re-hosting it as a public HTTPS MCP would add a service to
+maintain; since the server was just a thin wrapper around the ASC
+REST API anyway, `asc.py feedback` is the direct replacement with
+one fewer moving part.

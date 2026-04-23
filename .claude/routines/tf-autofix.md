@@ -53,15 +53,22 @@ Inspect the trigger:
 
 ## Iterate mode
 
-1. Fetch the failing Xcode Cloud log. Mint an ASC JWT from workflow
-   env vars `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_PRIVATE_KEY`
-   (see `.claude/routines/README.md` for the helper snippet), then:
+1. Fetch the failing Xcode Cloud log. Use `asc.py`:
+   ```bash
+   source .claude/routines/scripts/asc_helpers.sh
+   # Find the latest build run for this PR's branch
+   RUN_ID=$(asc_get "/v1/ciProducts/$ASC_PRODUCT_ID/buildRuns?sort=-createdDate&limit=20" \
+            | jq -r --arg br "autofix/issue-$N" \
+                '.data[] | select(.attributes.sourceCommit.commitSha != null) | select(.relationships.sourceBranchOrTag.data != null) | .id' \
+            | head -1)
+   # If filter-by-branch isn't available on your Apple plan, fall back:
+   #   check the PR's check-run details URL — the trailing path segment
+   #   is the ciBuildRunId:
+   #   gh pr checks <PR> --json name,link | jq -r '.[] | select(.name | startswith("Xcode Cloud")) | .link'
+   LOG_URLS=$(python3 .claude/routines/scripts/asc.py build-log --run "$RUN_ID")
+   curl -sSL "$(echo "$LOG_URLS" | head -1)" > /tmp/xc_log.txt
+   tail -300 /tmp/xc_log.txt  # feed into your root-cause analysis
    ```
-   GET /v1/ciBuildRuns?filter[product]=<PROD_ID>&filter[pullRequest]=<PR_NUM>&sort=-createdDate&limit=1
-   GET /v1/ciBuildRuns/{id}/actions
-   GET /v1/ciBuildActions/{id}/artifacts
-   ```
-   Download the log artifact and grep the failure.
 2. `git checkout autofix/issue-<N>; git pull --ff-only`.
 3. Read the failure, understand root cause (not just "tests red"),
    edit code.
