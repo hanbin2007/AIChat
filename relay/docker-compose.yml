@@ -1,0 +1,21 @@
+services:
+  relay:
+    build: .
+    image: aichat-relay:latest
+    container_name: aichat-relay
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      RELAY_BEARER_TOKEN: ${RELAY_BEARER_TOKEN}
+      RELAY_SESSION_SECRET: ${RELAY_SESSION_SECRET}
+      RELAY_ADMIN_USER: ${RELAY_ADMIN_USER:-admin}
+      RELAY_ADMIN_PASSWORD: ${RELAY_ADMIN_PASSWORD}
+      RELAY_BILLING_MODE: ${RELAY_BILLING_MODE:-stub}
+      RELAY_DEBUG_LOGGING: ${RELAY_DEBUG_LOGGING:-0}
+    volumes:
+      - relay-data:/data
+
+volumes:
+  relay-data:
