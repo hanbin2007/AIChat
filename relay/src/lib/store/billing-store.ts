@@ -616,6 +616,7 @@ class BillingStore {
       if (account) this.refundGrants(account, record.reservedCredits);
       record.settledCredits = 0;
       record.reservedCredits = 0;
+      this.compact();
     });
   }
 
