@@ -6,6 +6,8 @@ You are the orchestrator for auto-handling TestFlight feedback for AIChat (repo 
 
 **Review channel is GitHub only** — no iMessage, no external messaging. The user reacts on issues (labels / comments / close). Every reaction from the user triggers action on the next tick (or sooner if they ping you in-session).
 
+**Build infrastructure is Xcode Cloud.** Every PR opened by Phase 2 must clear an Xcode Cloud `PR Build & Test` check before auto-merge is queued. Phase 3 ships by writing `TestFlight/WhatToTest.<LOCALE>.txt` files and pushing to `main` — Xcode Cloud's `Ship to TestFlight` workflow handles archive, upload, and external-group distribution natively (no fastlane). See `docs/xcode-cloud.md` for ASC-side configuration.
+
 Run phases below in order; end with a one-line summary.
 
 ---
@@ -144,10 +146,12 @@ Surface `SYNC_STATUS` in the tick summary line. Never rebase automatically. Neve
 **State shape**: `tf-state.json.in_flight` is a dict keyed by issue number:
 ```
 "in_flight": {
-  "1": {"agent_id": "...", "phase": "agent_running"|"test_running"|"pr_queued", "worktree": "...", "started": "ISO"},
+  "1": {"agent_id": "...", "phase": "agent_running"|"ci_running"|"pr_queued"|"pr_conflicted", "pr": <N>, "worktree": "...", "started": "ISO"},
   "3": {...}
 }
 ```
+
+Phase progression: `agent_running` → (local build+test passed, PR opened) → `ci_running` → (Xcode Cloud PR check passed, auto-merge queued) → `pr_queued` → (PR merged, Phase 3 picks it up) → entry deleted.
 
 Each tick runs these three sub-steps IN ORDER:
 
@@ -157,10 +161,16 @@ For each `<N> -> entry` in `in_flight`:
 
 - Phase `agent_running`: call `TaskOutput(task_id=entry.agent_id, block=false, timeout=0)`.
   - `status=running` → skip.
-  - `status=completed` with SUCCESS block → parse branch + SHA, create PR (`gh pr create ...`), queue auto-merge (`gh pr merge <PR#> --squash --auto`), swap labels on issue (`auto-fix-in-progress` off, `auto-fix-ready` on), comment `Attempt succeeded → PR #<PR#> queued for merge.`, move entry.phase to `pr_queued` (or delete entry if PR already merged).
+  - `status=completed` with SUCCESS block → parse branch + SHA, create PR (`gh pr create ...`, do NOT queue auto-merge yet), swap labels on issue (`auto-fix-in-progress` off, `auto-fix-ci-pending` on), comment `@hanbin2007 Local attempt succeeded → PR #<N> opened, waiting on Xcode Cloud.`, set `entry.pr = <PR#>` and move `entry.phase = "ci_running"`.
   - `status=completed` with FAILED block → remove `auto-fix-in-progress` and `auto-fix-approved`, add `auto-fix-failed`, comment the failure report, delete entry.
 
-- Phase `pr_queued`: check if PR merged. If yes, delete entry (Phase 3 will handle ship separately).
+- Phase `ci_running`: query PR checks via `gh pr checks <entry.pr> --json name,state,bucket`.
+  - Look for the Xcode Cloud check (name starts with `Xcode Cloud` — typically `Xcode Cloud / PR Build & Test`).
+  - Still `IN_PROGRESS` / `QUEUED` / `PENDING` → skip (next tick re-checks).
+  - `SUCCESS` → queue auto-merge (`gh pr merge <entry.pr> --squash --auto`), swap `auto-fix-ci-pending` → `auto-fix-ready`, comment `@hanbin2007 Xcode Cloud ✅ → PR #<entry.pr> queued for merge.`, move `entry.phase = "pr_queued"`.
+  - `FAILURE` / `CANCELLED` → remove `auto-fix-ci-pending` and `auto-fix-approved`, add `auto-fix-failed`, comment `@hanbin2007 Xcode Cloud ❌ on PR #<entry.pr>. Local build passed but cloud rejected. Details: <check's detailsUrl>. Leaving for manual triage.`, delete entry. (We don't auto-respawn because cloud-vs-local divergence usually means signing, fresh-VM assumptions, or missing files — worth a human look.)
+
+- Phase `pr_queued`: check if PR merged. If yes, delete entry (Phase 3 will handle ship separately). If PR shows `mergeStateStatus=DIRTY` per the stale-base logic in Phase 0, move to `pr_conflicted`.
 
 ### 2B. Start new agents for newly approved issues
 
@@ -246,7 +256,7 @@ For each issue `<N>` in `approved_set` (up to the cap):
 > - Relay code changed: `xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build`
 > - Shared Licensing changed: build all three above (it compiles into each).
 >
-> On success: `git checkout -b autofix/issue-<N>`; commit `fix: <summary> (Fixes #<N>)`; `git push -u origin autofix/issue-<N>`. Return EXACTLY:
+> On success: `git checkout -b autofix/issue-<N>`; commit `fix: <summary> (Fixes #<N>)`; `git push -u origin autofix/issue-<N>`. Note: your SUCCESS opens the PR but does **not** auto-merge — Xcode Cloud's `PR Build & Test` workflow must also pass. The orchestrator handles that gate in Phase 2A `ci_running`. If your local build passes but cloud rejects, the human triages. Return EXACTLY:
 > ```
 > SUCCESS
 > branch: autofix/issue-<N>
@@ -274,29 +284,56 @@ For each issue `<N>` in `approved_set` (up to the cap):
 
 ---
 
-## Phase 3 — SHIP (upload merged fixes to TestFlight)
+## Phase 3 — SHIP (push changelog to main; Xcode Cloud handles upload)
+
+Xcode Cloud's `Ship to TestFlight` workflow auto-runs on every push to `main`. Our job here is to (a) write `TestFlight/WhatToTest.<LOCALE>.txt` with the right changelog, (b) push to main, (c) wait for the cloud build to upload, (d) close issues.
 
 1. Query recently-merged auto-fix PRs since `last_ship_iso`:
    ```
    gh pr list --repo hanbin2007/AIChat --state merged --label auto-fix-ready --json number,title,mergedAt,headRefName --jq '.[] | select(.mergedAt > "<last_ship_iso>")'
    ```
 
-2. If the list is non-empty:
-   - For each merged PR:
-     - Get the linked issue number from commit message (`git log -1 --format=%B <PR merge sha>` → grep `Fixes #<N>`)
-     - Fetch that issue: `gh issue view <N> --json title,body`
-     - Extract: (a) the original feedback quote from "## 原文" section (first blockquote line), (b) the PR title summary after `fix(tf): ` prefix
-   - Build changelog, one block per fix:
+2. If the list is empty, skip. Otherwise:
+
+   **2a. Build changelog bodies.** For each merged PR:
+   - Linked issue: `git log -1 --format=%B <merge sha>` → grep `Fixes #<N>`
+   - `gh issue view <N> --json title,body`
+   - Extract (a) original feedback from "## 原文" first blockquote, (b) PR title summary after `fix(tf): ` prefix
+   - zh-Hans block:
      ```
      修复 #<N>: <summary>
-       反馈: "<original feedback one-liner>"
+       反馈: "<original one-liner>"
      ```
-   - Join all blocks with blank lines. Keep total under 4000 chars (TestFlight limit); truncate oldest if over.
-   - `cd ~/Documents/aichat; set -a; source fastlane/.env; set +a; fastlane beta changelog:"<changelog>"` (timeout 30 min)
-   - On success: for each referenced issue, comment `Shipped in TestFlight build <ver>(<build_num>) to external group PBTestGroup.`, add label `shipped-to-testflight`, close the issue. Update `last_ship_iso`.
-   - On failure: comment on each pending issue with last 3 lines of fastlane stderr; next tick will retry.
+   - en block:
+     ```
+     Fixes #<N>: <summary>
+       Feedback: "<original one-liner>"
+     ```
+   Join with blank lines. Cap each locale at 4000 chars (TF limit); drop oldest if over. If there are no fix blocks for a run (nightly-style), use the 5-most-recent-commits summary instead.
 
-3. If no merged PRs, skip.
+   **2b. Write files on main.**
+   ```
+   cd ~/Documents/aichat
+   git checkout main
+   git pull --ff-only origin main
+   printf '%s\n' "$ZH_BODY" > TestFlight/WhatToTest.zh-Hans.txt
+   printf '%s\n' "$EN_BODY" > TestFlight/WhatToTest.en.txt
+   git add TestFlight/WhatToTest.zh-Hans.txt TestFlight/WhatToTest.en.txt
+   git commit -m "chore(tf): ship $(date -u +%Y%m%d-%H%M) — fixes $(echo $ISSUES | tr ' ' ',')"
+   git push origin main
+   ```
+
+   **2c. Wait for Xcode Cloud.** Poll via ASC API (JWT minted from `fastlane/.env` — `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`):
+   ```
+   GET /v1/ciProducts/{productId}/buildRuns?filter[workflow]=<Ship workflow id>&sort=-createdDate&limit=1
+   ```
+   Wait until `attributes.executionProgress == COMPLETE`. Timeout 45 min. If `attributes.completionStatus == SUCCEEDED` → the build is uploaded and distributed (TestFlight post-action configured in ASC handles the rest).
+
+   On success: for each referenced issue, comment `@hanbin2007 Shipped in TestFlight build <build_num> (Xcode Cloud run #<runNumber>) to external group PBTestGroup.`, add label `shipped-to-testflight`, close. Update `last_ship_iso`. Remove all `WhatToTest.*.txt` staging if desired (or leave until next ship overwrites).
+
+   On failure (`completionStatus` in {FAILED, ERRORED, CANCELED} or timeout): comment on each pending issue with the Xcode Cloud run URL and last action's failure reason. Do NOT revert the main push (the file change is harmless; next ship picks up). Next tick will retry when new merges accumulate. If two consecutive Phase 3 runs fail, post a `@hanbin2007 Phase 3 failing twice — check Xcode Cloud.` alert on the most recent issue.
+
+3. **Fallback.** If `ASC_KEY_PATH` is unset or the ASC API is unreachable, fall back to the legacy fastlane path: `cd ~/Documents/aichat; set -a; source fastlane/.env; set +a; fastlane beta changelog:"<zh block>"`. Log `phase3: fell back to fastlane` in the summary. The launchd nightly job (`fastlane/nightly.sh`) also stays armed as a belt-and-suspenders — it only fires at 00:00 and harmlessly no-ops when nothing changed.
 
 ---
 

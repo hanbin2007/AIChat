@@ -1,0 +1,3 @@
+Routine update.
+
+Please submit feedback directly inside TestFlight — every report is mirrored to a GitHub issue for follow-up.
