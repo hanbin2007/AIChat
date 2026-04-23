@@ -51,14 +51,17 @@ no-op for this workflow but harmless.
 `ci_pre_xcodebuild.sh` aligns `CFBundleVersion` with `CI_BUILD_NUMBER` so
 each ship gets a unique build number with no commit-back loop. Changelog
 comes from `TestFlight/WhatToTest.<LOCALE>.txt` files in the repo —
-`tf-cycle` writes these as part of Phase 3 before merging into `main`.
+the `tf-ship` routine (see `.claude/routines/tf-ship.md`) writes these
+before pushing `main`.
 
 ## Webhook (optional but recommended)
 
 Configure in ASC → Xcode Cloud → Settings → Webhooks. Point the URL at
-the same smee channel `tf-cycle` already listens on; Xcode Cloud build
-events then land in `/tmp/aichat-gh-events.log` and wake the orchestrator
-the same way GitHub events do.
+your Claude Code Routines inbound webhook so Xcode Cloud build-done
+events can wake the `tf-ship` / `tf-sweep` routines without waiting
+for the hourly sweep. If you don't wire this up, the hourly `tf-sweep`
+is the fallback — `tf-ship` already polls ASC API directly anyway, so
+the webhook is a latency optimization, not a correctness requirement.
 
 ## Snapshot dump
 
@@ -72,10 +75,11 @@ asc ci-workflows list --product-name AIChat --json > docs/xcode-cloud-snapshot.j
 commit the JSON. That gives us a diffable record next time someone
 quietly changes a trigger.
 
-## Why we kept fastlane
+## Manual emergency-ship escape hatch
 
-`fastlane/Fastfile` and `fastlane/nightly.sh` stay in the repo as a
-fallback path. If Xcode Cloud is down or quota-exhausted, the launchd
-nightly job on `zhb`'s Mac can still ship a build. Once Xcode Cloud is
-proven stable for 30 days, the launchd plist + fastlane lane can be
-retired.
+`fastlane/Fastfile` stays in the repo as a manual-only escape hatch.
+If Xcode Cloud is unavailable and you need to ship a build immediately,
+run `fastlane beta changelog:"..."` from any Mac with Xcode + the ASC
+key. There is no automated path that invokes it — the old launchd
+`fastlane/nightly.sh` and its smee/webhook daemon are gone along with
+the local orchestrator.
