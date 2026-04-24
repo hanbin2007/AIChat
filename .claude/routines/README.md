@@ -14,9 +14,9 @@ upload). This file covers the Routines side.
 |---|---|---|
 | `tf-triage.md` | Schedule: every 30 min | Pull new TF feedback → file issues |
 | `tf-react.md` | GitHub `issues` / `issue_comment` with label `source:testflight-api` | Process owner approvals / refinements |
-| `tf-autofix.md` | GitHub `issues` (labeled `auto-fix-approved`) **AND** `pull_request` sync on `autofix/*` | Start, iterate, merge one fix |
+| `tf-autofix.md` | GitHub `issues` labeled `auto-fix-approved` | Start, iterate, merge one fix (re-fired by `tf-sweep` via label toggle) |
 | `tf-ship.md` | GitHub `pull_request` closed + merged with label `auto-fix-ready` | Write WhatToTest → push main → wait for upload |
-| `tf-sweep.md` | Schedule: every 1 hour | Fallback for dropped webhooks |
+| `tf-sweep.md` | Schedule: every 15 min | Poll Xcode Cloud checks + catch dropped webhooks |
 
 `_shared.md` is not a routine — it's included in every routine's
 deployed prompt (paste at the top in the web UI, or `@include` it if
@@ -104,15 +104,24 @@ them on first run if missing, so you don't need a pre-baked image.
 
 ## Event coverage caveat
 
-As of this writing, Claude Code Routines supports `pull_request`,
-`issues`, `issue_comment`, and `release` events, with label filters
-for `issues`. If your Routines tier doesn't fire on `issues` with
-label filters, `tf-sweep` at hourly cadence is the safety net — it
-re-checks state and forcibly re-dispatches by toggling labels.
+Claude Code Routines supports `pull_request`, `issues`,
+`issue_comment`, and `release` events with label filters. It does
+**not** expose `check_run` or `workflow_run` / `check_suite` events
+on the current tier. Xcode Cloud reports PR build results as a
+`check_run` on the PR head commit — but because we can't subscribe
+to it, `tf-autofix` can't self-trigger when a build finishes.
 
-Do **not** rely on `workflow_run` or `check_run` events (Xcode Cloud
-posts status via the GitHub app, which shows up as a PR sync — that
-is what `tf-autofix` continuation listens to).
+**Our workaround:** `tf-sweep` runs every 15 min, polls the
+`statusCheckRollup` on every open `autofix/*` PR, and when it sees
+a terminal check status it toggles the `auto-fix-approved` label on
+the linked issue. The re-add fires `issues.labeled`, which
+`tf-autofix` does see, and the routine looks at branch + check
+state to decide Start / Iterate / Merge / Fail. This makes
+check-polling the primary signal path, not just a fallback.
+
+Worst-case latency: a failing build is noticed within 15 min; three
+iterations of a gnarly bug land in about 2 hours. That's still well
+under the old local orchestrator's end-to-end time.
 
 ## Migration from the old local orchestrator
 

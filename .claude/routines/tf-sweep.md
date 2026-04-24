@@ -1,15 +1,21 @@
 ---
-description: Hourly fallback that catches missed webhook events
-trigger: schedule (every 1 hour)
+description: 15-min tick that polls Xcode Cloud results and pokes stuck routines
+trigger: schedule (every 15 minutes)
 ---
 
-You are the **SWEEP** routine. Follow `_shared.md`. One run re-runs
-the event-driven phases against current GitHub state so nothing
-stays stuck if a webhook was dropped, rate-limited, or delivered
-during a Routines outage.
+You are the **SWEEP** routine. Follow `_shared.md`. Two jobs:
+
+1. **Primary (every tick): poll Xcode Cloud check results** on open
+   autofix PRs and poke `tf-autofix` when a check has completed.
+   This is necessary because this Routines tier does not expose
+   `check_run` events, so `tf-autofix` cannot be event-triggered
+   when Xcode Cloud finishes a build — sweep is how it finds out.
+
+2. **Fallback: rescue dropped webhooks and stale state** elsewhere
+   in the pipeline.
 
 This routine does **not** do investigation, approval, or code
-editing. It only notices state that looks wrong and nudges it.
+editing. It only observes state and nudges it.
 
 ## Steps
 
@@ -32,23 +38,43 @@ editing. It only notices state that looks wrong and nudges it.
      ```
      (The label-add re-fires the `tf-autofix` routine.)
 
-2. **Dropped PR sync events.**
-   - List open PRs with head `autofix/issue-*` whose last push is
-     >15 min old:
-     ```
-     gh pr list --repo hanbin2007/AIChat --state open \
-       --search "head:autofix/ sort:updated-desc" \
-       --json number,headRefName,updatedAt,statusCheckRollup
-     ```
-   - For each: look at the Xcode Cloud check. If status is SUCCESS
-     and the PR is not yet merged (no `auto-merge` queued), or if
-     status is FAILURE and the branch still has <3 commits and no
-     new commit in >15 min → re-dispatch:
-     ```
-     gh pr comment <PR> --body "<!-- sweep: poke autofix -->"
-     ```
-     The comment triggers a PR sync event which `tf-autofix` picks
-     up in CONTINUE mode.
+2. **Poll Xcode Cloud check results on every open autofix PR.** This
+   is the primary job. For each open PR with head `autofix/issue-*`:
+   ```bash
+   gh pr list --repo hanbin2007/AIChat --state open \
+     --search "head:autofix/" \
+     --json number,headRefName,commits,statusCheckRollup,body,updatedAt
+   ```
+   Extract the Xcode Cloud check (name starts with `Xcode Cloud`).
+   Note the issue number `N` from `headRefName` (`autofix/issue-<N>`)
+   and the commit count on the branch.
+
+   Decide by check state:
+
+   | Check | Commits | Age of last commit | Action |
+   |---|---|---|---|
+   | `IN_PROGRESS` / `QUEUED` / `PENDING` | — | — | skip (still building) |
+   | `SUCCESS` | — | — | skip (auto-merge will handle it; if PR is old and still unmerged, see step 3) |
+   | `FAILURE` / `CANCELLED` / `TIMED_OUT` | < 3 | any | **poke autofix** |
+   | `FAILURE` / `CANCELLED` / `TIMED_OUT` | ≥ 3 | any | **poke autofix** (it will go to Fail mode and clean up) |
+   | no check yet | — | > 10 min | **poke autofix** (Xcode Cloud failed to trigger) |
+   | no check yet | — | ≤ 10 min | skip (give Xcode Cloud time) |
+
+   "poke autofix" = toggle the `auto-fix-approved` label on the
+   linked issue, which re-fires `tf-autofix`:
+   ```bash
+   gh issue edit $N --repo hanbin2007/AIChat --remove-label auto-fix-approved
+   # one-shot; no sleep needed — the removal doesn't fire autofix
+   gh issue edit $N --repo hanbin2007/AIChat --add-label    auto-fix-approved
+   ```
+   Only the **add** fires the routine (trigger filter is
+   `labeled`). Do not also add a comment — comments are noise and
+   don't trigger tf-autofix anyway.
+
+   Before poking, check you haven't already poked in the last 10 min
+   (look for the last `auto-fix-approved` label event via
+   `gh api /repos/.../issues/$N/events`). If so, skip to avoid
+   storms when Xcode Cloud is genuinely slow.
 
 3. **Stuck ship.**
    - If there is any merged PR with label `auto-fix-ready` older
