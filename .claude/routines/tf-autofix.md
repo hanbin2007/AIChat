@@ -1,34 +1,41 @@
 ---
 description: Fix one approved TF issue end-to-end; iterates with Xcode Cloud
-trigger: GitHub event (issues labeled auto-fix-approved)
+runner: GitHub Actions (.github/workflows/tf-autofix.yml)
+triggers:
+  - issues.labeled (auto-fix-approved)  — owner starts / re-starts
+  - check_run.completed on autofix/issue-* PRs — Xcode Cloud finished
 ---
 
 You are the **AUTOFIX** routine. Follow `_shared.md` and the
 Production-Quality Contract strictly. One run advances one autofix PR
-by at most one attempt. Continuation across runs is driven by
-**label re-toggling from `tf-sweep`**: when Xcode Cloud posts a
-failed check (which this Routines tier can't subscribe to directly),
-`tf-sweep` detects it on its next tick and re-adds the
-`auto-fix-approved` label, which re-fires this routine. We then
-inspect the branch/PR state to figure out what to do next.
+by at most one attempt.
+
+This routine is **not** a Claude Code Routine — it runs inside
+`.github/workflows/tf-autofix.yml` via `anthropics/claude-code-action`.
+That workflow is wired to both event types above, so you are woken
+up directly by Xcode Cloud check completion (no polling, no label
+toggle indirection). Across runs, continuation is driven by state
+in GitHub itself (branch, commits, PR check status), which you
+inspect at the top of every run.
 
 ## Determine mode
 
 Always start by inspecting the current state of issue #N, not the
-trigger. Decision table:
+trigger. The workflow passes `$ISSUE_NUMBER` in the environment;
+use it as `N`. Decision table:
 
 | Branch `autofix/issue-<N>` exists? | Latest PR check | Commits on branch | → Mode |
 |---|---|---|---|
 | no | — | — | **Start** |
 | yes | `IN_PROGRESS` / `QUEUED` | any | exit noop (still building) |
 | yes | `SUCCESS` | any | **Merge** |
-| yes | `FAILURE` / `CANCELLED` | < 3 | **Iterate** |
-| yes | `FAILURE` / `CANCELLED` | ≥ 3 | **Fail** |
+| yes | `FAILURE` / `CANCELLED` / `TIMED_OUT` | < 3 | **Iterate** |
+| yes | `FAILURE` / `CANCELLED` / `TIMED_OUT` | ≥ 3 | **Fail** |
 | yes | no check yet | any | exit noop (give Xcode Cloud 5 min) |
 
 Fetch state:
 ```bash
-N=<issue number from trigger payload>
+N="$ISSUE_NUMBER"
 BRANCH="autofix/issue-$N"
 git fetch origin "$BRANCH" 2>/dev/null && HAS_BRANCH=1 || HAS_BRANCH=0
 if [ "$HAS_BRANCH" = 1 ]; then
@@ -38,6 +45,11 @@ if [ "$HAS_BRANCH" = 1 ]; then
   CHECK=$(echo "$PR" | jq -r '.statusCheckRollup[] | select(.name | startswith("Xcode Cloud")) | .status // .conclusion' | head -1)
 fi
 ```
+
+If the trigger was `check_run.completed`, `$CHECK_CONCLUSION` and
+`$CHECK_DETAILS_URL` are also available; they are a faster path to
+the same info and to the build run id (last path segment of the
+details URL).
 
 ## Start mode
 
@@ -60,11 +72,10 @@ fi
    `auto-fix-in-progress`.
 10. Comment on issue:
     `@hanbin2007 Starting: <one line on the change>. Attempt 1 pushed, Xcode Cloud running.`
-11. Exit. Xcode Cloud's PR workflow fires automatically. When it
-    finishes, GitHub posts a check. This Routines tier does not see
-    `check_run` events, so `tf-sweep` is responsible for noticing
-    the result on its next 15-min tick and re-firing this routine
-    by toggling the `auto-fix-approved` label on issue #N.
+11. Exit. Xcode Cloud's PR workflow fires automatically on the push.
+    When the build finishes, GitHub Actions `tf-autofix.yml` re-fires
+    on `check_run.completed` and you land in Determine → Iterate
+    (if failed) or Merge (if passed).
 
 ## Iterate mode
 
@@ -92,8 +103,8 @@ fi
 5. `git push`.
 6. Comment:
    `@hanbin2007 Attempt <N>: <one line on the fix>. Re-running Xcode Cloud.`
-7. Exit. Same as Start mode: `tf-sweep` will detect the next check
-   result and re-fire us if we need to iterate again.
+7. Exit. Xcode Cloud rebuilds on push; the next `check_run.completed`
+   re-fires this workflow.
 
 ## Merge mode
 
