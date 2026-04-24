@@ -6,7 +6,6 @@ DerivedData/
 Packages/*/build/
 Packages/*/.build/
 Packages/*/.swiftpm/
-AIChat.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 *.xcuserstate
 *.xcuserdata/
 xcuserdata/
@@ -35,4 +34,3 @@ AuthKey_*.p8
 fastlane/nightly.launchd.out.log
 fastlane/nightly.launchd.err.log
 fastlane/nightly.log
-

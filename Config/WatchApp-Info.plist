@@ -4,18 +4,16 @@
 <dict>
 	<key>AI_BACKEND_MODE</key>
 	<string>$(AI_BACKEND_MODE)</string>
+	<key>AI_RELAY_ALLOW_INSECURE_TLS</key>
+	<string>$(AI_RELAY_ALLOW_INSECURE_TLS)</string>
 	<key>AI_RELAY_BASE_URL</key>
 	<string>$(AI_RELAY_BASE_URL)</string>
 	<key>AI_RELAY_BEARER_TOKEN</key>
 	<string>$(AI_RELAY_BEARER_TOKEN)</string>
-	<key>AI_RELAY_ALLOW_INSECURE_TLS</key>
-	<string>$(AI_RELAY_ALLOW_INSECURE_TLS)</string>
 	<key>AI_RELAY_STREAM_PATH</key>
 	<string>$(AI_RELAY_STREAM_PATH)</string>
 	<key>APP_GROUP_IDENTIFIER</key>
 	<string>$(APP_GROUP_IDENTIFIER)</string>
-	<key>ICLOUD_CONTAINER_IDENTIFIER</key>
-	<string>$(ICLOUD_CONTAINER_IDENTIFIER)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -53,23 +51,25 @@
 	<string>$(GEMINI_MODEL)</string>
 	<key>GEMINI_TRANSCRIPTION_MODEL</key>
 	<string>$(GEMINI_TRANSCRIPTION_MODEL)</string>
+	<key>ICLOUD_CONTAINER_IDENTIFIER</key>
+	<string>$(ICLOUD_CONTAINER_IDENTIFIER)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>$(INFOPLIST_KEY_NSPhotoLibraryUsageDescription)</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Record voice prompts to send to Gemini.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Record voice prompts to send to Gemini.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>$(INFOPLIST_KEY_NSPhotoLibraryUsageDescription)</string>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>hanbin.AIChat</string>
 	<key>WKRunsIndependentlyOfCompanionApp</key>
-	<true/>
+	<false/>
 	<key>WKSupportsAlwaysOnDisplay</key>
 	<true/>
 </dict>
