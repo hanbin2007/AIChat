@@ -63,17 +63,41 @@ export async function POST(req: Request) {
   }
 
   const encoder = new TextEncoder();
+  let aborted = false;
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`event: ${event}\n`));
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        if (aborted) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          aborted = true;
+        }
       };
       let mergedAnswer = "";
       let mergedThought = "";
       let finishReason = "";
       let inputTokens = 0;
       let outputTokens = 0;
+      // Client disconnect → release reservation so credits don't leak.
+      const signal = req.signal;
+      const onAbort = async () => {
+        if (aborted) return;
+        aborted = true;
+        if (reservationID) await billingStore().rollbackReservation(reservationID).catch(() => undefined);
+        try { controller.close(); } catch { /* already closed */ }
+        await finishObserve(ctx, {
+          statusCode: 499,
+          level: "warning",
+          category: "failure",
+          message: "client disconnected before completion",
+          mergedAnswer,
+          mergedThought,
+        });
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+
       try {
         const result = await proxyGeminiStream({
           model,
@@ -89,6 +113,7 @@ export async function POST(req: Request) {
         inputTokens = result.usage?.promptTokens ?? 0;
         outputTokens = result.usage?.candidatesTokens ?? 0;
       } catch (err: unknown) {
+        if (aborted) return;
         send("error", { type: "error", message: (err as Error).message });
         if (reservationID) await billingStore().rollbackReservation(reservationID).catch(() => undefined);
         controller.close();
@@ -101,7 +126,10 @@ export async function POST(req: Request) {
           mergedThought,
         });
         return;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
       }
+      if (aborted) return;
       controller.close();
       ctx.finishReason = finishReason;
       ctx.inputTokens = inputTokens;

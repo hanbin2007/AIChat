@@ -47,6 +47,7 @@ export function Chip({
       {onRemove && (
         <span
           role="button"
+          aria-label="Remove"
           onClick={(e) => {
             e.stopPropagation();
             onRemove();

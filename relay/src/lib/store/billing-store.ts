@@ -40,6 +40,7 @@ import type {
   TrialClaim,
   UsageRecord,
 } from "@/lib/billing/types";
+import { now as clockNow, nowIso } from "@/lib/clock";
 import { readJsonFile, writeJsonFileAtomic, WriteQueue } from "./persistence";
 
 const FILE = () => path.join(config.dataDir, "billing.json");
@@ -80,7 +81,7 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function iso(d: Date = new Date()): string {
+function iso(d: Date = clockNow()): string {
   return d.toISOString();
 }
 
@@ -100,7 +101,7 @@ class BillingStore {
     this.loaded = true;
   }
 
-  private compact(now = new Date()) {
+  private compact(now: Date = clockNow()) {
     // expire pairing tokens
     for (const [t, p] of Object.entries(this.state.pairingTokens)) {
       if (new Date(p.expiresAt).getTime() < now.getTime()) delete this.state.pairingTokens[t];
@@ -227,7 +228,7 @@ class BillingStore {
       };
       device.keyID = key.keyID;
       account.keyIDs.push(key.keyID);
-      const expires = new Date();
+      const expires = new Date(clockNow().getTime());
       expires.setDate(expires.getDate() + this.state.policy.trialDurationDays);
       const grant: Grant = {
         grantID: uuid(),
@@ -411,7 +412,7 @@ class BillingStore {
         token: newPairingToken(),
         accountID: params.accountID,
         issuedBy: params.deviceID,
-        expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString(),
+        expiresAt: new Date(clockNow().getTime() + PAIRING_TTL_MS).toISOString(),
       };
       this.state.pairingTokens[token.token] = token;
       return clone(token);
@@ -426,7 +427,7 @@ class BillingStore {
   }): Promise<{ account: Account; device: Device; key: Key }> {
     return this.write(() => {
       const token = this.state.pairingTokens[params.pairingToken];
-      if (!token || new Date(token.expiresAt).getTime() < Date.now()) {
+      if (!token || new Date(token.expiresAt).getTime() < clockNow().getTime()) {
         throw new Error("Pairing token expired or not found.");
       }
       const account = this.state.accounts[token.accountID];
@@ -777,6 +778,42 @@ class BillingStore {
     await this.write(() => {
       const c = this.state.activationCodes[code];
       if (c && c.state === "unused") c.state = "revoked";
+    });
+  }
+
+  /**
+   * Unbinds a device from its account. The paired key is revoked (set to
+   * `revoked` so historical attribution still works) and the device row is
+   * detached from the account's device list. If the account ends up with
+   * zero devices AND zero active keys, its state moves to `inactive`.
+   */
+  async unbindDevice(deviceID: string): Promise<void> {
+    await this.write(() => {
+      const device = this.state.devices[deviceID];
+      if (!device) throw new Error("Device not found.");
+      const account = this.state.accounts[device.accountID];
+      if (account) {
+        account.deviceIDs = account.deviceIDs.filter((d) => d !== deviceID);
+      }
+      // Revoke the device's key so it can no longer authenticate.
+      for (const k of Object.values(this.state.keys)) {
+        if (k.deviceID === deviceID) k.state = "revoked";
+      }
+      delete this.state.devices[deviceID];
+      if (account && account.deviceIDs.length === 0) {
+        const hasActiveKey = account.keyIDs
+          .map((id) => this.state.keys[id])
+          .some((k) => k && k.state === "active");
+        if (!hasActiveKey) account.state = "inactive";
+      }
+      this.compact();
+    });
+  }
+
+  /** Revoke a pairing token before it is consumed. */
+  async revokePairingToken(token: string): Promise<void> {
+    await this.write(() => {
+      delete this.state.pairingTokens[token];
     });
   }
 }

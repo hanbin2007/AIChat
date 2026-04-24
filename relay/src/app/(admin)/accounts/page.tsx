@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import Link from "next/link";
 import { AdminShell } from "@/components/admin-shell";
 import { Badge, Card, CardContent, Chip, Tabs, Icon, IconButton, TextField, Button, Dialog, useSnackbar } from "@/components/m3";
 import type { Account, Device, Key, ActivationCode, PairingToken } from "@/lib/billing/types";
@@ -42,6 +43,25 @@ export default function AccountsPage() {
     !q || c.code.toLowerCase().includes(q),
   );
 
+  async function revokeCode(code: string) {
+    if (!confirm(`吊销激活码 ${code}？`)) return;
+    await fetch(`/api/admin/billing/activation-codes/${encodeURIComponent(code)}`, { method: "DELETE" });
+    snack.push({ message: "激活码已吊销" });
+    refresh();
+  }
+  async function revokeToken(token: string) {
+    if (!confirm("吊销配对码？")) return;
+    await fetch(`/api/admin/billing/pairing/${encodeURIComponent(token)}`, { method: "DELETE" });
+    snack.push({ message: "配对码已吊销" });
+    refresh();
+  }
+  async function unbindDevice(id: string) {
+    if (!confirm("解绑设备会同时吊销其 key。继续？")) return;
+    await fetch(`/api/admin/billing/device?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    snack.push({ message: "设备已解绑" });
+    refresh();
+  }
+
   return (
     <AdminShell title="Accounts" breadcrumb={["Billing"]}>
       <div className="space-y-4 p-6">
@@ -66,10 +86,10 @@ export default function AccountsPage() {
         <Card>
           <CardContent className="p-0">
             {tab === "accounts" && <AccountTable accounts={accounts} onGrant={setGrantAccount} />}
-            {tab === "devices" && <DeviceTable devices={devices} />}
-            {tab === "keys" && <KeyTable keys={keys} onChange={refresh} />}
-            {tab === "codes" && <CodeTable codes={codes} />}
-            {tab === "pairing" && <PairingTable tokens={data?.pairingTokens ?? []} />}
+            {tab === "devices" && <DeviceTable devices={devices} onUnbind={unbindDevice} />}
+            {tab === "keys" && <KeyTable keys={keys} />}
+            {tab === "codes" && <CodeTable codes={codes} onRevoke={revokeCode} />}
+            {tab === "pairing" && <PairingTable tokens={data?.pairingTokens ?? []} onRevoke={revokeToken} />}
           </CardContent>
         </Card>
       </div>
@@ -100,6 +120,7 @@ export default function AccountsPage() {
 }
 
 function AccountTable({ accounts, onGrant }: { accounts: Account[]; onGrant: (a: Account) => void }) {
+  if (accounts.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有账户</div>;
   return (
     <table className="w-full text-left text-m3-body-s">
       <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
@@ -110,14 +131,16 @@ function AccountTable({ accounts, onGrant }: { accounts: Account[]; onGrant: (a:
           <th className="px-3 py-2">余额</th>
           <th className="px-3 py-2">到期</th>
           <th className="px-3 py-2">最近使用</th>
-          <th className="px-3 py-2 w-10"></th>
+          <th className="px-3 py-2 w-24"></th>
         </tr>
       </thead>
       <tbody>
         {accounts.map((a) => (
           <tr key={a.accountID} className="border-t border-outline-variant">
             <td className="px-3 py-2">
-              <div className="font-medium">{a.displayName ?? a.accountID.slice(0, 8)}</div>
+              <Link href={`/accounts/${a.accountID}`} className="text-primary hover:underline">
+                {a.displayName ?? a.accountID.slice(0, 8)}
+              </Link>
               <div className="font-mono text-m3-label-s text-on-surface-variant">{a.accountID}</div>
             </td>
             <td className="px-3 py-2">
@@ -129,20 +152,21 @@ function AccountTable({ accounts, onGrant }: { accounts: Account[]; onGrant: (a:
             <td className="px-3 py-2">{a.creditBalance.toLocaleString()}</td>
             <td className="px-3 py-2">{a.creditExpiresAt ? new Date(a.creditExpiresAt).toLocaleDateString() : "—"}</td>
             <td className="px-3 py-2">{a.lastUsageAt ? new Date(a.lastUsageAt).toLocaleString() : "—"}</td>
-            <td className="px-3 py-2">
-              <IconButton icon="add_card" size="sm" onClick={() => onGrant(a)} aria-label="发额度" />
+            <td className="px-3 py-2 text-right">
+              <IconButton icon="add_card" onClick={() => onGrant(a)} aria-label="发额度" />
+              <Link href={`/accounts/${a.accountID}`} aria-label="详情">
+                <IconButton icon="arrow_forward" aria-label="详情" />
+              </Link>
             </td>
           </tr>
         ))}
-        {accounts.length === 0 && (
-          <tr><td colSpan={7} className="px-3 py-8 text-center text-on-surface-variant">没有账户</td></tr>
-        )}
       </tbody>
     </table>
   );
 }
 
-function DeviceTable({ devices }: { devices: Device[] }) {
+function DeviceTable({ devices, onUnbind }: { devices: Device[]; onUnbind: (id: string) => void }) {
+  if (devices.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有设备</div>;
   return (
     <table className="w-full text-left text-m3-body-s">
       <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
@@ -152,6 +176,7 @@ function DeviceTable({ devices }: { devices: Device[] }) {
           <th className="px-3 py-2">账户</th>
           <th className="px-3 py-2">Key</th>
           <th className="px-3 py-2">最近</th>
+          <th className="px-3 py-2 w-10"></th>
         </tr>
       </thead>
       <tbody>
@@ -167,9 +192,14 @@ function DeviceTable({ devices }: { devices: Device[] }) {
                 {d.platform}
               </span>
             </td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{d.accountID.slice(0, 8)}</td>
+            <td className="px-3 py-2 font-mono text-m3-label-s">
+              <Link className="text-primary hover:underline" href={`/accounts/${d.accountID}`}>{d.accountID.slice(0, 8)}</Link>
+            </td>
             <td className="px-3 py-2 font-mono text-m3-label-s">{d.keyID?.slice(0, 8) ?? "—"}</td>
             <td className="px-3 py-2">{d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "—"}</td>
+            <td className="px-3 py-2">
+              <IconButton icon="link_off" size="sm" onClick={() => onUnbind(d.deviceID)} aria-label="解绑" />
+            </td>
           </tr>
         ))}
       </tbody>
@@ -177,8 +207,9 @@ function DeviceTable({ devices }: { devices: Device[] }) {
   );
 }
 
-function KeyTable({ keys, onChange }: { keys: Key[]; onChange: () => void }) {
+function KeyTable({ keys }: { keys: Key[] }) {
   const [reveal, setReveal] = React.useState(false);
+  if (keys.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有 Key</div>;
   return (
     <>
       <div className="flex items-center justify-end gap-2 px-3 py-2">
@@ -191,7 +222,6 @@ function KeyTable({ keys, onChange }: { keys: Key[]; onChange: () => void }) {
           <tr>
             <th className="px-3 py-2">Key</th>
             <th className="px-3 py-2">账户</th>
-            <th className="px-3 py-2">设备</th>
             <th className="px-3 py-2">状态</th>
             <th className="px-3 py-2">来源</th>
             <th className="px-3 py-2">发放时间</th>
@@ -201,8 +231,9 @@ function KeyTable({ keys, onChange }: { keys: Key[]; onChange: () => void }) {
           {keys.map((k) => (
             <tr key={k.keyID} className="border-t border-outline-variant">
               <td className="px-3 py-2 font-mono">{reveal ? k.keyValue : `${k.keyValue.slice(0, 8)}••••`}</td>
-              <td className="px-3 py-2 font-mono text-m3-label-s">{k.accountID.slice(0, 8)}</td>
-              <td className="px-3 py-2 font-mono text-m3-label-s">{k.deviceID?.slice(0, 10) ?? "—"}</td>
+              <td className="px-3 py-2 font-mono text-m3-label-s">
+                <Link href={`/accounts/${k.accountID}`} className="text-primary hover:underline">{k.accountID.slice(0, 8)}</Link>
+              </td>
               <td className="px-3 py-2">
                 <Badge tone={k.state === "active" ? "success" : k.state === "paused" ? "warn" : "error"}>
                   {k.state}
@@ -218,7 +249,8 @@ function KeyTable({ keys, onChange }: { keys: Key[]; onChange: () => void }) {
   );
 }
 
-function CodeTable({ codes }: { codes: ActivationCode[] }) {
+function CodeTable({ codes, onRevoke }: { codes: ActivationCode[]; onRevoke: (code: string) => void }) {
+  if (codes.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有激活码</div>;
   return (
     <table className="w-full text-left text-m3-body-s">
       <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
@@ -229,6 +261,7 @@ function CodeTable({ codes }: { codes: ActivationCode[] }) {
           <th className="px-3 py-2">到期</th>
           <th className="px-3 py-2">状态</th>
           <th className="px-3 py-2">备注</th>
+          <th className="px-3 py-2 w-10"></th>
         </tr>
       </thead>
       <tbody>
@@ -244,6 +277,9 @@ function CodeTable({ codes }: { codes: ActivationCode[] }) {
               </Badge>
             </td>
             <td className="px-3 py-2 text-on-surface-variant">{c.note ?? "—"}</td>
+            <td className="px-3 py-2">
+              {c.state === "unused" && <IconButton icon="block" size="sm" onClick={() => onRevoke(c.code)} aria-label="吊销" />}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -251,7 +287,8 @@ function CodeTable({ codes }: { codes: ActivationCode[] }) {
   );
 }
 
-function PairingTable({ tokens }: { tokens: PairingToken[] }) {
+function PairingTable({ tokens, onRevoke }: { tokens: PairingToken[]; onRevoke: (token: string) => void }) {
+  if (tokens.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有配对码</div>;
   return (
     <table className="w-full text-left text-m3-body-s">
       <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
@@ -260,6 +297,7 @@ function PairingTable({ tokens }: { tokens: PairingToken[] }) {
           <th className="px-3 py-2">账户</th>
           <th className="px-3 py-2">发起设备</th>
           <th className="px-3 py-2">过期</th>
+          <th className="px-3 py-2 w-10"></th>
         </tr>
       </thead>
       <tbody>
@@ -269,6 +307,9 @@ function PairingTable({ tokens }: { tokens: PairingToken[] }) {
             <td className="px-3 py-2 font-mono text-m3-label-s">{t.accountID.slice(0, 8)}</td>
             <td className="px-3 py-2 font-mono text-m3-label-s">{t.issuedBy.slice(0, 10)}</td>
             <td className="px-3 py-2">{new Date(t.expiresAt).toLocaleString()}</td>
+            <td className="px-3 py-2">
+              <IconButton icon="block" size="sm" onClick={() => onRevoke(t.token)} aria-label="吊销" />
+            </td>
           </tr>
         ))}
       </tbody>
