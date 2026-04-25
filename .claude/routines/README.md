@@ -62,18 +62,20 @@ routine in the web UI; the Actions workflow concatenates it with
    - Attach the built-in GitHub MCP connector.
 
    `tf-autofix` is **not** created here — it runs from
-   `.github/workflows/tf-autofix.yml`. Make sure the
-   `anthropics/claude-code-action` GitHub App is installed on the
-   repo (claude.com → Settings → GitHub) and that the secrets in
-   step 5 are set on the repo (Settings → Secrets and variables →
-   Actions), not just on the routines.
+   `.github/workflows/tf-autofix.yml`. Install the Claude GitHub App
+   on the repo by running `/install-github-app` from Claude Code;
+   that step also writes a `CLAUDE_CODE_OAUTH_TOKEN` repo secret
+   (no Anthropic API key needed — it bills against your Claude
+   subscription). The remaining secrets in step 5 must also be set
+   on the repo (Settings → Secrets and variables → Actions), not
+   just on the routines.
 
 5. **Configure env vars / secrets.** Mark all ASC vars secret in the
    Routines UI; in GitHub put them under repo Actions secrets.
 
    | Var | Set on | Value |
    |---|---|---|
-   | `ANTHROPIC_API_KEY` | GitHub repo secrets | for `tf-autofix` workflow |
+   | `CLAUDE_CODE_OAUTH_TOKEN` | GitHub repo secrets | for `tf-autofix` workflow — run `/install-github-app` in Claude Code to mint one (uses your Claude subscription, no API key) |
    | `ASC_KEY_ID` | all routines + repo secrets | from step 2 |
    | `ASC_ISSUER_ID` | all routines + repo secrets | from step 2 |
    | `ASC_PRIVATE_KEY` | all routines + repo secrets | full `.p8` PEM contents |

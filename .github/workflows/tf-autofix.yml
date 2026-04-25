@@ -95,6 +95,6 @@ jobs:
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           ASC_PRODUCT_ID: ${{ secrets.ASC_PRODUCT_ID }}
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ steps.prompt.outputs.content }}
           allowed_tools: "Bash,Read,Edit,Write,Grep,Glob"
