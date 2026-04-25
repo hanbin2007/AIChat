@@ -8,19 +8,24 @@ by a GitHub webhook or a schedule.
 See `docs/xcode-cloud.md` for the Xcode Cloud side (build + TestFlight
 upload). This file covers the Routines side.
 
-## Routines to create
+## Topology
 
-| File | Trigger | Purpose |
-|---|---|---|
-| `tf-triage.md` | Schedule: every 30 min | Pull new TF feedback → file issues |
-| `tf-react.md` | GitHub `issues` / `issue_comment` with label `source:testflight-api` | Process owner approvals / refinements |
-| `tf-autofix.md` | GitHub `issues` labeled `auto-fix-approved` | Start, iterate, merge one fix (re-fired by `tf-sweep` via label toggle) |
-| `tf-ship.md` | GitHub `pull_request` closed + merged with label `auto-fix-ready` | Write WhatToTest → push main → wait for upload |
-| `tf-sweep.md` | Schedule: every 15 min | Poll Xcode Cloud checks + catch dropped webhooks |
+Three of the four prompts run as Claude Code Routines (cloud-hosted,
+event-triggered). The fourth — `tf-autofix` — runs as a GitHub
+Actions workflow because it needs the `check_run.completed` event
+that Routines does not expose.
 
-`_shared.md` is not a routine — it's included in every routine's
-deployed prompt (paste at the top in the web UI, or `@include` it if
-supported).
+| File | Runner | Trigger | Purpose |
+|---|---|---|---|
+| `tf-triage.md` | Routine | Schedule: every 30 min | Pull new TF feedback → file issues |
+| `tf-react.md`  | Routine | GitHub `issues` / `issue_comment` with label `source:testflight-api` | Process owner approvals / refinements |
+| `tf-autofix.md` | **GitHub Actions** (`.github/workflows/tf-autofix.yml`) | `issues.labeled` (`auto-fix-approved`) + `check_run.completed` on `autofix/issue-*` branches | Start, iterate, merge one fix |
+| `tf-ship.md`   | Routine | GitHub `pull_request` closed + merged with label `auto-fix-ready` | Write WhatToTest → push main → wait for upload |
+
+`_shared.md` is not a runnable prompt — it's prepended to every
+prompt above. The Routines deployment pastes it at the top of each
+routine in the web UI; the Actions workflow concatenates it with
+`tf-autofix.md` in the "Assemble prompt" step.
 
 ## One-time setup
 
@@ -49,23 +54,32 @@ supported).
    # → note the "Ship to TestFlight" workflow id
    ```
 
-4. **Create the 5 routines** at claude.ai/code/routines. For each:
+4. **Create the 3 routines** at claude.ai/code/routines (`tf-triage`,
+   `tf-react`, `tf-ship`). For each:
    - Paste `_shared.md` content at the top of the prompt.
    - Append the routine file's content below.
    - Set the trigger per the table above.
    - Attach the built-in GitHub MCP connector.
 
-5. **Configure env vars** on each routine (Settings → Environment).
-   Mark all ASC vars secret:
+   `tf-autofix` is **not** created here — it runs from
+   `.github/workflows/tf-autofix.yml`. Make sure the
+   `anthropics/claude-code-action` GitHub App is installed on the
+   repo (claude.com → Settings → GitHub) and that the secrets in
+   step 5 are set on the repo (Settings → Secrets and variables →
+   Actions), not just on the routines.
+
+5. **Configure env vars / secrets.** Mark all ASC vars secret in the
+   Routines UI; in GitHub put them under repo Actions secrets.
 
    | Var | Set on | Value |
    |---|---|---|
-   | `ASC_KEY_ID` | all | from step 2 |
-   | `ASC_ISSUER_ID` | all | from step 2 |
-   | `ASC_PRIVATE_KEY` | all | full `.p8` PEM contents |
-   | `ASC_APP_ID` | `tf-triage` | `6760607040` |
-   | `ASC_PRODUCT_ID` | `tf-autofix`, `tf-ship`, `tf-sweep` | from step 3 |
-   | `ASC_SHIP_WORKFLOW_ID` | `tf-ship`, `tf-sweep` | from step 3 |
+   | `ANTHROPIC_API_KEY` | GitHub repo secrets | for `tf-autofix` workflow |
+   | `ASC_KEY_ID` | all routines + repo secrets | from step 2 |
+   | `ASC_ISSUER_ID` | all routines + repo secrets | from step 2 |
+   | `ASC_PRIVATE_KEY` | all routines + repo secrets | full `.p8` PEM contents |
+   | `ASC_APP_ID` | `tf-triage` + repo secrets | `6760607040` |
+   | `ASC_PRODUCT_ID` | `tf-ship` + repo secrets | from step 3 |
+   | `ASC_SHIP_WORKFLOW_ID` | `tf-ship` | from step 3 |
 
 6. **Seed the `meta-state` issue** (the first `tf-triage` run will
    create it if missing; you can do it by hand too):
@@ -90,7 +104,7 @@ Subcommands:
 | `asc.py jwt` | Print a fresh JWT (debug) | — |
 | `asc.py get <path>` | GET any ASC endpoint, print JSON | ad-hoc |
 | `asc.py feedback --since <iso>` | Normalized TF feedback list | `tf-triage` |
-| `asc.py ship-latest --workflow <id>` | Latest Xcode Cloud run for a workflow | `tf-ship`, `tf-sweep` |
+| `asc.py ship-latest --workflow <id>` | Latest Xcode Cloud run for a workflow | `tf-ship` |
 | `asc.py build-log --run <id>` | Log download URLs for a failed run | `tf-autofix` (iterate) |
 
 For one-shot `curl`-style access from bash:

@@ -1,0 +1,100 @@
+name: tf-autofix
+
+# Re-fires the tf-autofix routine on the two events that drive its loop:
+#
+#   1. Owner labels an issue `auto-fix-approved`         → Start
+#   2. Xcode Cloud finishes a check on `autofix/issue-*` → Iterate / Merge / Fail
+#
+# State across runs is read from GitHub itself (branch + PR check status),
+# so this workflow is stateless. The full decision table lives in
+# .claude/routines/tf-autofix.md (Determine mode).
+
+on:
+  issues:
+    types: [labeled]
+  check_run:
+    types: [completed]
+
+# One in-flight run per issue. Two checks finishing back-to-back queue
+# rather than racing; cross-issue runs stay independent.
+concurrency:
+  group: tf-autofix-${{ github.event.issue.number || github.event.check_run.check_suite.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    if: >-
+      (github.event_name == 'issues' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'auto-fix-approved') ||
+      (github.event_name == 'check_run' &&
+       startsWith(github.event.check_run.check_suite.head_branch, 'autofix/issue-') &&
+       contains(fromJSON('["success","failure","cancelled","timed_out"]'),
+                github.event.check_run.conclusion))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      checks: read
+    steps:
+      - name: Checkout (full history — autofix branches diverge from main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity for autofix commits
+        run: |
+          git config user.name  "tf-autofix[bot]"
+          git config user.email "tf-autofix@users.noreply.github.com"
+
+      - name: Resolve issue number + check context
+        id: ctx
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            N="${{ github.event.issue.number }}"
+          else
+            BRANCH='${{ github.event.check_run.check_suite.head_branch }}'
+            N="${BRANCH##*issue-}"
+            if ! [[ "$N" =~ ^[0-9]+$ ]]; then
+              echo "Branch '$BRANCH' did not encode an issue number; nothing to do."
+              exit 0
+            fi
+            {
+              echo "check_conclusion=${{ github.event.check_run.conclusion }}"
+              echo "check_details_url=${{ github.event.check_run.details_url }}"
+              echo "check_name=${{ github.event.check_run.name }}"
+            } >> "$GITHUB_OUTPUT"
+          fi
+          echo "issue_number=$N" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble prompt (_shared.md + tf-autofix.md)
+        id: prompt
+        run: |
+          set -euo pipefail
+          {
+            echo 'content<<PROMPT_EOF'
+            cat .claude/routines/_shared.md
+            printf '\n\n---\n\n'
+            cat .claude/routines/tf-autofix.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+          CHECK_CONCLUSION: ${{ steps.ctx.outputs.check_conclusion }}
+          CHECK_DETAILS_URL: ${{ steps.ctx.outputs.check_details_url }}
+          CHECK_NAME: ${{ steps.ctx.outputs.check_name }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          ASC_PRODUCT_ID: ${{ secrets.ASC_PRODUCT_ID }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          allowed_tools: "Bash,Read,Edit,Write,Grep,Glob"
