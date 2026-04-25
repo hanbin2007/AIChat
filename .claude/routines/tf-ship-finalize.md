@@ -27,23 +27,25 @@ The workflow passes:
    issue numbers out:
    ```bash
    MSG=$(git log -1 --format=%B "$MAIN_SHA")
-   ISSUES=$(echo "$MSG" | grep -oE '#[0-9]+' | tr -d '#')
-   if [ -z "$ISSUES" ]; then
+   FIXES_LINE=$(echo "$MSG" | grep -E '^chore\(tf\): ship ' || true)
+   if [ -z "$FIXES_LINE" ]; then
      echo "Not a tf-ship commit — exiting noop."
      exit 0
    fi
+   ISSUES=$(echo "$FIXES_LINE" | grep -oE '#[0-9]+' | tr -d '#')
    ```
 
-   Also collect the PRs that wear `auto-fix-ready` and were merged
-   into this push:
+   Collect every still-open autofix PR wearing `auto-fix-ready`:
    ```bash
    PRS=$(gh pr list --repo hanbin2007/AIChat \
            --state merged --label auto-fix-ready \
-           --json number,mergeCommit,title \
-           --jq ".[] | select(.mergeCommit.oid != \"$MAIN_SHA\") | .number")
+           --json number --jq '.[].number')
    ```
-   (PRs were merged before the ship commit; they show up as merged
-   without being the ship commit itself.)
+   By the time this routine runs successfully, any merged PR still
+   wearing `auto-fix-ready` is one whose ship hasn't been finalized
+   yet — i.e. part of this batch (or a previous batch whose cloud
+   build failed; either way, success on the latest `main` covers
+   everything in the ancestor set).
 
 2. **Branch on `$CHECK_CONCLUSION`.**
 

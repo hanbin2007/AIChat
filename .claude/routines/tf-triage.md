@@ -101,9 +101,11 @@ Env vars on this routine:
 
 ## Caps
 
-- Max 20 new issues per run. If more, file the first 20 (oldest first,
-  since the list is sorted ascending) and log a warning — next tick
-  picks up the rest naturally.
+- `asc.py feedback` paginates until it hits an item at-or-below
+  `last_feedback_iso`, so it returns everything new in one call.
+  No artificial per-run cap; if you ever see >50 in one tick, log
+  a warning before filing — that probably means the cursor was
+  reset and you're about to flood the issue tracker.
 
 ## Summary line
 

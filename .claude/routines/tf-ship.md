@@ -58,11 +58,11 @@ polling, no concurrency-guard incantation).
    printf '%s\n' "$EN_BODY" > TestFlight/WhatToTest.en.txt
    git add TestFlight/WhatToTest.zh-Hans.txt TestFlight/WhatToTest.en.txt
 
-   # Embed PR list in the commit message so tf-ship-finalize can match
-   # this push back to the issues that need closing without a second
-   # query against PR labels.
-   PR_LIST="$(printf '#%s ' $PR_NUMBERS)"
-   git commit -m "chore(tf): ship $(date -u +%Y%m%d-%H%M) — fixes ${PR_LIST% }"
+   # Embed the issue numbers in the commit message so tf-ship-finalize
+   # can match this push back to the issues that need closing without
+   # a second query.
+   ISSUE_LIST="$(printf '#%s ' $ISSUE_NUMBERS)"   # e.g. "#42 #51 "
+   git commit -m "chore(tf): ship $(date -u +%Y%m%d-%H%M) — fixes ${ISSUE_LIST% }"
    git push origin main
    ```
 

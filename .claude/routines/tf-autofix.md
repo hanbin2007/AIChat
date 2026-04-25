@@ -22,7 +22,30 @@ inspect at the top of every run.
 
 Always start by inspecting the current state of issue #N, not the
 trigger. The workflow passes `$ISSUE_NUMBER` in the environment;
-use it as `N`. Decision table:
+use it as `N`.
+
+**Owner abort check** — first thing every run:
+```bash
+ISSUE_JSON=$(gh issue view "$N" --repo hanbin2007/AIChat \
+               --json state,labels --jq '{state, labels: [.labels[].name]}')
+STATE=$(echo "$ISSUE_JSON" | jq -r .state)
+LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels | join(",")')
+if [ "$STATE" != "OPEN" ] \
+   || [[ ",$LABELS," == *",defer,"* ]] \
+   || [[ ",$LABELS," == *",dismissed,"* ]]; then
+  # Owner stopped the fix between events. Close the PR if one's open.
+  PR_NUM=$(gh pr list --repo hanbin2007/AIChat --head "autofix/issue-$N" \
+             --state open --json number --jq '.[0].number // empty')
+  if [ -n "$PR_NUM" ]; then
+    gh pr close "$PR_NUM" --repo hanbin2007/AIChat \
+      --comment "@hanbin2007 Owner stopped the fix (issue $STATE / labels: $LABELS)."
+  fi
+  echo "autofix OK — issue #$N aborted by owner, exiting."
+  exit 0
+fi
+```
+
+Decision table:
 
 Match check status case-insensitively. The `check_run.completed`
 event payload uses lowercase (`success` / `failure` / ...);
@@ -160,12 +183,12 @@ template verbatim.
 ## Two-way conversation with the owner
 
 If the owner posts a comment on issue #N **while this routine is
-running**, you will not see it (routines are event-bound). Owner
-direction arrives as a separate `tf-react` event. If that event sets
-label `defer` or closes the issue, the `tf-autofix` continuation
-path's first check should be: is the issue still open and not
-deferred? If not → `gh pr close <PR> --comment "Owner stopped the fix."`
-and exit. Add this check as step 0 of both Iterate and Merge modes.
+running**, you will not see it (each event triggers one fresh run).
+Owner direction arrives via a separate `tf-react` event. The owner
+abort path is checked at the top of every Determine pass (see the
+"Owner abort check" item right above the decision table) — so as
+long as you re-run Determine on every event, you'll never blow past
+a `defer` label or a closed issue.
 
 ## Summary line
 

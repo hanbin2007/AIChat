@@ -35,8 +35,10 @@ jobs:
         run: |
           set -euo pipefail
           proceed=false
+          # Xcode Cloud reports its workflow checks as "Xcode Cloud / <Workflow Name>".
+          # Match the prefix + the exact ship workflow name we configured in ASC.
           if [ "$BRANCH" = "main" ] \
-             && [[ "$CHECK_NAME" == *"Ship to TestFlight"* ]]; then
+             && [[ "$CHECK_NAME" =~ ^Xcode\ Cloud[[:space:]]*/[[:space:]]*Ship\ to\ TestFlight$ ]]; then
             proceed=true
           fi
           {

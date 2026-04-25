@@ -91,6 +91,31 @@ def _resolve_build(included: list[dict], build_id: str) -> str:
     return build_id  # fall back to raw id if not included
 
 
+def _fetch_until(start_path: str, since_iso: str) -> tuple[list[dict], list[dict]]:
+    """Walk `links.next` until a page contains an item ≤ since_iso (results
+    are descending by createdDate, so no later page can contribute).
+    Returns merged `data` (still descending) and `included` arrays.
+    """
+    data: list[dict] = []
+    included: list[dict] = []
+    url = start_path
+    while url:
+        page = asc_get(url)
+        page_data = page.get("data", [])
+        data.extend(page_data)
+        included.extend(page.get("included", []))
+        # Stop early if the youngest item we saw on this page is already
+        # at-or-below the cursor — older items can't be newer than it.
+        if any(d.get("attributes", {}).get("createdDate", "") <= since_iso
+               for d in page_data):
+            break
+        nxt = page.get("links", {}).get("next")
+        if not nxt:
+            break
+        url = nxt[len(BASE):] if nxt.startswith(BASE) else nxt
+    return data, included
+
+
 def list_feedback(since_iso: str) -> list[dict]:
     """Merge screenshot + crash feedback from ASC, normalize, dedup-hash.
     Returns items with `created > since_iso`, sorted ascending by created.
@@ -101,18 +126,12 @@ def list_feedback(since_iso: str) -> list[dict]:
         "&include=build,tester"
     )
 
-    # --- screenshots ---
-    ss_raw = asc_get(
-        f"/v1/betaFeedbackScreenshotSubmissions?{common_q}"
+    ss_data, ss_inc = _fetch_until(
+        f"/v1/betaFeedbackScreenshotSubmissions?{common_q}", since_iso
     )
-    ss_data = ss_raw.get("data", [])
-    ss_inc = ss_raw.get("included", [])
-
-    # --- crashes (include crashLog for stack frames) ---
-    cr_q = common_q + ",crashLog"
-    cr_raw = asc_get(f"/v1/betaFeedbackCrashSubmissions?{cr_q}")
-    cr_data = cr_raw.get("data", [])
-    cr_inc = cr_raw.get("included", [])
+    cr_data, cr_inc = _fetch_until(
+        f"/v1/betaFeedbackCrashSubmissions?{common_q},crashLog", since_iso
+    )
 
     items = []
 
