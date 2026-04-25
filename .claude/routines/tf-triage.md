@@ -17,7 +17,6 @@ REST API (`/v1/betaFeedbackScreenshotSubmissions` +
 Env vars on this routine:
 - `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY` — ASC API auth
   (see `README.md`)
-- `ASC_APP_ID` = `6760607040`
 
 ## Steps
 
@@ -98,8 +97,7 @@ Env vars on this routine:
 
 6. **Update state.** Set `last_feedback_iso` to the highest `created`
    value seen (even for duplicates, so we don't reprocess them).
-   Set `last_triage_iso = now()`. Write back to the `meta-state`
-   issue body.
+   Write back to the `meta-state` issue body.
 
 ## Caps
 

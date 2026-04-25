@@ -8,14 +8,13 @@ Usage (from a routine's bash):
     python3 .claude/routines/scripts/asc.py jwt
     python3 .claude/routines/scripts/asc.py get /v1/ciBuildRuns/<id>
     python3 .claude/routines/scripts/asc.py feedback --since 2026-04-01T00:00:00Z
-    python3 .claude/routines/scripts/asc.py ship-latest --workflow <id>
     python3 .claude/routines/scripts/asc.py build-log --run <id>
 
 Required env vars:
     ASC_KEY_ID            10-char key id from ASC → Users & Access → Integrations
     ASC_ISSUER_ID         issuer UUID from the same page
     ASC_PRIVATE_KEY       full contents of the .p8 file (PEM, with BEGIN/END lines)
-    ASC_APP_ID            ASC app id (6760607040 for AIChat)
+    ASC_APP_ID            ASC app id (defaults to AIChat's 6760607040)
     ASC_PRODUCT_ID        Xcode Cloud product id (only needed for ship-* / build-*)
 """
 from __future__ import annotations
@@ -41,9 +40,13 @@ except ImportError:
 
 BASE = "https://api.appstoreconnect.apple.com"
 
+# AIChat ASC app id. Public-ish (visible in App Store URLs); no reason to
+# carry it as a secret env var on every routine and in repo Actions secrets.
+DEFAULT_APP_ID = "6760607040"
 
-def _env(name: str) -> str:
-    v = os.environ.get(name)
+
+def _env(name: str, default: str | None = None) -> str:
+    v = os.environ.get(name) or default
     if not v:
         sys.exit(f"asc.py: missing env var {name}")
     return v
@@ -73,25 +76,6 @@ def asc_get(path: str) -> dict:
         return json.loads(resp.read())
 
 
-def _paginated(path: str, *, cap: int = 500):
-    out = []
-    url = path
-    while url and len(out) < cap:
-        data = asc_get(url)
-        out.extend(data.get("data", []))
-        # Also pass through `included` merged with each page so callers can
-        # resolve relationships without a second trip.
-        inc = data.get("included", [])
-        for item in inc:
-            item["_included"] = True
-        out.extend(inc)
-        links = data.get("links", {})
-        url = links.get("next")
-        if url and url.startswith(BASE):
-            url = url[len(BASE):]
-    return out
-
-
 # ---------------- TestFlight feedback ----------------
 
 def _dedup_hash(kind: str, payload: str, build_ver: str) -> str:
@@ -111,7 +95,7 @@ def list_feedback(since_iso: str) -> list[dict]:
     """Merge screenshot + crash feedback from ASC, normalize, dedup-hash.
     Returns items with `created > since_iso`, sorted ascending by created.
     """
-    app_id = _env("ASC_APP_ID")
+    app_id = _env("ASC_APP_ID", DEFAULT_APP_ID)
     common_q = (
         f"filter[app]={app_id}&limit=200&sort=-createdDate"
         "&include=build,tester"
@@ -210,14 +194,6 @@ def list_feedback(since_iso: str) -> list[dict]:
 
 # ---------------- Xcode Cloud ----------------
 
-def latest_run(workflow_id: str) -> dict | None:
-    product = _env("ASC_PRODUCT_ID")
-    q = f"filter[workflow]={workflow_id}&sort=-createdDate&limit=1"
-    data = asc_get(f"/v1/ciProducts/{product}/buildRuns?{q}")
-    items = data.get("data", [])
-    return items[0] if items else None
-
-
 def build_log_urls(run_id: str) -> list[str]:
     actions = asc_get(f"/v1/ciBuildRuns/{run_id}/actions").get("data", [])
     urls = []
@@ -250,10 +226,6 @@ def main():
     f.add_argument("--since", required=True,
                    help="ISO timestamp; items with created > since are returned")
 
-    sl = sub.add_parser("ship-latest",
-                        help="Print latest Xcode Cloud buildRun for workflow")
-    sl.add_argument("--workflow", required=True)
-
     bl = sub.add_parser("build-log",
                         help="Print downloadable log URLs for a buildRun")
     bl.add_argument("--run", required=True)
@@ -266,9 +238,6 @@ def main():
         print(json.dumps(asc_get(args.path), indent=2, ensure_ascii=False))
     elif args.cmd == "feedback":
         print(json.dumps(list_feedback(args.since), indent=2, ensure_ascii=False))
-    elif args.cmd == "ship-latest":
-        r = latest_run(args.workflow)
-        print(json.dumps(r, indent=2, ensure_ascii=False) if r else "null")
     elif args.cmd == "build-log":
         for u in build_log_urls(args.run):
             print(u)

@@ -54,27 +54,6 @@ comes from `TestFlight/WhatToTest.<LOCALE>.txt` files in the repo —
 the `tf-ship` routine (see `.claude/routines/tf-ship.md`) writes these
 before pushing `main`.
 
-## Webhook (optional but recommended)
-
-Configure in ASC → Xcode Cloud → Settings → Webhooks. Point the URL at
-your Claude Code Routines inbound webhook so Xcode Cloud build-done
-events can wake the `tf-ship` / `tf-sweep` routines without waiting
-for the hourly sweep. If you don't wire this up, the hourly `tf-sweep`
-is the fallback — `tf-ship` already polls ASC API directly anyway, so
-the webhook is a latency optimization, not a correctness requirement.
-
-## Snapshot dump
-
-When you change anything in the ASC UI, run:
-
-```
-asc ci-workflows list --product-name AIChat --json > docs/xcode-cloud-snapshot.json
-```
-
-(or the equivalent raw `GET /v1/ciProducts/{id}/workflows` call) and
-commit the JSON. That gives us a diffable record next time someone
-quietly changes a trigger.
-
 ## Manual emergency-ship escape hatch
 
 `fastlane/Fastfile` stays in the repo as a manual-only escape hatch.

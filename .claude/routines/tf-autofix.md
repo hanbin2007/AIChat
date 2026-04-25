@@ -24,13 +24,19 @@ Always start by inspecting the current state of issue #N, not the
 trigger. The workflow passes `$ISSUE_NUMBER` in the environment;
 use it as `N`. Decision table:
 
+Match check status case-insensitively. The `check_run.completed`
+event payload uses lowercase (`success` / `failure` / ...);
+`gh pr list ... statusCheckRollup` returns SCREAMING_SNAKE for
+`status` and SCREAMING_SNAKE for `conclusion`. Compare against the
+lowercased value to handle both.
+
 | Branch `autofix/issue-<N>` exists? | Latest PR check | Commits on branch | → Mode |
 |---|---|---|---|
 | no | — | — | **Start** |
-| yes | `IN_PROGRESS` / `QUEUED` | any | exit noop (still building) |
-| yes | `SUCCESS` | any | **Merge** |
-| yes | `FAILURE` / `CANCELLED` / `TIMED_OUT` | < 3 | **Iterate** |
-| yes | `FAILURE` / `CANCELLED` / `TIMED_OUT` | ≥ 3 | **Fail** |
+| yes | `in_progress` / `queued` | any | exit noop (still building) |
+| yes | `success` | any | **Merge** |
+| yes | `failure` / `cancelled` / `timed_out` | < 3 | **Iterate** |
+| yes | `failure` / `cancelled` / `timed_out` | ≥ 3 | **Fail** |
 | yes | no check yet | any | exit noop (give Xcode Cloud 5 min) |
 
 Fetch state:
@@ -68,29 +74,31 @@ details URL).
      --title "fix(tf): <short summary> (Fixes #<N>)" \
      --body "<see PR body template below>"
    ```
-9. Swap labels on issue #N: remove `auto-fix-approved`, add
-   `auto-fix-in-progress`.
-10. Comment on issue:
-    `@hanbin2007 Starting: <one line on the change>. Attempt 1 pushed, Xcode Cloud running.`
-11. Exit. Xcode Cloud's PR workflow fires automatically on the push.
+9. Comment on issue:
+   `@hanbin2007 Starting: <one line on the change>. Attempt 1 pushed, Xcode Cloud running.`
+10. Exit. Xcode Cloud's PR workflow fires automatically on the push.
     When the build finishes, GitHub Actions `tf-autofix.yml` re-fires
     on `check_run.completed` and you land in Determine → Iterate
     (if failed) or Merge (if passed).
 
+The `auto-fix-approved` label stays on the issue throughout the loop;
+it's the owner's stamp, not progress state. Re-entry is keyed on
+"branch exists + check status", not on label toggling.
+
 ## Iterate mode
 
-1. Fetch the failing Xcode Cloud log. Use `asc.py`:
+1. Fetch the failing Xcode Cloud log. The workflow exposes
+   `$CHECK_DETAILS_URL` whose trailing path segment is the ASC
+   `ciBuildRunId`; use that as the primary source.
    ```bash
-   source .claude/routines/scripts/asc_helpers.sh
-   # Find the latest build run for this PR's branch
-   RUN_ID=$(asc_get "/v1/ciProducts/$ASC_PRODUCT_ID/buildRuns?sort=-createdDate&limit=20" \
-            | jq -r --arg br "autofix/issue-$N" \
-                '.data[] | select(.attributes.sourceCommit.commitSha != null) | select(.relationships.sourceBranchOrTag.data != null) | .id' \
-            | head -1)
-   # If filter-by-branch isn't available on your Apple plan, fall back:
-   #   check the PR's check-run details URL — the trailing path segment
-   #   is the ciBuildRunId:
-   #   gh pr checks <PR> --json name,link | jq -r '.[] | select(.name | startswith("Xcode Cloud")) | .link'
+   # Primary: parse run id from the check-run details URL.
+   RUN_ID="${CHECK_DETAILS_URL##*/}"
+   # Fallback (e.g. running locally without the env var): ask the PR.
+   if [ -z "$RUN_ID" ]; then
+     RUN_ID=$(gh pr checks "$PR" --repo hanbin2007/AIChat --json name,link \
+              | jq -r '.[] | select(.name | startswith("Xcode Cloud")) | .link' \
+              | head -1 | awk -F/ '{print $NF}')
+   fi
    LOG_URLS=$(python3 .claude/routines/scripts/asc.py build-log --run "$RUN_ID")
    curl -sSL "$(echo "$LOG_URLS" | head -1)" > /tmp/xc_log.txt
    tail -300 /tmp/xc_log.txt  # feed into your root-cause analysis
@@ -109,7 +117,8 @@ details URL).
 ## Merge mode
 
 1. `gh pr merge <PR> --repo hanbin2007/AIChat --squash --auto`.
-2. On the issue: remove `auto-fix-in-progress`, add `auto-fix-ready`.
+2. On the **PR** (not the issue): add `auto-fix-ready`. This is the
+   label that wakes `tf-ship` on `pull_request closed+merged`.
 3. Comment on issue:
    `@hanbin2007 Xcode Cloud ✅ → PR #<PR> queued for merge.`
 4. Exit. The `pull_request closed+merged` event will fire
@@ -117,7 +126,7 @@ details URL).
 
 ## Fail mode
 
-1. On the issue: remove `auto-fix-in-progress`, add `auto-fix-failed`.
+1. On the issue: add `auto-fix-failed` (leave `auto-fix-approved` alone).
 2. Fetch the last failure log (as in Iterate mode).
 3. Comment with a concise failure report:
    ```
@@ -129,31 +138,24 @@ details URL).
 4. Close the PR as not-merged: `gh pr close <PR> --comment "Auto-fix exhausted."`
 5. Exit.
 
-## PR body template
+## PR body
 
-```
-Fixes #<N>
+The PR body must cover, in this order:
 
-## What changed
-<2-3 lines, code-focused>
+1. `Fixes #<N>`
+2. **What changed** — 2–3 code-focused lines.
+3. **Why** — 1–2 lines tying back to root cause from the issue's
+   `## 我的理解` section.
+4. **Cross-target impact** — list **only** the targets actually
+   affected (Watch / iOS / Relay / Shared Licensing). Don't list
+   unaffected targets.
+5. **Test** — new/changed test, `file:line`, what invariant it pins.
+6. **Observability** — only if you added a log/assertion; otherwise
+   omit the section entirely.
+7. `/cc @hanbin2007`
 
-## Why
-<1-2 lines linking to the root cause from the issue's 我的理解 section>
-
-## Cross-target impact
-- AIChat Watch App: <rebuild yes/no, what to verify>
-- AIChat iOS App:   <...>
-- AIChat Relay:     <...>
-- Shared Licensing: <...>
-
-## Test
-<new or changed test file:line; what invariant it pins>
-
-## Observability
-<new log or assertion; or "n/a — failure was already visible">
-
-/cc @hanbin2007
-```
+Write it in prose with short headers; no need to mimic a fixed
+template verbatim.
 
 ## Two-way conversation with the owner
 

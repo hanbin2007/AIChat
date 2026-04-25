@@ -49,7 +49,6 @@ pinned GitHub issue labeled `meta-state`, title
 ```json
 {
   "last_feedback_iso": "2026-04-23T00:00:00Z",
-  "last_triage_iso":   "2026-04-23T00:00:00Z",
   "last_ship_iso":     "2026-04-23T00:00:00Z"
 }
 ```
@@ -70,7 +69,7 @@ If no `meta-state` issue exists yet, create one:
 gh issue create --repo hanbin2007/AIChat \
   --title "[meta] tf-cycle state — do not close" \
   --label meta-state \
-  --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
+  --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
 ```
 
 ## App Store Connect API access (shared by most routines)
@@ -82,12 +81,10 @@ that mints an ES256 JWT and wraps the REST API.
 ```bash
 # Typical use from a routine:
 python3 .claude/routines/scripts/asc.py feedback --since "$SINCE"
-python3 .claude/routines/scripts/asc.py ship-latest --workflow "$ASC_SHIP_WORKFLOW_ID"
 python3 .claude/routines/scripts/asc.py build-log --run "$RUN_ID"
 
-# For ad-hoc curl:
-source .claude/routines/scripts/asc_helpers.sh
-asc_get "/v1/ciBuildRuns/$RUN_ID"
+# Ad-hoc GET (returns pretty JSON):
+python3 .claude/routines/scripts/asc.py get "/v1/ciBuildRuns/$RUN_ID"
 ```
 
 Required env vars on every routine that calls ASC (all marked secret
@@ -96,9 +93,10 @@ in the Routines UI):
 - `ASC_ISSUER_ID` — issuer UUID
 - `ASC_PRIVATE_KEY` — full PEM contents of the `.p8` (including
   `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----`)
-- `ASC_APP_ID` — `6760607040`
 - `ASC_PRODUCT_ID` — only on routines that talk to Xcode Cloud
-- `ASC_SHIP_WORKFLOW_ID` — only on `tf-ship` and `tf-sweep`
+
+`ASC_APP_ID` is hardcoded in `asc.py` (`DEFAULT_APP_ID`); override with
+the env var only if you fork this for a different app.
 
 ## Per-fix state (no state file needed)
 
@@ -107,13 +105,13 @@ Everything else is derived from GitHub state directly — there is no
 
 | Meaning | GitHub signal |
 |---|---|
-| Issue approved | label `auto-fix-approved` |
+| Issue approved | issue label `auto-fix-approved` |
 | Autofix in progress | open PR on `autofix/issue-<N>` branch |
 | CI running | PR check `Xcode Cloud / PR Build & Test` status |
 | Attempts used | commit count on the `autofix/issue-<N>` branch |
-| Fix merged, awaiting ship | label `auto-fix-ready`, PR state `merged` |
-| Fix shipped | label `shipped-to-testflight`, issue `closed` |
-| Failed, needs human | label `auto-fix-failed` |
+| Awaiting merge | PR label `auto-fix-ready` |
+| Fix shipped | issue label `shipped-to-testflight`, issue `closed` |
+| Failed, needs human | issue label `auto-fix-failed` |
 
 ## Owner pings
 
@@ -127,9 +125,9 @@ no code blocks except in the final SUCCESS/FAILED report.
 - `tf-bug` / `tf-feature` / `tf-other` — classification
 - `needs-review` — awaiting owner approval
 - `needs-fix` — bug that should be fixed
-- `auto-fix-approved` — owner OK'd; autofix routine will start
-- `auto-fix-ready` — PR open, Xcode Cloud passed, awaiting merge
-- `auto-fix-failed` — 3 attempts exhausted or cloud rejected
+- `auto-fix-approved` — owner OK'd; on **issue**
+- `auto-fix-ready` — Xcode Cloud passed, awaiting merge; on **PR**
+- `auto-fix-failed` — 3 attempts exhausted or cloud rejected; on **issue**
 - `shipped-to-testflight` — terminal success label
 - `meta-state` — the persistent-state issue (never close)
 - `dismissed` / `defer` / `regression` — misc

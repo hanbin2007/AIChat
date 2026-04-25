@@ -1,0 +1,93 @@
+name: tf-ship-finalize
+
+# Wakes up after Xcode Cloud reports its `Ship to TestFlight` check on a
+# `main` commit. Closes the issues that ship commit references and clears
+# the `auto-fix-ready` label off the PRs.
+#
+# Replaces the in-routine polling loop the old tf-ship had (Routines
+# don't see check_run events; GitHub Actions does, with sub-minute
+# latency).
+
+on:
+  check_run:
+    types: [completed]
+
+jobs:
+  resolve:
+    # Filter to ship-relevant checks early, before paying for prompt
+    # assembly + Claude. Both the head_branch == main and the check
+    # name guard need to hold.
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.ctx.outputs.proceed }}
+      main_sha: ${{ steps.ctx.outputs.main_sha }}
+      check_conclusion: ${{ steps.ctx.outputs.check_conclusion }}
+      check_details_url: ${{ steps.ctx.outputs.check_details_url }}
+    steps:
+      - name: Resolve event
+        id: ctx
+        env:
+          BRANCH: ${{ github.event.check_run.check_suite.head_branch }}
+          CHECK_NAME: ${{ github.event.check_run.name }}
+          CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
+          CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
+          HEAD_SHA: ${{ github.event.check_run.head_sha }}
+        run: |
+          set -euo pipefail
+          proceed=false
+          if [ "$BRANCH" = "main" ] \
+             && [[ "$CHECK_NAME" == *"Ship to TestFlight"* ]]; then
+            proceed=true
+          fi
+          {
+            echo "proceed=$proceed"
+            echo "main_sha=$HEAD_SHA"
+            echo "check_conclusion=$CHECK_CONCLUSION"
+            echo "check_details_url=$CHECK_DETAILS_URL"
+          } >> "$GITHUB_OUTPUT"
+
+  finalize:
+    needs: resolve
+    if: needs.resolve.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: tf-ship-finalize-${{ needs.resolve.outputs.main_sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      checks: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50  # enough to resolve the ship commit message
+
+      - name: Assemble prompt (_shared.md + tf-ship-finalize.md)
+        id: prompt
+        run: |
+          set -euo pipefail
+          {
+            echo 'content<<PROMPT_EOF'
+            cat .claude/routines/_shared.md
+            printf '\n\n---\n\n'
+            cat .claude/routines/tf-ship-finalize.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAIN_SHA: ${{ needs.resolve.outputs.main_sha }}
+          CHECK_CONCLUSION: ${{ needs.resolve.outputs.check_conclusion }}
+          CHECK_DETAILS_URL: ${{ needs.resolve.outputs.check_details_url }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_PRODUCT_ID: ${{ secrets.ASC_PRODUCT_ID }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          allowed_tools: "Bash,Read,Grep,Glob"

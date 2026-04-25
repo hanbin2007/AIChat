@@ -10,22 +10,23 @@ upload). This file covers the Routines side.
 
 ## Topology
 
-Three of the four prompts run as Claude Code Routines (cloud-hosted,
-event-triggered). The fourth — `tf-autofix` — runs as a GitHub
-Actions workflow because it needs the `check_run.completed` event
-that Routines does not expose.
+Three of the five prompts run as Claude Code Routines
+(cloud-hosted, event-triggered). The other two — `tf-autofix` and
+`tf-ship-finalize` — run as GitHub Actions workflows because they
+need the `check_run.completed` event that Routines does not expose.
 
 | File | Runner | Trigger | Purpose |
 |---|---|---|---|
 | `tf-triage.md` | Routine | Schedule: every 30 min | Pull new TF feedback → file issues |
 | `tf-react.md`  | Routine | GitHub `issues` / `issue_comment` with label `source:testflight-api` | Process owner approvals / refinements |
 | `tf-autofix.md` | **GitHub Actions** (`.github/workflows/tf-autofix.yml`) | `issues.labeled` (`auto-fix-approved`) + `check_run.completed` on `autofix/issue-*` branches | Start, iterate, merge one fix |
-| `tf-ship.md`   | Routine | GitHub `pull_request` closed + merged with label `auto-fix-ready` | Write WhatToTest → push main → wait for upload |
+| `tf-ship.md` | Routine | GitHub `pull_request` closed + merged with PR label `auto-fix-ready` | Write WhatToTest → push main (no polling) |
+| `tf-ship-finalize.md` | **GitHub Actions** (`.github/workflows/tf-ship-finalize.yml`) | `check_run.completed` on `main` matching `Ship to TestFlight` | Close issues + clear `auto-fix-ready` after Xcode Cloud uploads |
 
 `_shared.md` is not a runnable prompt — it's prepended to every
 prompt above. The Routines deployment pastes it at the top of each
-routine in the web UI; the Actions workflow concatenates it with
-`tf-autofix.md` in the "Assemble prompt" step.
+routine in the web UI; the Actions workflows concatenate it with
+the routine file in their "Assemble prompt" step.
 
 ## One-time setup
 
@@ -61,8 +62,8 @@ routine in the web UI; the Actions workflow concatenates it with
    - Set the trigger per the table above.
    - Attach the built-in GitHub MCP connector.
 
-   `tf-autofix` is **not** created here — it runs from
-   `.github/workflows/tf-autofix.yml`. Install the Claude GitHub App
+   `tf-autofix` and `tf-ship-finalize` are **not** created here —
+   both run from `.github/workflows/`. Install the Claude GitHub App
    on the repo by running `/install-github-app` from Claude Code;
    that step also writes a `CLAUDE_CODE_OAUTH_TOKEN` repo secret
    (no Anthropic API key needed — it bills against your Claude
@@ -75,13 +76,15 @@ routine in the web UI; the Actions workflow concatenates it with
 
    | Var | Set on | Value |
    |---|---|---|
-   | `CLAUDE_CODE_OAUTH_TOKEN` | GitHub repo secrets | for `tf-autofix` workflow — run `/install-github-app` in Claude Code to mint one (uses your Claude subscription, no API key) |
+   | `CLAUDE_CODE_OAUTH_TOKEN` | GitHub repo secrets | for the Actions workflows — run `/install-github-app` in Claude Code to mint one (uses your Claude subscription, no API key) |
    | `ASC_KEY_ID` | all routines + repo secrets | from step 2 |
    | `ASC_ISSUER_ID` | all routines + repo secrets | from step 2 |
    | `ASC_PRIVATE_KEY` | all routines + repo secrets | full `.p8` PEM contents |
-   | `ASC_APP_ID` | `tf-triage` + repo secrets | `6760607040` |
-   | `ASC_PRODUCT_ID` | `tf-ship` + repo secrets | from step 3 |
-   | `ASC_SHIP_WORKFLOW_ID` | `tf-ship` | from step 3 |
+   | `ASC_PRODUCT_ID` | `tf-autofix` + `tf-ship-finalize` (repo secrets) | from step 3 |
+
+   `ASC_APP_ID` (`6760607040`) is baked into `asc.py` as `DEFAULT_APP_ID`
+   and does not need to be set as a secret. Only override via env var
+   if you fork this for a different app.
 
 6. **Seed the `meta-state` issue** (the first `tf-triage` run will
    create it if missing; you can do it by hand too):
@@ -89,7 +92,7 @@ routine in the web UI; the Actions workflow concatenates it with
    gh label create meta-state --color c5def5 --description "Routine state carrier"
    gh issue create --title "[meta] tf-cycle state — do not close" \
                    --label meta-state \
-                   --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_triage_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
+                   --body '{"last_feedback_iso":"1970-01-01T00:00:00Z","last_ship_iso":"1970-01-01T00:00:00Z"}'
    gh issue pin <N>
    ```
 
@@ -104,40 +107,23 @@ Subcommands:
 | Command | Purpose | Used by |
 |---|---|---|
 | `asc.py jwt` | Print a fresh JWT (debug) | — |
-| `asc.py get <path>` | GET any ASC endpoint, print JSON | ad-hoc |
+| `asc.py get <path>` | GET any ASC endpoint, print JSON | `tf-ship-finalize` (build-run lookup), ad-hoc |
 | `asc.py feedback --since <iso>` | Normalized TF feedback list | `tf-triage` |
-| `asc.py ship-latest --workflow <id>` | Latest Xcode Cloud run for a workflow | `tf-ship` |
 | `asc.py build-log --run <id>` | Log download URLs for a failed run | `tf-autofix` (iterate) |
-
-For one-shot `curl`-style access from bash:
-```bash
-source .claude/routines/scripts/asc_helpers.sh
-asc_get /v1/ciBuildRuns/<id>
-```
 
 Dependencies: `pyjwt` + `cryptography`. `asc.py` auto-pip-installs
 them on first run if missing, so you don't need a pre-baked image.
 
-## Event coverage caveat
+## Why tf-autofix lives in GitHub Actions
 
 Claude Code Routines supports `pull_request`, `issues`,
-`issue_comment`, and `release` events with label filters. It does
-**not** expose `check_run` or `workflow_run` / `check_suite` events
-on the current tier. Xcode Cloud reports PR build results as a
-`check_run` on the PR head commit — but because we can't subscribe
-to it, `tf-autofix` can't self-trigger when a build finishes.
-
-**Our workaround:** `tf-sweep` runs every 15 min, polls the
-`statusCheckRollup` on every open `autofix/*` PR, and when it sees
-a terminal check status it toggles the `auto-fix-approved` label on
-the linked issue. The re-add fires `issues.labeled`, which
-`tf-autofix` does see, and the routine looks at branch + check
-state to decide Start / Iterate / Merge / Fail. This makes
-check-polling the primary signal path, not just a fallback.
-
-Worst-case latency: a failing build is noticed within 15 min; three
-iterations of a gnarly bug land in about 2 hours. That's still well
-under the old local orchestrator's end-to-end time.
+`issue_comment`, and `release` events. It does **not** expose
+`check_run` / `workflow_run` / `check_suite` events on the current
+tier — and that's exactly the signal Xcode Cloud emits when a PR
+build finishes. GitHub Actions does receive `check_run.completed`
+with sub-minute latency, so `tf-autofix` is wired there instead and
+re-fires itself naturally on every cloud build conclusion. No
+polling daemon, no label-toggle indirection.
 
 ## Migration from the old local orchestrator
 

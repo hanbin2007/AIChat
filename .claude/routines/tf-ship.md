@@ -4,13 +4,16 @@ trigger: GitHub event (pull_request closed+merged on main, head branch autofix/*
 ---
 
 You are the **SHIP** routine. Follow `_shared.md`. One run collects
-every auto-fix-ready PR merged since `last_ship_iso`, writes the
-changelog files, pushes to `main`, and waits for Xcode Cloud to
-upload.
+every `auto-fix-ready` PR merged since `last_ship_iso`, writes the
+changelog files, and pushes `main`. **You do not wait for Xcode
+Cloud to finish.**
 
-Xcode Cloud's `Ship to TestFlight` workflow is already configured to
-run on every push to `main` and distribute to `PBTestGroup` — this
-routine does **not** invoke any build tooling.
+After `main` is pushed, Xcode Cloud's `Ship to TestFlight` workflow
+runs and reports its conclusion as a `check_run` on the new `main`
+commit. The companion workflow `.github/workflows/tf-ship-finalize.yml`
+listens for that `check_run.completed` event and handles closing the
+issues + label cleanup. That keeps this routine quick (no 60-min
+polling, no concurrency-guard incantation).
 
 ## Steps
 
@@ -54,62 +57,23 @@ routine does **not** invoke any build tooling.
    printf '%s\n' "$ZH_BODY" > TestFlight/WhatToTest.zh-Hans.txt
    printf '%s\n' "$EN_BODY" > TestFlight/WhatToTest.en.txt
    git add TestFlight/WhatToTest.zh-Hans.txt TestFlight/WhatToTest.en.txt
-   git commit -m "chore(tf): ship $(date -u +%Y%m%d-%H%M) — fixes <#N1,#N2,...>"
+
+   # Embed PR list in the commit message so tf-ship-finalize can match
+   # this push back to the issues that need closing without a second
+   # query against PR labels.
+   PR_LIST="$(printf '#%s ' $PR_NUMBERS)"
+   git commit -m "chore(tf): ship $(date -u +%Y%m%d-%H%M) — fixes ${PR_LIST% }"
    git push origin main
    ```
-   The push triggers Xcode Cloud's `Ship to TestFlight` workflow.
 
-5. **Wait for upload.** Poll ASC for the latest Ship run:
-   ```bash
-   while true; do
-     RUN=$(python3 .claude/routines/scripts/asc.py ship-latest \
-             --workflow "$ASC_SHIP_WORKFLOW_ID")
-     PROGRESS=$(echo "$RUN" | jq -r '.attributes.executionProgress')
-     STATUS=$(echo   "$RUN" | jq -r '.attributes.completionStatus')
-     RUN_NUMBER=$(echo "$RUN" | jq -r '.attributes.number')
-     [ "$PROGRESS" = "COMPLETE" ] && break
-     sleep 60
-     # Exit before hitting routine timeout (~60 min). tf-sweep will
-     # resume from here on its next hourly tick.
-     [ "$SECONDS" -gt 3300 ] && {
-       echo "ship DEFERRED — Xcode Cloud still running (run $RUN_NUMBER), handing off to tf-sweep"
-       exit 0
-     }
-   done
-   ```
+5. **Update state.** Set `last_ship_iso = now()` in `meta-state`.
 
-   After the loop exits with `PROGRESS=COMPLETE`:
-   - `STATUS == SUCCEEDED`: continue to step 6.
-   - `STATUS in {FAILED, ERRORED, CANCELED}`: on each pending issue,
-     comment
-     `@hanbin2007 Ship FAILED on Xcode Cloud run <RUN_NUMBER>: <one line reason>. Details: <url>. Will retry next cycle.`
-     Do **not** revert the main push. Exit with `ship FAILED`.
-
-6. **Close out.** For each referenced issue:
-   - `gh issue comment <N> --body "@hanbin2007 Shipped in TestFlight build <build_num> (Xcode Cloud run <runNumber>) to external group PBTestGroup."`
-   - `gh issue edit <N> --add-label shipped-to-testflight`
-   - `gh issue close <N>`
-   - `gh pr edit <PR> --remove-label auto-fix-ready` (so we don't
-     re-ship on the next sweep).
-
-7. **Update state.** Set `last_ship_iso = now()` in `meta-state`.
+That's it — no polling, no `--remove-label` step, no Xcode Cloud
+status check. `tf-ship-finalize.yml` handles everything that depends
+on the cloud upload result.
 
 ## Summary line
 
-`ship OK — shipped: <K> fixes, build <build_num>` or
-`ship FAILED: <reason>`.
-
-## Concurrency guard
-
-Two `tf-ship` runs should never be in flight at once. Before step 4:
-```bash
-PREV=$(python3 .claude/routines/scripts/asc.py ship-latest \
-         --workflow "$ASC_SHIP_WORKFLOW_ID" \
-         | jq -r '.attributes.executionProgress')
-if [ "$PREV" != "COMPLETE" ] && [ "$PREV" != "null" ]; then
-  echo "ship DEFERRED — previous ship still uploading ($PREV)"
-  exit 0
-fi
-```
-The deferred work gets picked up on the next merged-PR event or by
-`tf-sweep`.
+`ship OK — pushed: <K> fixes (PRs <#N1,#N2,...>), main commit <sha>`
+or `ship FAILED: <reason>` (only used for pre-push failures — git
+problems, state-issue write errors, etc).
