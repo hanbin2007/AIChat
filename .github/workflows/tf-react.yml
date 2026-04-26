@@ -106,8 +106,15 @@ jobs:
         id: prompt
         run: |
           set -euo pipefail
+          # The action's default `claude_code` system-prompt preset reads
+          # markdown specs as docs/role-assignment unless an imperative
+          # directive opens the user message. See debug/tf-triage-diagnostics.
           {
             echo 'content<<PROMPT_EOF'
+            echo 'Execute the REACT routine described below right now on the issue specified by the env vars (EVENT_NAME, EVENT_ACTION, ISSUE_NUMBER, LABEL_NAME, COMMENT_BODY, ACTOR). Use the available tools (Bash, Read, Grep, Glob) as needed. Do not ask for confirmation. End with the summary line specified in the routine.'
+            echo
+            echo '---'
+            echo
             cat .claude/routines/_shared.md
             printf '\n\n---\n\n'
             cat .claude/routines/tf-react.md
@@ -133,6 +140,5 @@ jobs:
           prompt: ${{ steps.prompt.outputs.content }}
           claude_args: |
             --model claude-opus-4-7[1m]
-            --effort xhigh
             --max-turns 30
             --allowedTools Bash,Read,Grep,Glob
