@@ -1,0 +1,74 @@
+name: tf-ship
+
+# When an auto-fix PR merges into main, write the TestFlight WhatToTest
+# changelog files and push main so Xcode Cloud's Ship to TestFlight
+# workflow picks it up. Replaces the Anthropic Routines trigger of the
+# same name.
+#
+# Pairs with tf-ship-finalize.yml, which closes the linked issues and
+# strips labels once Xcode Cloud reports the upload result on the main
+# commit's check_run.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# Filter to merged PRs from autofix/* branches that carry auto-fix-ready.
+# tf-react / tf-autofix sets that label only after Xcode Cloud passes.
+jobs:
+  ship:
+    if: |
+      github.event.pull_request.merged == true
+      && startsWith(github.event.pull_request.head.ref, 'autofix/')
+      && contains(github.event.pull_request.labels.*.name, 'auto-fix-ready')
+    runs-on: ubuntu-latest
+    # Serialize ships: each push of main kicks Xcode Cloud's Ship workflow,
+    # and two simultaneous changelog writes would race the rebase.
+    concurrency:
+      group: tf-ship
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Need a token that can push to main — GITHUB_TOKEN works because
+          # the repo's Actions write permission is enabled and there's no
+          # branch protection blocking it.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git author
+        run: |
+          git config user.name  "tf-ship-bot"
+          git config user.email "tf-ship-bot@users.noreply.github.com"
+
+      - name: Assemble prompt (_shared.md + tf-ship.md)
+        id: prompt
+        run: |
+          set -euo pipefail
+          {
+            echo 'content<<PROMPT_EOF'
+            cat .claude/routines/_shared.md
+            printf '\n\n---\n\n'
+            cat .claude/routines/tf-ship.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGED_PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED_PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          allowed_tools: "Bash,Read,Grep,Glob"
+          claude_args: |
+            --model claude-opus-4-7[1m]
+            --effort xhigh

@@ -1,0 +1,57 @@
+name: tf-triage
+
+# Hourly pull of new TestFlight feedback from App Store Connect, files each
+# new item as a GitHub issue with classification + investigation. Replaces
+# the Anthropic Routines schedule of the same name; lives here so:
+#
+#   - apple.com is directly reachable from GitHub-hosted runners (no relay
+#     proxy needed)
+#   - ASC secrets and the autofix loop live in one place
+#   - manual replay (workflow_dispatch) is one click
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+# Hourly cron and a manual replay must not stomp on each other's
+# meta-state cursor write.
+concurrency:
+  group: tf-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble prompt (_shared.md + tf-triage.md)
+        id: prompt
+        run: |
+          set -euo pipefail
+          {
+            echo 'content<<PROMPT_EOF'
+            cat .claude/routines/_shared.md
+            printf '\n\n---\n\n'
+            cat .claude/routines/tf-triage.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          allowed_tools: "Bash,Read,Grep,Glob,Task"
+          claude_args: |
+            --model claude-opus-4-7[1m]
+            --effort xhigh
