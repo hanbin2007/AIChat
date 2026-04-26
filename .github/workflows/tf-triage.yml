@@ -33,8 +33,17 @@ jobs:
         id: prompt
         run: |
           set -euo pipefail
+          # The action sends the prompt input to Claude Code under the
+          # default `claude_code` system-prompt preset, which treats long
+          # markdown as docs/role-assignment rather than a command. Without
+          # an explicit imperative leader, Claude responds "Ready. What
+          # would you like me to do?" and exits. Prepend a one-line directive.
           {
             echo 'content<<PROMPT_EOF'
+            echo 'Execute the TRIAGE routine described below right now. Use the available tools (Bash, Read, Grep, Glob, Task) as needed. Do not ask for confirmation. End with the summary line specified in the "Summary line" section.'
+            echo
+            echo '---'
+            echo
             cat .claude/routines/_shared.md
             printf '\n\n---\n\n'
             cat .claude/routines/tf-triage.md
