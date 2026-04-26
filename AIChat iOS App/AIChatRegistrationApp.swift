@@ -70,8 +70,10 @@ struct AIChatRegistrationApp: App {
                     await chatStore.refreshRemoteSyncState()
                 }
             }
+            .preferredColorScheme(.dark)
             #else
             OfflineActivationKeygenView()
+                .preferredColorScheme(.dark)
             #endif
         }
     }

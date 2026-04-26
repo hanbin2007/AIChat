@@ -90,6 +90,7 @@ struct CompanionRootView: View {
                 bottomSurfaceHeight = 0
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     private var shouldExtendBottomSurface: Bool {
