@@ -137,7 +137,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: ${{ steps.prompt.outputs.content }}
-          allowed_tools: "Bash,Read,Edit,Write,Grep,Glob"
           claude_args: |
             --model claude-opus-4-7[1m]
             --effort xhigh
+            --max-turns 80
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob,Task
