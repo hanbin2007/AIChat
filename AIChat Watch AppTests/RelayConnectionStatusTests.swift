@@ -104,6 +104,53 @@ final class RelayConnectionStatusTests: XCTestCase {
     }
 
     @MainActor
+    func testCancelledPendingTaskDoesNotImmediatelyFlush() async throws {
+        // Regression: when a pending delivery task is cancelled inside
+        // the debounce window, the previous implementation used
+        // `try? await Task.sleep(...)`. `try?` swallows
+        // `CancellationError` so the cancelled task fell straight
+        // through to `flushPending()` and emitted immediately,
+        // defeating the debounce on every burst (H2 in the watch
+        // services review).
+        //
+        // After the fix: report A → schedules X. Report B (cancels X,
+        // schedules Y). Report C (cancels Y, schedules Z). Only Z
+        // should fire after the debounce window — no early emission of
+        // B by the cancellation path of X.
+        let handler = RelayConnectionStatusHandler(debounceInterval: 0.2)
+        let collector = StatusCollector()
+        handler.setOnChange { [weak collector] status in
+            collector?.append(status)
+        }
+
+        // First emission goes through immediately (no prior emission).
+        handler.report(.connecting)
+        try await collector.waitForCount(1)
+
+        // Within the debounce window: schedule, cancel, reschedule.
+        handler.report(.online)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        handler.report(.offline(reason: "first flap"))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        handler.report(.offline(reason: "final"))
+
+        // Wait past the debounce window plus margin.
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let delivered = collector.snapshot()
+        XCTAssertEqual(delivered.first, .connecting)
+        XCTAssertEqual(delivered.last, .offline(reason: "final"))
+        // Only `connecting` and `offline(reason: "final")` should be
+        // delivered. Anything between is a sign the cancelled task
+        // flushed prematurely.
+        XCTAssertLessThanOrEqual(
+            delivered.count,
+            2,
+            "Cancelled debounce task must not flush. Got: \(delivered)"
+        )
+    }
+
+    @MainActor
     func testRapidFlapIsDebouncedToLatestStatus() async throws {
         // 10 alternating transitions within the debounce window should
         // deliver the first one immediately and then a single

@@ -807,6 +807,24 @@ actor ConversationRepository {
                     }
 
                     let url = attachmentsRootURL.appendingPathComponent(blobFilename, isDirectory: false)
+
+                    // Skip the atomic-write when the on-disk blob is
+                    // already up to date. Without this guard,
+                    // `loadConversations()` rewrites every attachment
+                    // blob on every cold start (M2 in the watch
+                    // services review) — a real I/O burst on watches
+                    // with many audio attachments. We use file size
+                    // as a cheap freshness check; SwiftData round-trips
+                    // the bytes through its external-storage attribute,
+                    // so size-equality is a good enough proxy for
+                    // identity here. If size matches, skip; otherwise
+                    // overwrite atomically.
+                    if fileManager.fileExists(atPath: url.path),
+                       let existingSize = (try? fileManager.attributesOfItem(atPath: url.path)[.size]) as? Int,
+                       existingSize == attachment.data.count {
+                        continue
+                    }
+
                     try attachment.data.write(to: url, options: [.atomic])
                 }
             }

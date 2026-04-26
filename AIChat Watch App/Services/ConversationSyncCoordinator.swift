@@ -73,6 +73,13 @@ final class ConversationSyncCoordinator: ObservableObject {
 
     private var lastPushedSyncSummaryDigest: String?
     private var lastBootstrapRequestAt: Date?
+    /// Throttle for the full reconcile triggered on each `.reachable`
+    /// transition. WatchConnectivity reachability flaps frequently
+    /// (Bluetooth proximity, wrist-up). Without this gate every flap
+    /// kicks off a full iCloud reconcile, which is expensive (M9 in
+    /// the watch-services review).
+    private var lastReachableReconcileAt: Date?
+    private let reachableReconcileMinInterval: TimeInterval = 30
 
     // MARK: - Init
 
@@ -416,6 +423,19 @@ final class ConversationSyncCoordinator: ObservableObject {
 
         switch status {
         case .reachable:
+            // Reachability flaps are common on watch — gate the full
+            // reconcile to at most one per `reachableReconcileMinInterval`
+            // seconds. The first reachable transition still always
+            // reconciles because `lastReachableReconcileAt` starts nil.
+            let now = Date.now
+            if let lastReachableReconcileAt,
+               now.timeIntervalSince(lastReachableReconcileAt) < reachableReconcileMinInterval {
+                // Still ask the bootstrap throttle — that path is
+                // cheap and handles its own dedupe.
+                requestBootstrapIfNeeded()
+                return
+            }
+            lastReachableReconcileAt = now
             await reconcileRemoteStores(requestBootstrap: true)
         case .idle:
             pushCurrentSyncSummary()

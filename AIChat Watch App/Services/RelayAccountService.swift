@@ -229,6 +229,10 @@ struct RelayAccountService {
             encoder.dateEncodingStrategy = .iso8601
             request.httpBody = try encoder.encode(body)
         }
+        // Standard client-context headers (User-Agent, app version,
+        // OS, device-model, locale) for the activity log. No
+        // conversation ID — these are account/billing endpoints.
+        RelayRequestEnricher.attachClientContext(to: &request)
 
         let relaySession = makeRelayURLSession(
             configuration: configuration,

@@ -117,7 +117,15 @@ final class RelayConnectionStatusHandler: @unchecked Sendable {
         _pendingDeliveryTask?.cancel()
         let delayNanoseconds = UInt64(max(0, interval - elapsed) * 1_000_000_000)
         _pendingDeliveryTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            // CancellationError must NOT be swallowed via `try?` — that
+            // would let a freshly-cancelled task fall through to
+            // `flushPending()` immediately, defeating the debounce on
+            // every burst. Bail out explicitly on cancellation.
+            do {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            } catch {
+                return
+            }
             self?.flushPending()
         }
         lock.unlock()

@@ -15,6 +15,12 @@ enum RelayAPIError: LocalizedError, Equatable {
     case incompleteResponse
     case truncated
     case storeKitProductUnavailable(productID: String)
+    /// Raised when a code path that only exists for the deprecated
+    /// `direct` backend mode is invoked at runtime. The watch ships in
+    /// `relay` mode in production; the direct stub clients exist only
+    /// to keep the `AIBackendMode.direct` enum case wired, not to
+    /// service real traffic.
+    case directModeUnsupported
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +38,8 @@ enum RelayAPIError: LocalizedError, Equatable {
             return L10n.tr("error.reply.truncated")
         case .storeKitProductUnavailable(let productID):
             return String(format: L10n.tr("error.relay.storekit_product_unavailable"), productID)
+        case .directModeUnsupported:
+            return L10n.tr("error.relay.direct_mode_unsupported")
         }
     }
 }
@@ -62,6 +70,10 @@ struct RelayAIClient: AIStreamingService {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
                 request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                RelayRequestEnricher.attachClientContext(
+                    to: &request,
+                    conversationID: conversation.id
+                )
 
                 let encoder = JSONEncoder()
                 encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -165,6 +177,10 @@ struct RelayTranscriptionService: AITranscriptionService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        RelayRequestEnricher.attachClientContext(
+            to: &request,
+            conversationID: conversation.id
+        )
 
         let prompt = VoiceTranscriptionPromptBuilder.prompt(
             for: conversation,
@@ -410,6 +426,19 @@ func relayOfflineReason(for error: Error) -> String {
     return (error as NSError).localizedDescription
 }
 
+/// Caches one `URLSession(configuration:delegate:delegateQueue:)` per
+/// allowed-host so we do not leak a session + delegate + sockets on
+/// every relay request when `relayAllowsInsecureTLS` is on.
+///
+/// The previous implementation created a fresh `URLSession` on every
+/// call and never invalidated it; URLSession retains its delegate
+/// strongly until `invalidateAndCancel` / `finishTasksAndInvalidate`
+/// runs, so each call leaked. Caching is acceptable here because the
+/// dev-mode insecure-TLS path is gated by configuration and the
+/// allowed-host set is tiny (typically one entry).
+private let insecureRelaySessionCacheLock = NSLock()
+nonisolated(unsafe) private var insecureRelaySessionCache: [String: URLSession] = [:]
+
 func makeRelayURLSession(
     configuration: AppConfiguration,
     fallback: URLSession
@@ -420,11 +449,36 @@ func makeRelayURLSession(
         return fallback
     }
 
+    let cacheKey = allowedHost.lowercased()
+    insecureRelaySessionCacheLock.lock()
+    defer { insecureRelaySessionCacheLock.unlock() }
+
+    if let cached = insecureRelaySessionCache[cacheKey] {
+        return cached
+    }
+
     let delegate = RelayTLSDelegate(allowedHost: allowedHost)
     let sessionConfiguration = URLSessionConfiguration.default
     sessionConfiguration.waitsForConnectivity = true
     sessionConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    return URLSession(configuration: sessionConfiguration, delegate: delegate, delegateQueue: nil)
+    let session = URLSession(
+        configuration: sessionConfiguration,
+        delegate: delegate,
+        delegateQueue: nil
+    )
+    insecureRelaySessionCache[cacheKey] = session
+    return session
+}
+
+/// Test seam: drops the cache so a unit test can assert that a fresh
+/// session is constructed on the next call. Not used in production.
+nonisolated func _resetRelayURLSessionCacheForTesting() {
+    insecureRelaySessionCacheLock.lock()
+    defer { insecureRelaySessionCacheLock.unlock() }
+    for (_, session) in insecureRelaySessionCache {
+        session.invalidateAndCancel()
+    }
+    insecureRelaySessionCache.removeAll()
 }
 
 private func makeRelayStreamingSession(

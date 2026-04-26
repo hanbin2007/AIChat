@@ -7,6 +7,7 @@
 
 import Foundation
 import WatchConnectivity
+import os
 
 nonisolated struct CompanionDeletedConversationTombstone: Codable, Equatable {
     let id: UUID
@@ -84,6 +85,16 @@ nonisolated struct CompanionIncomingAttachmentBlob {
     let temporaryFileURL: URL
 }
 
+/// Bridge between the watch app and its iPhone companion (or vice
+/// versa) over WatchConnectivity. This class is `@MainActor`-isolated:
+/// every mutable field (`currentStatus`, the closure handler slots,
+/// the encoder/decoder) is accessed exclusively from the main actor.
+/// `WCSessionDelegate` callbacks arrive on WatchConnectivity's private
+/// serial queue — those entry points are `nonisolated` and hop to the
+/// main actor before touching any state. Without that hop, the
+/// previous implementation racily wrote `currentStatus` and torn-read
+/// the handler slots (H1 in the watch-services review).
+@MainActor
 final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias EventHandler = @MainActor (CompanionSyncEvent) -> Void
     typealias StatusHandler = @MainActor (CompanionSyncStatus) -> Void
@@ -93,6 +104,8 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     typealias GlobalPinnedMemoriesProvider = @MainActor () -> [PinnedMemoryItem]
     typealias PromptPresetsProvider = @MainActor () -> [PromptPreset]
     typealias SyncSummaryProvider = @MainActor () -> ConversationSyncSummary?
+
+    private static let log = Logger(subsystem: "com.aichat.watch", category: "CompanionSync")
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -105,7 +118,12 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     private var globalPinnedMemoriesProvider: GlobalPinnedMemoriesProvider?
     private var promptPresetsProvider: PromptPresetsProvider?
     private var syncSummaryProvider: SyncSummaryProvider?
-    private var queuedAttachmentTransferBlobFilenames: Set<String> = []
+    /// The attachment-transfer dedupe set is touched from both the
+    /// MainActor (`pushXxx` paths) and the WC delegate queue
+    /// (`session(didFinish:)`). Keep its lock-protected access pattern
+    /// rather than forcing a hop in the file-completion callback —
+    /// that one piece legitimately wants to stay non-MainActor.
+    nonisolated(unsafe) private var queuedAttachmentTransferBlobFilenames: Set<String> = []
     private let attachmentTransferStateLock = NSLock()
 
     private(set) var currentStatus: CompanionSyncStatus = .unavailable
@@ -131,8 +149,9 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
 
     func setStatusHandler(_ handler: StatusHandler?) {
         statusHandler = handler
+        let snapshot = currentStatus
         Task { @MainActor in
-            handler?(currentStatus)
+            handler?(snapshot)
         }
     }
 
@@ -165,24 +184,10 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        do {
-            let sanitizedConversation = sanitizedConversationPayload(from: conversation)
-            let data = try encoder.encode(sanitizedConversation)
-            let payload: [String: Any] = [
-                "type": "conversation_upsert",
-                "payload": data.base64EncodedString()
-            ]
-            let session = WCSession.default
-
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-            }
-
-            session.transferUserInfo(payload)
-            enqueueAttachmentTransfers(for: sanitizedConversation, using: session)
-        } catch {
-            return
-        }
+        let sanitizedConversation = sanitizedConversationPayload(from: conversation)
+        let session = WCSession.default
+        enqueue(typeKey: "conversation_upsert", encodable: sanitizedConversation, on: session)
+        enqueueAttachmentTransfers(for: sanitizedConversation, using: session)
     }
 
     func pushDeletion(conversationID: UUID, deletedAt: Date) {
@@ -195,13 +200,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             "conversationID": conversationID.uuidString,
             "deletedAt": deletedAt.timeIntervalSince1970
         ]
-        let session = WCSession.default
-
-        if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-        }
-
-        session.transferUserInfo(payload)
+        send(payload: payload, on: WCSession.default, typeKey: "conversation_delete")
     }
 
     func pushGlobalPinnedMemories(_ items: [PinnedMemoryItem]) {
@@ -209,22 +208,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        do {
-            let data = try encoder.encode(items)
-            let payload: [String: Any] = [
-                "type": "global_pinned_memories",
-                "payload": data.base64EncodedString()
-            ]
-            let session = WCSession.default
-
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-            }
-
-            session.transferUserInfo(payload)
-        } catch {
-            return
-        }
+        enqueue(typeKey: "global_pinned_memories", encodable: items, on: WCSession.default)
     }
 
     func pushPromptPresets(_ items: [PromptPreset]) {
@@ -232,22 +216,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        do {
-            let data = try encoder.encode(items)
-            let payload: [String: Any] = [
-                "type": "prompt_presets",
-                "payload": data.base64EncodedString()
-            ]
-            let session = WCSession.default
-
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-            }
-
-            session.transferUserInfo(payload)
-        } catch {
-            return
-        }
+        enqueue(typeKey: "prompt_presets", encodable: items, on: WCSession.default)
     }
 
     func pushSyncSummary(_ summary: ConversationSyncSummary) {
@@ -255,22 +224,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        do {
-            let data = try encoder.encode(summary)
-            let payload: [String: Any] = [
-                "type": "sync_summary",
-                "payload": data.base64EncodedString()
-            ]
-            let session = WCSession.default
-
-            if session.isReachable {
-                session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-            }
-
-            session.transferUserInfo(payload)
-        } catch {
-            return
-        }
+        enqueue(typeKey: "sync_summary", encodable: summary, on: WCSession.default)
     }
 
     func requestBootstrapIfPossible() {
@@ -295,13 +249,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             "type": "activation_request_code",
             "requestCode": requestCode
         ]
-        let session = WCSession.default
-
-        if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-        }
-
-        session.transferUserInfo(payload)
+        send(payload: payload, on: WCSession.default, typeKey: "activation_request_code")
     }
 
     func pushActivationCodeImport(_ activationCode: String) {
@@ -314,13 +262,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             "code": activationCode,
             "transferID": UUID().uuidString
         ]
-        let session = WCSession.default
-
-        if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-        }
-
-        session.transferUserInfo(payload)
+        send(payload: payload, on: WCSession.default, typeKey: "activation_code_import")
     }
 
     func pushRelayPairingToken(_ pairingToken: String, expiresAt: Date) {
@@ -333,70 +275,87 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             "pairingToken": pairingToken,
             "expiresAt": expiresAt.timeIntervalSince1970
         ]
-        let session = WCSession.default
-
-        if session.isReachable {
-            session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
-        }
-
-        session.transferUserInfo(payload)
+        send(payload: payload, on: WCSession.default, typeKey: "relay_pairing_token")
     }
 
     #if os(iOS)
-    func sessionDidBecomeInactive(_ session: WCSession) {
-        refreshStatus(for: session)
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
+        Task { @MainActor [weak self] in
+            self?.refreshStatus(for: session)
+        }
     }
 
-    func sessionDidDeactivate(_ session: WCSession) {
+    nonisolated func sessionDidDeactivate(_ session: WCSession) {
         WCSession.default.activate()
-        refreshStatus(for: WCSession.default)
+        Task { @MainActor [weak self] in
+            self?.refreshStatus(for: WCSession.default)
+        }
     }
     #endif
 
-    func session(
+    nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        refreshStatus(for: session)
+        Task { @MainActor [weak self] in
+            self?.refreshStatus(for: session)
+        }
     }
 
-    func sessionReachabilityDidChange(_ session: WCSession) {
-        refreshStatus(for: session)
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        Task { @MainActor [weak self] in
+            self?.refreshStatus(for: session)
+        }
     }
 
-    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
-        handleIncoming(payload: userInfo)
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        let captured = userInfo
+        Task { @MainActor [weak self] in
+            self?.handleIncoming(payload: captured)
+        }
     }
 
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        handleIncoming(payload: applicationContext)
+    nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        let captured = applicationContext
+        Task { @MainActor [weak self] in
+            self?.handleIncoming(payload: captured)
+        }
     }
 
-    func session(_ session: WCSession, didReceive file: WCSessionFile) {
-        guard let incomingBlob = incomingAttachmentBlob(from: file) else {
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        // `incomingAttachmentBlob(from:)` is a pure metadata read from
+        // the SDK-provided `WCSessionFile`; safe to compute on the WC
+        // queue.
+        guard let incomingBlob = Self.incomingAttachmentBlob(from: file) else {
             return
         }
 
-        Task { @MainActor in
-            eventHandler?(.attachmentBlob(incomingBlob))
+        Task { @MainActor [weak self] in
+            self?.eventHandler?(.attachmentBlob(incomingBlob))
         }
     }
 
-    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        handleIncoming(payload: message)
+    nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        let captured = message
+        Task { @MainActor [weak self] in
+            self?.handleIncoming(payload: captured)
+        }
     }
 
-    func session(
+    nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        handleIncoming(payload: message)
+        let captured = message
+        Task { @MainActor [weak self] in
+            self?.handleIncoming(payload: captured)
+        }
         replyHandler(["ok": true])
     }
 
-    func session(
+    nonisolated func session(
         _ session: WCSession,
         didFinish fileTransfer: WCSessionFileTransfer,
         error: Error?
@@ -405,9 +364,11 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        _ = attachmentTransferStateLock.withLock {
-            queuedAttachmentTransferBlobFilenames.remove(blobFilename)
-        }
+        // Lock-protected mutation of the dedupe set — safe to do on
+        // the WC queue.
+        attachmentTransferStateLock.lock()
+        queuedAttachmentTransferBlobFilenames.remove(blobFilename)
+        attachmentTransferStateLock.unlock()
     }
 
     private func refreshStatus(for session: WCSession) {
@@ -424,9 +385,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         }
 
         currentStatus = nextStatus
-        Task { @MainActor in
-            statusHandler?(nextStatus)
-        }
+        statusHandler?(nextStatus)
     }
 
     private func handleIncoming(payload: [String: Any]) {
@@ -445,9 +404,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.upsert(conversation))
-            }
+            eventHandler?(.upsert(conversation))
         case "conversation_delete":
             guard let rawID = payload["conversationID"] as? String,
                   let conversationID = UUID(uuidString: rawID)
@@ -459,9 +416,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 .map(Date.init(timeIntervalSince1970:))
                 ?? .now
 
-            Task { @MainActor in
-                eventHandler?(.delete(conversationID, deletedAt: deletedAt))
-            }
+            eventHandler?(.delete(conversationID, deletedAt: deletedAt))
         case "conversation_snapshot":
             guard let base64Payload = payload["payload"] as? String,
                   let data = Data(base64Encoded: base64Payload),
@@ -470,9 +425,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.snapshot(conversations))
-            }
+            eventHandler?(.snapshot(conversations))
         case "sync_summary":
             guard let base64Payload = payload["payload"] as? String,
                   let data = Data(base64Encoded: base64Payload),
@@ -481,9 +434,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.syncSummary(summary))
-            }
+            eventHandler?(.syncSummary(summary))
         case "bootstrap_snapshot":
             let conversations = (payload["conversationsPayload"] as? String)
                 .flatMap { Data(base64Encoded: $0) }
@@ -501,26 +452,24 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 .flatMap { Data(base64Encoded: $0) }
                 .flatMap { try? decoder.decode(ConversationSyncSummary.self, from: $0) }
 
-            Task { @MainActor in
-                if let syncSummary {
-                    eventHandler?(.syncSummary(syncSummary))
-                }
+            if let syncSummary {
+                eventHandler?(.syncSummary(syncSummary))
+            }
 
-                if let deletedConversationTombstones {
-                    eventHandler?(.deletedConversationTombstones(deletedConversationTombstones))
-                }
+            if let deletedConversationTombstones {
+                eventHandler?(.deletedConversationTombstones(deletedConversationTombstones))
+            }
 
-                if let conversations {
-                    eventHandler?(.snapshot(conversations))
-                }
+            if let conversations {
+                eventHandler?(.snapshot(conversations))
+            }
 
-                if let globalPinnedMemories {
-                    eventHandler?(.globalPinnedMemories(globalPinnedMemories))
-                }
+            if let globalPinnedMemories {
+                eventHandler?(.globalPinnedMemories(globalPinnedMemories))
+            }
 
-                if let promptPresets {
-                    eventHandler?(.promptPresets(promptPresets))
-                }
+            if let promptPresets {
+                eventHandler?(.promptPresets(promptPresets))
             }
         case "global_pinned_memories":
             guard let base64Payload = payload["payload"] as? String,
@@ -530,9 +479,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.globalPinnedMemories(items))
-            }
+            eventHandler?(.globalPinnedMemories(items))
         case "prompt_presets":
             guard let base64Payload = payload["payload"] as? String,
                   let data = Data(base64Encoded: base64Payload),
@@ -541,28 +488,22 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.promptPresets(presets))
-            }
+            eventHandler?(.promptPresets(presets))
         case "activation_request_code":
             guard let requestCode = payload["requestCode"] as? String else {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.activationRequestCode(requestCode))
-            }
+            eventHandler?(.activationRequestCode(requestCode))
         case "activation_code_import":
             guard let code = payload["code"] as? String else {
                 return
             }
 
-            Task { @MainActor in
-                eventHandler?(.activationCodeImport(
-                    code: code,
-                    transferID: payload["transferID"] as? String
-                ))
-            }
+            eventHandler?(.activationCodeImport(
+                code: code,
+                transferID: payload["transferID"] as? String
+            ))
         case "relay_pairing_token":
             guard let pairingToken = payload["pairingToken"] as? String else {
                 return
@@ -571,9 +512,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             let expiresAt = (payload["expiresAt"] as? TimeInterval)
                 .map(Date.init(timeIntervalSince1970:))
 
-            Task { @MainActor in
-                eventHandler?(.relayPairingToken(token: pairingToken, expiresAt: expiresAt))
-            }
+            eventHandler?(.relayPairingToken(token: pairingToken, expiresAt: expiresAt))
         default:
             break
         }
@@ -584,46 +523,96 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
             return
         }
 
-        Task { @MainActor [weak self] in
-            guard let self else {
-                return
+        let conversations = (snapshotProvider?() ?? []).map(sanitizedConversationPayload(from:))
+        let deletedConversationTombstones = deletedConversationTombstonesProvider?() ?? []
+        let globalPinnedMemories = globalPinnedMemoriesProvider?() ?? []
+        let promptPresets = promptPresetsProvider?() ?? []
+        let syncSummary = syncSummaryProvider?()
+
+        guard let conversationsData = encodeOrLog(conversations, typeKey: "bootstrap_snapshot.conversations"),
+              let deletedConversationTombstonesData = encodeOrLog(
+                  deletedConversationTombstones,
+                  typeKey: "bootstrap_snapshot.tombstones"
+              ),
+              let globalPinnedData = encodeOrLog(globalPinnedMemories, typeKey: "bootstrap_snapshot.pinned"),
+              let promptPresetsData = encodeOrLog(promptPresets, typeKey: "bootstrap_snapshot.prompt_presets")
+        else {
+            return
+        }
+
+        let syncSummaryPayload = syncSummary
+            .flatMap { encodeOrLog($0, typeKey: "bootstrap_snapshot.sync_summary") }
+            .map { $0.base64EncodedString() }
+
+        let session = WCSession.default
+        var payload: [String: Any] = [
+            "type": "bootstrap_snapshot",
+            "conversationsPayload": conversationsData.base64EncodedString(),
+            "deletedConversationTombstonesPayload": deletedConversationTombstonesData.base64EncodedString(),
+            "globalPinnedPayload": globalPinnedData.base64EncodedString(),
+            "promptPresetsPayload": promptPresetsData.base64EncodedString()
+        ]
+        if let syncSummaryPayload {
+            payload["syncSummaryPayload"] = syncSummaryPayload
+        }
+
+        do {
+            try session.updateApplicationContext(payload)
+            enqueueAttachmentTransfers(for: conversations, using: session)
+        } catch {
+            Self.log.error(
+                "Failed to push bootstrap snapshot via updateApplicationContext: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Encodes `value` and chooses ONE WC transport (sendMessage when
+    /// reachable, transferUserInfo otherwise) — never both. Centralizes
+    /// the encode + transport selection across all `pushXxx` paths
+    /// (M5 + M6 in the watch services review).
+    private func enqueue(
+        typeKey: String,
+        encodable value: Encodable,
+        on session: WCSession
+    ) {
+        guard let data = encodeOrLog(value, typeKey: typeKey) else {
+            return
+        }
+
+        let payload: [String: Any] = [
+            "type": typeKey,
+            "payload": data.base64EncodedString()
+        ]
+        send(payload: payload, on: session, typeKey: typeKey)
+    }
+
+    /// Sends a pre-built payload dictionary on a single transport.
+    /// `sendMessage` when reachable, `transferUserInfo` otherwise. Do
+    /// not call both — every payload crossed the wire twice in the
+    /// previous implementation.
+    private func send(payload: [String: Any], on session: WCSession, typeKey: String) {
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil) { error in
+                // Fall back to userInfo on transient send failures so
+                // the payload still reaches the counterpart.
+                Self.log.debug(
+                    "sendMessage failed for \(typeKey, privacy: .public); falling back to transferUserInfo: \(error.localizedDescription, privacy: .public)"
+                )
+                session.transferUserInfo(payload)
             }
+        } else {
+            session.transferUserInfo(payload)
+        }
+    }
 
-            let conversations = (self.snapshotProvider?() ?? []).map(self.sanitizedConversationPayload(from:))
-            let deletedConversationTombstones = self.deletedConversationTombstonesProvider?() ?? []
-            let globalPinnedMemories = self.globalPinnedMemoriesProvider?() ?? []
-            let promptPresets = self.promptPresetsProvider?() ?? []
-            let syncSummary = self.syncSummaryProvider?()
-            guard let conversationsData = try? self.encoder.encode(conversations),
-                  let deletedConversationTombstonesData = try? self.encoder.encode(deletedConversationTombstones),
-                  let globalPinnedData = try? self.encoder.encode(globalPinnedMemories),
-                  let promptPresetsData = try? self.encoder.encode(promptPresets)
-            else {
-                return
-            }
-
-            let syncSummaryPayload = syncSummary
-                .flatMap { try? self.encoder.encode($0) }
-                .map { $0.base64EncodedString() }
-
-            do {
-                let session = WCSession.default
-                var payload: [String: Any] = [
-                    "type": "bootstrap_snapshot",
-                    "conversationsPayload": conversationsData.base64EncodedString(),
-                    "deletedConversationTombstonesPayload": deletedConversationTombstonesData.base64EncodedString(),
-                    "globalPinnedPayload": globalPinnedData.base64EncodedString(),
-                    "promptPresetsPayload": promptPresetsData.base64EncodedString()
-                ]
-                if let syncSummaryPayload {
-                    payload["syncSummaryPayload"] = syncSummaryPayload
-                }
-
-                try session.updateApplicationContext(payload)
-                self.enqueueAttachmentTransfers(for: conversations, using: session)
-            } catch {
-                return
-            }
+    private func encodeOrLog<T: Encodable>(_ value: T, typeKey: String) -> Data? {
+        do {
+            return try encoder.encode(value)
+        } catch {
+            Self.log.error(
+                "Failed to encode \(typeKey, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
         }
     }
 
@@ -668,9 +657,9 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
                     }
 
                     guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                        _ = attachmentTransferStateLock.withLock {
-                            queuedAttachmentTransferBlobFilenames.remove(blobFilename)
-                        }
+                        attachmentTransferStateLock.lock()
+                        queuedAttachmentTransferBlobFilenames.remove(blobFilename)
+                        attachmentTransferStateLock.unlock()
                         continue
                     }
 
@@ -687,9 +676,9 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
     }
 
     private func markAttachmentTransferQueued(_ blobFilename: String) -> Bool {
-        attachmentTransferStateLock.withLock {
-            queuedAttachmentTransferBlobFilenames.insert(blobFilename).inserted
-        }
+        attachmentTransferStateLock.lock()
+        defer { attachmentTransferStateLock.unlock() }
+        return queuedAttachmentTransferBlobFilenames.insert(blobFilename).inserted
     }
 
     private func attachmentTransferMetadata(
@@ -724,7 +713,7 @@ final class CompanionSyncBridge: NSObject, WCSessionDelegate {
         return metadata
     }
 
-    private func incomingAttachmentBlob(from file: WCSessionFile) -> CompanionIncomingAttachmentBlob? {
+    nonisolated private static func incomingAttachmentBlob(from file: WCSessionFile) -> CompanionIncomingAttachmentBlob? {
         guard let metadata = file.metadata,
               (metadata["type"] as? String) == "conversation_attachment_blob",
               let rawConversationID = metadata["conversationID"] as? String,

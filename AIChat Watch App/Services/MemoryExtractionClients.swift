@@ -4,6 +4,15 @@
 //
 //  Created by Codex on 2026/3/10.
 //
+//  - `RelayMemoryExtractionClient` is the production implementation
+//    that calls the relay's `/api/v1/memory/extract` endpoint.
+//  - `GeminiMemoryExtractionClient` is intentionally a stub: the watch
+//    app ships in `relay` mode in production, but the
+//    `AIBackendMode.direct` enum case is preserved so dev configs that
+//    still wire it through `AIServiceFactory.makeMemoryMaintenanceService`
+//    keep compiling. Calling it at runtime throws
+//    `RelayAPIError.directModeUnsupported`.
+//
 
 import Foundation
 
@@ -58,6 +67,12 @@ private actor RelayMemoryExtractionSupportCache {
     }
 }
 
+/// Direct-mode (Gemini) memory-extraction stub. The watch ships in
+/// relay mode in production; the enum case `AIBackendMode.direct` is
+/// preserved so dev wiring keeps compiling, but the implementation is
+/// a stub that throws. Replaces the previous direct-call code path
+/// that built `URL(string: "...:generateContent")!` with a force-unwrap
+/// (also addresses H8 in the watch-services review).
 struct GeminiMemoryExtractionClient: AIMemoryExtractionClient {
     let configuration: AppConfiguration
     var session: URLSession = .shared
@@ -65,84 +80,7 @@ struct GeminiMemoryExtractionClient: AIMemoryExtractionClient {
     func extractMemory(
         request: ConversationMemoryExtractionRequest
     ) async throws -> ConversationMemoryExtractionResponse {
-        guard let apiKey = configuration.geminiAPIKey else {
-            throw GeminiAPIError.missingAPIKey
-        }
-
-        var urlRequest = URLRequest(
-            url: URL(
-                string: "https://generativelanguage.googleapis.com/v1beta/models/\(request.model):generateContent"
-            )!
-        )
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        urlRequest.httpBody = try encoder.encode(
-            GeminiGenerateContentRequest(
-                systemInstruction: GeminiContent.systemPrompt(MemoryExtractionConstants.systemPrompt),
-                contents: [
-                    GeminiContent(
-                        role: "user",
-                        parts: [
-                            GeminiPart(
-                                text: memoryExtractionPrompt(for: request),
-                                inlineData: nil
-                            )
-                        ]
-                    )
-                ],
-                generationConfig: GeminiGenerationConfig(
-                    temperature: 0.1,
-                    topP: 0.9,
-                    topK: nil,
-                    maxOutputTokens: MemoryExtractionConstants.maxOutputTokens,
-                    thinkingConfig: nil,
-                    responseMimeType: "application/json",
-                    enableEnhancedCivicAnswers: nil,
-                    mediaResolution: nil
-                )
-            )
-        )
-
-        let (data, response) = try await session.data(for: urlRequest)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiAPIError.invalidResponse
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw geminiExtractionError(from: data)
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
-
-        if let completionError = geminiCompletionError(
-            for: responseEnvelope.candidates.compactMap(\.finishReason).first
-        ) {
-            throw completionError
-        }
-
-        let text = responseEnvelope.candidates
-            .compactMap { $0.content?.parts.compactMap(\.text).joined(separator: "\n") }
-            .first?
-            .trimmed ?? ""
-
-        return try decodeMemoryExtractionResponse(from: text)
-    }
-
-    private func geminiExtractionError(from data: Data) -> Error {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-
-        if let envelope = try? decoder.decode(GeminiAPIErrorEnvelope.self, from: data) {
-            return GeminiAPIError.api(message: envelope.error.message)
-        }
-
-        return GeminiAPIError.invalidResponse
+        throw RelayAPIError.directModeUnsupported
     }
 }
 
@@ -172,6 +110,7 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        RelayRequestEnricher.attachClientContext(to: &urlRequest)
 
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -269,7 +208,7 @@ private func memoryExtractionPrompt(for request: ConversationMemoryExtractionReq
     return sections.joined(separator: "\n\n")
 }
 
-private func decodeMemoryExtractionResponse(
+func decodeMemoryExtractionResponse(
     from text: String
 ) throws -> ConversationMemoryExtractionResponse {
     let decoder = JSONDecoder()
@@ -281,10 +220,65 @@ private func decodeMemoryExtractionResponse(
         return response
     }
 
-    if let range = trimmed.range(of: #"\{[\s\S]*\}"#, options: .regularExpression),
-       let data = String(trimmed[range]).data(using: .utf8) {
+    // Walk the string for the first balanced JSON object. The previous
+    // greedy regex `\{[\s\S]*\}` swallowed everything between the first
+    // `{` and the last `}`, breaking decode whenever the model emitted
+    // multiple JSON-like blobs (L2 in the watch-services review).
+    if let firstObjectSubstring = firstBalancedJSONObject(in: trimmed),
+       let data = String(firstObjectSubstring).data(using: .utf8) {
         return try decoder.decode(ConversationMemoryExtractionResponse.self, from: data)
     }
 
-    throw GeminiAPIError.invalidResponse
+    throw RelayAPIError.invalidResponse
+}
+
+/// Returns the substring containing the first top-level balanced
+/// `{...}` JSON object in `source`, respecting strings and escaped
+/// quotes. Returns `nil` if no balanced object is found.
+///
+/// Internal so `MemoryExtractionRegexTests` can target this helper
+/// directly without round-tripping through `decodeMemoryExtractionResponse`.
+func firstBalancedJSONObject(in source: String) -> Substring? {
+    var depth = 0
+    var startIndex: String.Index?
+    var inString = false
+    var isEscaped = false
+
+    for index in source.indices {
+        let character = source[index]
+
+        if inString {
+            if isEscaped {
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == "\"" {
+                inString = false
+            }
+            continue
+        }
+
+        switch character {
+        case "\"":
+            inString = true
+        case "{":
+            if depth == 0 {
+                startIndex = index
+            }
+            depth += 1
+        case "}":
+            guard depth > 0 else {
+                continue
+            }
+            depth -= 1
+            if depth == 0, let startIndex {
+                let endIndex = source.index(after: index)
+                return source[startIndex..<endIndex]
+            }
+        default:
+            break
+        }
+    }
+
+    return nil
 }
