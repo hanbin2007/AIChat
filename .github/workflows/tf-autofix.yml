@@ -149,6 +149,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # tf-autofix-bridge.yml dispatches this workflow via `gh workflow
+          # run`, which sets the actor to github-actions[bot]. Without this
+          # the action rejects the run as "non-human actor".
+          allowed_bots: "github-actions"
           prompt: ${{ steps.prompt.outputs.content }}
           claude_args: |
             --model claude-opus-4-7[1m]
