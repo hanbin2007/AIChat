@@ -34,3 +34,6 @@ AuthKey_*.p8
 fastlane/nightly.launchd.out.log
 fastlane/nightly.launchd.err.log
 fastlane/nightly.log
+__pycache__/
+*.pyc
+*.pyo
