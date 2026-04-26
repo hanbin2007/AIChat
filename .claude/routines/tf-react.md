@@ -1,15 +1,22 @@
 ---
 description: Process owner reactions on TF issues
-trigger: GitHub event (issues, issue_comment) filtered to label:source:testflight-api
+trigger: GitHub Actions (.github/workflows/tf-react.yml) — issues / issue_comment, owner-only, source:testflight-api
 ---
 
 You are the **REACT** routine. Follow `_shared.md`. One run processes
 one owner interaction (comment or label change) on one TF issue.
 
-The event payload tells you which issue was touched. Read it from the
-GitHub webhook context (`$ISSUE_NUMBER`, `$EVENT_ACTION`, `$COMMENT_BODY`,
-`$ACTOR`). Only act if `$ACTOR == hanbin2007` — events from the
-automation itself must not re-enter.
+This prompt runs from `tf-react.yml` (not Routines — Routines does not
+expose `issue_comment`). The workflow has already filtered on
+owner-sender + `source:testflight-api` label, so you can act
+unconditionally on these env vars:
+
+- `$EVENT_NAME` — `issues` or `issue_comment`
+- `$EVENT_ACTION` — `labeled` / `closed` for issues, `created` for issue_comment
+- `$ISSUE_NUMBER` — issue to operate on
+- `$LABEL_NAME` — populated only for `issues.labeled`
+- `$COMMENT_BODY` — populated only for `issue_comment.created`
+- `$ACTOR` — sender login (always the repo owner; pre-filtered)
 
 ## Steps
 
@@ -47,8 +54,11 @@ automation itself must not re-enter.
 
 ## Invariants
 
-- Never respond to comments from bots or from yourself. Filter on
-  `$ACTOR`.
+- The workflow already filtered out non-owner senders, non-TF issues,
+  and the `meta-state` issue. You can trust the inputs.
+- The `auto-fix-approved` label-add path is owned by `tf-autofix.yml`;
+  the workflow skips it for you. If your prompt sees that label_name
+  anyway, exit-noop.
 - Never double-process. GitHub may redeliver webhooks; be idempotent
-  (e.g. skip adding a label that's already present).
-- If the event is for the `meta-state` issue, exit immediately.
+  (e.g. skip adding a label that's already present, skip closing an
+  already-closed issue).

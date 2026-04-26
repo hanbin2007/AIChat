@@ -10,15 +10,16 @@ upload). This file covers the Routines side.
 
 ## Topology
 
-Three of the five prompts run as Claude Code Routines
-(cloud-hosted, event-triggered). The other two — `tf-autofix` and
-`tf-ship-finalize` — run as GitHub Actions workflows because they
-need the `check_run.completed` event that Routines does not expose.
+Two of the five prompts run as Claude Code Routines
+(cloud-hosted, event-triggered). The other three — `tf-react`,
+`tf-autofix`, and `tf-ship-finalize` — run as GitHub Actions workflows
+because they need events Routines does not expose: `issue_comment`
+(react) and `check_run.completed` (autofix, ship-finalize).
 
 | File | Runner | Trigger | Purpose |
 |---|---|---|---|
-| `tf-triage.md` | Routine | Schedule: every 30 min | Pull new TF feedback → file issues |
-| `tf-react.md`  | Routine | GitHub `issues` / `issue_comment` with label `source:testflight-api` | Process owner approvals / refinements |
+| `tf-triage.md` | Routine | Schedule: hourly (`0 * * * *` — Routines minimum) | Pull new TF feedback → file issues |
+| `tf-react.md`  | **GitHub Actions** (`.github/workflows/tf-react.yml`) | `issues.labeled` / `issues.closed` / `issue_comment.created` filtered by owner + `source:testflight-api` label | Process owner approvals / refinements |
 | `tf-autofix.md` | **GitHub Actions** (`.github/workflows/tf-autofix.yml`) | `issues.labeled` (`auto-fix-approved`) + `check_run.completed` on `autofix/issue-*` branches | Start, iterate, merge one fix |
 | `tf-ship.md` | Routine | GitHub `pull_request` closed + merged with PR label `auto-fix-ready` | Write WhatToTest → push main (no polling) |
 | `tf-ship-finalize.md` | **GitHub Actions** (`.github/workflows/tf-ship-finalize.yml`) | `check_run.completed` on `main` matching `Ship to TestFlight` | Close issues + clear `auto-fix-ready` after Xcode Cloud uploads |
@@ -55,15 +56,15 @@ the routine file in their "Assemble prompt" step.
    # → note the "Ship to TestFlight" workflow id
    ```
 
-4. **Create the 3 routines** at claude.ai/code/routines (`tf-triage`,
-   `tf-react`, `tf-ship`). For each:
+4. **Create the 2 routines** at claude.ai/code/routines (`tf-triage`,
+   `tf-ship`). For each:
    - Paste `_shared.md` content at the top of the prompt.
    - Append the routine file's content below.
    - Set the trigger per the table above.
    - Attach the built-in GitHub MCP connector.
 
-   `tf-autofix` and `tf-ship-finalize` are **not** created here —
-   both run from `.github/workflows/`. Install the Claude GitHub App
+   `tf-react`, `tf-autofix`, and `tf-ship-finalize` are **not** created
+   here — they run from `.github/workflows/`. Install the Claude GitHub App
    on the repo by running `/install-github-app` from Claude Code;
    that step also writes a `CLAUDE_CODE_OAUTH_TOKEN` repo secret
    (no Anthropic API key needed — it bills against your Claude
@@ -114,16 +115,26 @@ Subcommands:
 Dependencies: `pyjwt` + `cryptography`. `asc.py` auto-pip-installs
 them on first run if missing, so you don't need a pre-baked image.
 
-## Why tf-autofix lives in GitHub Actions
+## Why some routines live in GitHub Actions
 
-Claude Code Routines supports `pull_request`, `issues`,
-`issue_comment`, and `release` events. It does **not** expose
-`check_run` / `workflow_run` / `check_suite` events on the current
-tier — and that's exactly the signal Xcode Cloud emits when a PR
-build finishes. GitHub Actions does receive `check_run.completed`
-with sub-minute latency, so `tf-autofix` is wired there instead and
-re-fires itself naturally on every cloud build conclusion. No
-polling daemon, no label-toggle indirection.
+Claude Code Routines, on the current tier, supports `pull_request`,
+`issues`, and `release` events plus `schedule`. It does **not** expose:
+
+- `issue_comment` — the most ergonomic owner reply path (typing
+  `approve A` in a comment). Without it, only label changes / closures
+  are observable, which is fine for autofix gating but kills the
+  comment-driven react flow.
+- `check_run` / `workflow_run` / `check_suite` — the signal Xcode Cloud
+  emits when a build finishes. Without it, the autofix loop and
+  ship-finalize step have no native way to wake on cloud build outcomes.
+
+GitHub Actions receives all of these with sub-minute latency, so the
+prompts that need them (`tf-react`, `tf-autofix`, `tf-ship-finalize`)
+run there instead. Each Action assembles `_shared.md` + the routine
+prompt at job-start time and invokes
+[anthropics/claude-code-action](https://github.com/anthropics/claude-code-action)
+with the pre-minted `CLAUDE_CODE_OAUTH_TOKEN`. No polling daemon,
+no label-toggle indirection.
 
 ## Migration from the old local orchestrator
 
