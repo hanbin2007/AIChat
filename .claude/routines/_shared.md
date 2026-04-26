@@ -98,7 +98,7 @@ Routines UI):
   returns 503 for `api.appstoreconnect.apple.com` even at "Full"
   network tier (apple.com is not on the egress allowlist; possibly
   also Apple-side IP filtering). Set this to the relay's bridge —
-  `https://ai.origenclub.cn/asc` — and `asc.py` rewrites every API
+  `https://ai.origenclub.cn/api/asc` — and `asc.py` rewrites every API
   call through there. The JWT is end-to-end; the relay just forwards
   bytes. Leave unset for local invocations from a Mac.
 

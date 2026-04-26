@@ -41,7 +41,7 @@ except ImportError:
 DEFAULT_BASE = "https://api.appstoreconnect.apple.com"
 # Override in routine env when the runtime sandbox can't reach Apple directly
 # (Anthropic egress IPs return 503 on apple.com regardless of network tier).
-# Point at the user's relay's `/asc` proxy, e.g. `https://ai.origenclub.cn/asc`.
+# Point at the user's relay's `/api/asc` proxy, e.g. `https://ai.origenclub.cn/api/asc`.
 BASE = os.environ.get("ASC_BASE_URL", DEFAULT_BASE).rstrip("/")
 
 # AIChat ASC app id. Public-ish (visible in App Store URLs); no reason to
