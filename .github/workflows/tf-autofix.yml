@@ -5,6 +5,11 @@ name: tf-autofix
 #   1. Owner labels an issue `auto-fix-approved`         → Start
 #   2. Xcode Cloud finishes a check on `autofix/issue-*` → Iterate / Merge / Fail
 #
+# Path #2 is delivered as a `check_run.completed` webhook, but
+# anthropics/claude-code-action@v1 rejects check_run as an unsupported
+# event type. tf-autofix-bridge.yml catches check_run and re-dispatches
+# this workflow via workflow_dispatch with the relevant context as inputs.
+#
 # State across runs is read from GitHub itself (branch + PR check status),
 # so this workflow is stateless. The full decision table lives in
 # .claude/routines/tf-autofix.md (Determine mode).
@@ -12,16 +17,23 @@ name: tf-autofix
 on:
   issues:
     types: [labeled]
-  check_run:
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number (autofix/issue-<N>)"
+        required: true
+      check_conclusion:
+        description: "Xcode Cloud check_run conclusion (success/failure/action_required/...)"
+        required: false
+      check_details_url:
+        description: "Xcode Cloud build details URL (for log fetching)"
+        required: false
+      check_name:
+        description: "Xcode Cloud check name"
+        required: false
 
 jobs:
   resolve:
-    # First, decide whether this event applies + extract the issue number
-    # from whichever event payload fired. The downstream concurrency group
-    # then keys on issue number (not branch / event type), so an
-    # issues.labeled and a check_run.completed for the same issue queue
-    # against each other rather than racing.
     runs-on: ubuntu-latest
     outputs:
       proceed: ${{ steps.ctx.outputs.proceed }}
@@ -36,19 +48,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
           LABEL_NAME: ${{ github.event.label.name }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_NUMBER_FROM_EVENT: ${{ github.event.issue.number }}
           SENDER_LOGIN: ${{ github.event.sender.login }}
           REPO_OWNER: ${{ github.repository_owner }}
-          # check_suite.head_branch is unreliable when a SHA is reachable
-          # from multiple refs — observed on 2026-04-26 reporting an old
-          # diagnostic branch name for an autofix/issue-* SHA. Prefer the
-          # PR's head.ref via the check_run.pull_requests array; fall back
-          # to head_branch only when no PR is associated.
-          BRANCH: ${{ github.event.check_run.pull_requests[0].head.ref || github.event.check_run.check_suite.head_branch }}
-          CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
-          CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
-          CHECK_NAME: ${{ github.event.check_run.name }}
+          DISPATCH_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          DISPATCH_CHECK_CONCLUSION: ${{ inputs.check_conclusion }}
+          DISPATCH_CHECK_DETAILS_URL: ${{ inputs.check_details_url }}
+          DISPATCH_CHECK_NAME: ${{ inputs.check_name }}
         run: |
           set -euo pipefail
           proceed=false
@@ -64,27 +70,18 @@ jobs:
               echo "Label added by '$SENDER_LOGIN' (not owner '$REPO_OWNER'); skipping."
             else
               proceed=true
-              issue_number="$ISSUE_NUMBER"
+              issue_number="$ISSUE_NUMBER_FROM_EVENT"
             fi
-          elif [ "$EVENT_NAME" = "check_run" ] \
-               && [[ "$BRANCH" =~ ^autofix/issue-([0-9]+)$ ]]; then
-            # Apple's Xcode Cloud reports test failures as `action_required`
-            # (it wants a human to look) rather than `failure`. We treat it
-            # as terminal here so the autofix routine can iterate.
-            case "$CHECK_CONCLUSION" in
-              success|failure|cancelled|timed_out|action_required)
-                proceed=true
-                issue_number="${BASH_REMATCH[1]}"
-                {
-                  echo "check_conclusion=$CHECK_CONCLUSION"
-                  echo "check_details_url=$CHECK_DETAILS_URL"
-                  echo "check_name=$CHECK_NAME"
-                } >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "check_run conclusion '$CHECK_CONCLUSION' not terminal; skipping."
-                ;;
-            esac
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # tf-autofix-bridge.yml has already validated the autofix
+            # branch + terminal conclusion. Trust the inputs.
+            proceed=true
+            issue_number="$DISPATCH_ISSUE_NUMBER"
+            {
+              echo "check_conclusion=$DISPATCH_CHECK_CONCLUSION"
+              echo "check_details_url=$DISPATCH_CHECK_DETAILS_URL"
+              echo "check_name=$DISPATCH_CHECK_NAME"
+            } >> "$GITHUB_OUTPUT"
           fi
 
           {
@@ -97,7 +94,8 @@ jobs:
     if: needs.resolve.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     # One in-flight run per issue regardless of event source. Issues.labeled
-    # and check_run.completed for the same issue queue rather than race.
+    # and bridge-dispatched check_run events for the same issue queue
+    # rather than race.
     concurrency:
       group: tf-autofix-issue-${{ needs.resolve.outputs.issue_number }}
       cancel-in-progress: false
