@@ -8,7 +8,8 @@
  * SSE deltas captured during proxying.
  */
 
-import { createHash } from "node:crypto";
+import { conversationKeyForEntry } from "./conversation-id";
+import { conversationPins } from "./conversation-pins";
 import { requestLog, type ActivityEntry } from "./request-log";
 
 export interface ConversationTurn {
@@ -50,6 +51,8 @@ export interface Conversation {
   hasErrors: boolean;
   hasImages: boolean;
   hasAudio: boolean;
+  pinned: boolean;
+  pinNote?: string;
 }
 
 function firstLine(text: string | undefined, max = 60): string {
@@ -64,14 +67,7 @@ function messagePreview(messages: Record<string, unknown>[]): string {
   return typeof first?.text === "string" ? first.text : "";
 }
 
-function conversationKey(entry: ActivityEntry): string {
-  if (entry.conversationID) return entry.conversationID;
-  const body = (entry.requestBody as Record<string, unknown> | undefined) ?? {};
-  const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
-  const fingerprint = messages.slice(0, 3).map((m) => String(m.text ?? "")).join("");
-  const h = createHash("sha1").update(`${entry.deviceID ?? ""}|${fingerprint}`).digest("hex");
-  return `auto-${h.slice(0, 16)}`;
-}
+const conversationKey = conversationKeyForEntry;
 
 export async function listConversations(opts: {
   limit?: number;
@@ -81,8 +77,10 @@ export async function listConversations(opts: {
   hasErrors?: boolean;
   hasImages?: boolean;
   hasAudio?: boolean;
+  pinnedOnly?: boolean;
   query?: string;
 } = {}): Promise<Conversation[]> {
+  const pinned = new Set(await conversationPins().list());
   const entries = (await requestLog().listActivity())
     .filter((e) => e.path === "/api/v1/chat/stream" || e.path === "/api/v1/audio/transcribe")
     .reverse();
@@ -150,8 +148,16 @@ export async function listConversations(opts: {
       hasErrors: (existing?.hasErrors ?? false) || entry.level === "error",
       hasImages: (existing?.hasImages ?? false) || hasImages,
       hasAudio: (existing?.hasAudio ?? false) || hasAudio,
+      pinned: pinned.has(key),
+      pinNote: existing?.pinNote,
     };
     byKey.set(key, next);
+  }
+  // Hydrate pin notes once per conversation.
+  for (const conversation of byKey.values()) {
+    if (conversation.pinned) {
+      conversation.pinNote = (await conversationPins().noteFor(conversation.id)) ?? undefined;
+    }
   }
 
   let list = Array.from(byKey.values()).sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1));
@@ -162,6 +168,7 @@ export async function listConversations(opts: {
   if (opts.hasErrors) list = list.filter((c) => c.hasErrors);
   if (opts.hasImages) list = list.filter((c) => c.hasImages);
   if (opts.hasAudio) list = list.filter((c) => c.hasAudio);
+  if (opts.pinnedOnly) list = list.filter((c) => c.pinned);
   if (opts.query) {
     const q = opts.query.toLowerCase();
     list = list.filter((c) =>

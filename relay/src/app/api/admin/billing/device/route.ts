@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth/admin-guard";
+import { requireBillingWrite } from "@/lib/auth/admin-guard";
 import { billingStore } from "@/lib/store/billing-store";
 import { auditLog } from "@/lib/store/audit-log";
 import { errorResponse, jsonResponse } from "@/lib/api/error";
@@ -7,7 +7,7 @@ import type { Device } from "@/lib/billing/types";
 export const runtime = "nodejs";
 
 export async function PATCH(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireBillingWrite();
   if (!guard.ok) return guard.response;
   const body = (await req.json().catch(() => null)) as ({ deviceID?: string } & Partial<Device>) | null;
   if (!body?.deviceID) return errorResponse(400, "deviceID required.");
@@ -23,7 +23,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireBillingWrite();
   if (!guard.ok) return guard.response;
   const url = new URL(req.url);
   const deviceID = url.searchParams.get("id");

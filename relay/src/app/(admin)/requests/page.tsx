@@ -22,6 +22,7 @@ export default function RequestsPage() {
     error: true,
   });
   const [hasErrorsOnly, setHasErrorsOnly] = React.useState(false);
+  const [pinnedOnly, setPinnedOnly] = React.useState(false);
   const [entries, setEntries] = React.useState<ActivityEntry[]>([]);
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
   const [selected, setSelected] = React.useState<ActivityEntry | null>(null);
@@ -36,10 +37,11 @@ export default function RequestsPage() {
     if (view === "conversations") {
       const params = new URLSearchParams();
       if (hasErrorsOnly) params.set("hasErrors", "1");
+      if (pinnedOnly) params.set("pinned", "1");
       if (query) params.set("q", query);
       fetch(`/api/admin/conversations?${params}`).then((r) => r.json()).then((d) => setConversations(d.conversations));
     }
-  }, [view, hasErrorsOnly, query]);
+  }, [view, hasErrorsOnly, pinnedOnly, query]);
 
   React.useEffect(() => {
     if (view !== "live" || paused) return;
@@ -106,7 +108,7 @@ export default function RequestsPage() {
           </div>
         </div>
 
-        {view !== "conversations" && (
+        {view !== "conversations" ? (
           <div className="flex flex-wrap gap-2">
             {(["info", "success", "warning", "error"] as Level[]).map((lvl) => (
               <Chip
@@ -119,6 +121,15 @@ export default function RequestsPage() {
             ))}
             <Chip selected={hasErrorsOnly} onClick={() => setHasErrorsOnly((v) => !v)}>
               仅错误
+            </Chip>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Chip selected={hasErrorsOnly} onClick={() => setHasErrorsOnly((v) => !v)}>
+              仅错误
+            </Chip>
+            <Chip selected={pinnedOnly} icon="push_pin" onClick={() => setPinnedOnly((v) => !v)}>
+              仅置顶
             </Chip>
           </div>
         )}
@@ -217,6 +228,7 @@ function ConversationList({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
+                    {c.pinned && <Icon name="push_pin" size={16} className="shrink-0 text-tertiary" filled />}
                     <h3 className="truncate text-m3-title-s">{c.title}</h3>
                     {c.confidence === "low" && (
                       <span

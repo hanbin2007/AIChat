@@ -5,6 +5,22 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Icon, IconButton } from "@/components/m3";
 
+export type Role = "operator" | "support" | "viewer";
+
+const RoleContext = React.createContext<Role>("operator");
+
+export function useRole(): Role {
+  return React.useContext(RoleContext);
+}
+
+export function canBillingWrite(role: Role): boolean {
+  return role === "operator" || role === "support";
+}
+
+export function canOperate(role: Role): boolean {
+  return role === "operator";
+}
+
 export interface NavItem {
   href: string;
   label: string;
@@ -42,6 +58,13 @@ export function AdminShell({
   const [railExpanded, setRailExpanded] = React.useState(false);
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [isDark, setIsDark] = React.useState(false);
+  const [role, setRole] = React.useState<Role>("operator");
+
+  React.useEffect(() => {
+    fetch("/api/admin/session").then((r) => r.json()).then((d) => {
+      if (d?.session?.role) setRole(d.session.role as Role);
+    });
+  }, []);
 
   React.useEffect(() => {
     setIsDark(document.documentElement.classList.contains("dark"));
@@ -80,6 +103,7 @@ export function AdminShell({
   }
 
   return (
+    <RoleContext.Provider value={role}>
     <div className="flex min-h-screen bg-surface">
       {/* Navigation rail */}
       <aside
@@ -152,6 +176,17 @@ export function AdminShell({
             ))}
             <h1 className="text-m3-title-l font-medium text-on-surface">{title}</h1>
           </div>
+          <span
+            title={`role: ${role}`}
+            className={cn(
+              "hidden rounded-full px-3 py-1 text-m3-label-m md:inline-flex",
+              role === "operator" && "bg-primary-container text-on-primary-container",
+              role === "support" && "bg-tertiary-container text-on-tertiary-container",
+              role === "viewer" && "bg-surface-container-highest text-on-surface-variant",
+            )}
+          >
+            {role}
+          </span>
           <button
             onClick={() => setPaletteOpen(true)}
             className="state-layer hidden h-10 min-w-64 items-center gap-3 rounded-full bg-surface-container px-4 text-m3-body-m text-on-surface-variant md:inline-flex"
@@ -169,6 +204,7 @@ export function AdminShell({
 
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
     </div>
+    </RoleContext.Provider>
   );
 }
 

@@ -1,6 +1,7 @@
 import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle, Button } from "@/components/m3";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/m3";
 import { config, configDiagnostics } from "@/lib/config";
+import { AboutActions } from "./about-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export default function AboutPage() {
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-1 gap-3 md:grid-cols-2 text-m3-body-m">
-              <Info label="版本" value="1.0.0" />
+              <Info label="版本" value="1.1.0" />
               <Info label="Node" value={process.version} />
               <Info label="监听端口" value={String(config.port)} />
               <Info label="数据目录" value={config.dataDir} />
@@ -39,16 +40,8 @@ export default function AboutPage() {
           <CardHeader>
             <CardTitle>诊断与支持</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/requests")}>
-              下载 requests JSON
-            </Button>
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/audit")}>
-              下载 audit JSON
-            </Button>
-            <Button variant="outlined" icon="health_and_safety" onClick={() => window.open("/api/health", "_blank")}>
-              /api/health
-            </Button>
+          <CardContent>
+            <AboutActions />
           </CardContent>
         </Card>
       </div>

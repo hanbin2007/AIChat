@@ -16,6 +16,7 @@ export async function GET(req: Request) {
     hasErrors: url.searchParams.get("hasErrors") === "1" || undefined,
     hasImages: url.searchParams.get("hasImages") === "1" || undefined,
     hasAudio: url.searchParams.get("hasAudio") === "1" || undefined,
+    pinnedOnly: url.searchParams.get("pinned") === "1" || undefined,
     query: url.searchParams.get("q") ?? undefined,
   });
   return jsonResponse(200, { conversations });

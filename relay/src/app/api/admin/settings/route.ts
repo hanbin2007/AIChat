@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth/admin-guard";
+import { requireAdmin, requireOperator } from "@/lib/auth/admin-guard";
 import { settingsStore } from "@/lib/store/settings-store";
 import { auditLog } from "@/lib/store/audit-log";
 import { jsonResponse } from "@/lib/api/error";
@@ -24,7 +24,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireOperator();
   if (!guard.ok) return guard.response;
   const patch = await req.json();
   const before = await settingsStore().get();

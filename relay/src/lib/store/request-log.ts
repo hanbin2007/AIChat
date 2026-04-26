@@ -8,6 +8,8 @@
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { config } from "@/lib/config";
+import { conversationPins } from "./conversation-pins";
+import { conversationKeyForEntry } from "./conversation-id";
 import { readJsonFile, writeJsonFileAtomic, WriteQueue } from "./persistence";
 
 export type LogLevel = "info" | "success" | "warning" | "error";
@@ -91,7 +93,15 @@ class RequestLog extends EventEmitter {
   async recordActivity(entry: ActivityEntry) {
     await this.ensureLoaded();
     this.activity.push(entry);
-    if (this.activity.length > this.activityCap) this.activity.shift();
+    if (this.activity.length > this.activityCap) {
+      const pinned = new Set(await conversationPins().list());
+      const dropAt = this.activity.findIndex(
+        (e) => !pinned.has(conversationKeyForEntry(e)),
+      );
+      // If everything is pinned (corner case), drop the oldest anyway so the
+      // ring keeps an upper bound. Otherwise drop the first non-pinned entry.
+      this.activity.splice(dropAt >= 0 ? dropAt : 0, 1);
+    }
     this.emit("activity", entry);
     this.schedulePersist();
   }
