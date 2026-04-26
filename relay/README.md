@@ -31,12 +31,44 @@ In `Config/Secrets.xcconfig`:
 ```xcconfig
 AI_BACKEND_MODE      = relay
 AI_RELAY_BASE_URL    = http:/$()/127.0.0.1:8787
-AI_RELAY_BEARER_TOKEN = <value of RELAY_BEARER_TOKEN>
 GEMINI_MODEL         = gemini-3-flash-preview
 ```
 
 (The `//` in URLs must be written as `/$()/` because xcconfig treats `//` as
 a comment.)
+
+**Leave `AI_RELAY_BEARER_TOKEN` unset in production.** The watch obtains a
+per-device `rk_…` key via `/v1/activation/bootstrap` (trial), `/v1/offline/exchange`
+(activation code), or the StoreKit purchase flow, and sends that key on every
+metered request. Admin/master tokens (`RELAY_BEARER_TOKEN` from the server env)
+are now rejected on metered endpoints (`/v1/chat/stream`, `/v1/audio/transcribe`,
+`/v1/memory/extract`) — they bypass billing and must never be baked into a
+shipped binary. For DEBUG-only local development against a relay you control,
+you may temporarily set `AI_RELAY_BEARER_TOKEN`; the watch only honours it in
+DEBUG builds.
+
+## Required environment
+
+Set these in `relay/.env` (production):
+
+| Variable | Purpose |
+|---|---|
+| `RELAY_BEARER_TOKEN` | Master admin token. Authorises `/api/admin/**` and is rejected by metered endpoints. Rotate on every release. |
+| `RELAY_SESSION_SECRET` | Cookie signing key. **Must be ≥ 32 bytes of entropy.** |
+| `RELAY_BILLING_MODE` | `apple` for production (StoreKit JWS). Other values are dev-only. |
+| `RELAY_ADMIN_USER` / `RELAY_ADMIN_PASSWORD` | Initial-setup credentials only. Once a password is set through the UI on `/setup`, the env values are ignored. |
+| `OFFLINE_ACTIVATION_SIGNING_SEED` | Must match the value used by the watch/iOS keygen builds so signatures verify. |
+| `GEMINI_API_KEY` | Upstream Gemini key. Held only on the relay; never shipped to clients. |
+
+## Deployment ordering for v1.X.X
+
+1. Cut a new watch build with `AI_RELAY_BEARER_TOKEN` removed from xcconfig
+   (and `GEMINI_API_KEY` cleared — direct mode is deprecated).
+2. Distribute via TestFlight; wait for testers to update.
+3. Rotate `RELAY_BEARER_TOKEN` on the relay environment.
+4. Deploy the new relay (admin tokens are now rejected on metering endpoints).
+5. Old TestFlight builds will fail to chat — this is expected. Testers must
+   update before chat works again.
 
 ## Endpoints
 

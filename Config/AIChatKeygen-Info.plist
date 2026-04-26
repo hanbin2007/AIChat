@@ -20,6 +20,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>OFFLINE_ACTIVATION_SIGNING_SEED</key>
+	<string>$(OFFLINE_ACTIVATION_SIGNING_SEED)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
