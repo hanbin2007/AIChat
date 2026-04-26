@@ -19,6 +19,9 @@ process.env.RELAY_ADMIN_PASSWORD = "testpassword";
 process.env.RELAY_BILLING_MODE = "stub";
 process.env.RELAY_DEBUG_LOGGING = "0";
 process.env.PORT = "8787";
+// Tests run many bootstraps from the same (synthetic) IP; the per-IP 1/24h
+// rate limit is for production traffic only.
+process.env.RELAY_BOOTSTRAP_RATELIMIT_DISABLED = "1";
 
 // A tiny in-memory substitute for next/headers' cookies() so admin auth
 // routes can be exercised from Vitest without the Next.js runtime context.

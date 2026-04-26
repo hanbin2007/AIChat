@@ -9,6 +9,7 @@ type GlobalStores = {
   __auditLog?: unknown;
   __metrics?: unknown;
   __rateLimiter?: unknown;
+  __bootstrapAttempts?: Map<string, unknown>;
   __cookieJar?: Map<string, string>;
 };
 
@@ -21,6 +22,7 @@ export async function resetState(): Promise<void> {
   delete g.__auditLog;
   delete g.__metrics;
   delete g.__rateLimiter;
+  delete g.__bootstrapAttempts;
   g.__cookieJar?.clear();
   try {
     const entries = await fs.readdir(config.dataDir);

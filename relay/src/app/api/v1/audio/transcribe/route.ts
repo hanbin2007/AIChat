@@ -5,32 +5,58 @@ import { buildTranscriptionRequest } from "@/lib/gemini/request";
 import { billingStore } from "@/lib/store/billing-store";
 import { beginObserve, finishObserve } from "@/lib/api/observe";
 import { errorResponse, jsonResponse } from "@/lib/api/error";
+import { transcribeRequestSchema, formatZodIssues } from "@/app/api/v1/_schemas";
+import { redactTranscribeBody } from "@/app/api/v1/_schemas/redact";
+import { adoptRequestId } from "@/app/api/v1/_schemas/request-id";
 
 export const runtime = "nodejs";
 
+const billingBypass = process.env.RELAY_BILLING_BYPASS === "1";
+
 export async function POST(req: Request) {
   const ctx = beginObserve(req, "/api/v1/audio/transcribe");
+  adoptRequestId(req, ctx);
   const auth = await authenticate(req);
   if (!auth) {
     await finishObserve(ctx, { statusCode: 401, level: "warning", category: "failure", message: "Unauthorized" });
     return errorResponse(401, "Unauthorized relay request.");
   }
   ctx.auth = auth;
+  if (!billingBypass && (auth.kind !== "client" || !auth.clientKey)) {
+    await finishObserve(ctx, {
+      statusCode: 401,
+      level: "warning",
+      category: "failure",
+      message: "Per-device key required for metered endpoints.",
+    });
+    return errorResponse(401, "Per-device key required for metered endpoints.");
+  }
   if (!config.geminiApiKey) {
     await finishObserve(ctx, { statusCode: 503, level: "error", category: "failure", message: "GEMINI_API_KEY missing" });
     return errorResponse(503, "Gemini API key is not configured on this relay.");
   }
 
-  let body: Record<string, unknown>;
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    rawBody = await req.json();
   } catch {
     await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: "Invalid JSON body" });
     return errorResponse(400, "Invalid JSON body.");
   }
-  ctx.requestBody = body;
+  const parsed = transcribeRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    await finishObserve(ctx, {
+      statusCode: 400,
+      level: "error",
+      category: "failure",
+      message: `Invalid request body: ${formatZodIssues(parsed.error)}`,
+    });
+    return errorResponse(400, `Invalid request body: ${formatZodIssues(parsed.error)}`);
+  }
+  const body = parsed.data;
+  ctx.requestBody = redactTranscribeBody(body);
 
-  const model = typeof body.model === "string" ? body.model : "gemini-3-flash-preview";
+  const model = body.model ?? "gemini-3-flash-preview";
   ctx.modelID = model;
 
   let reservationID: string | undefined;
@@ -58,7 +84,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const payload = await generateContent(model, buildTranscriptionRequest(body, model));
+    const payload = await generateContent(model, buildTranscriptionRequest(body as Record<string, unknown>, model));
     const finishReason = extractFinishReason(payload);
     if (!finishReason) throw new Error("Relay transcription ended before Gemini returned a terminal result.");
     if (finishReason === "MAX_TOKENS") throw new Error("Transcript hit the output limit before completion.");

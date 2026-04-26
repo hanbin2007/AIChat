@@ -9,6 +9,30 @@
  */
 
 import { config } from "@/lib/config";
+import { uuid } from "@/lib/ids";
+import { settingsStore } from "@/lib/store/settings-store";
+import { requestLog } from "@/lib/store/request-log";
+
+function debugEnabled(): boolean {
+  const cached = settingsStore().cachedSnapshot();
+  if (cached) return cached.observability.debugLoggingEnabled;
+  return config.debugLogging;
+}
+
+function recordUpstreamDebug(kind: "request" | "response" | "event", title: string, body?: string, statusCode?: number): void {
+  if (!debugEnabled()) return;
+  requestLog()
+    .recordDebug({
+      id: uuid(),
+      timestamp: new Date().toISOString(),
+      source: "upstream",
+      kind,
+      title,
+      statusCode,
+      body,
+    })
+    .catch(() => undefined);
+}
 
 interface GeminiPart {
   text?: string;
@@ -64,14 +88,25 @@ export interface StreamResult {
   thoughtText: string;
   modelContentParts: GeminiPart[];
   usage?: { promptTokens: number; candidatesTokens: number; totalTokens: number };
+  /** True when `usage` was estimated locally because Gemini did not emit
+   * `usageMetadata` on any chunk. Routes can pass this through to settle so
+   * operators can see the discrepancy. */
+  usageEstimated?: boolean;
 }
 
 export async function proxyGeminiStream(params: {
   model: string;
   requestBody: unknown;
   onEvent: (event: string, data: Record<string, unknown>) => void;
+  /** Aborts the upstream fetch when the originating client disconnects. */
+  signal?: AbortSignal;
+  /** Client-supplied input token estimate, used only as a fallback when
+   * Gemini omits `usageMetadata`. */
+  estimatedInputTokens?: number;
 }): Promise<StreamResult> {
   const url = `${config.geminiBaseUrl}/v1beta/models/${params.model}:streamGenerateContent?alt=sse`;
+  const requestBodyJson = JSON.stringify(params.requestBody);
+  recordUpstreamDebug("request", `POST ${url}`, requestBodyJson);
   const upstream = await fetch(url, {
     method: "POST",
     headers: {
@@ -79,11 +114,13 @@ export async function proxyGeminiStream(params: {
       Accept: "text/event-stream",
       "x-goog-api-key": config.geminiApiKey,
     },
-    body: JSON.stringify(params.requestBody),
+    body: requestBodyJson,
+    signal: params.signal,
   });
 
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
+    recordUpstreamDebug("response", `Gemini stream non-2xx`, text, upstream.status);
     const err = new Error(text || "Gemini stream failed.") as Error & { statusCode?: number };
     err.statusCode = upstream.status;
     throw err;
@@ -98,11 +135,16 @@ export async function proxyGeminiStream(params: {
   let finishReason = "";
   const accumulatedParts: GeminiPart[] = [];
   let lastUsage: ChunkSummary["usageMetadata"];
+  let chunksSeen = 0;
+  // Multi-line SSE continuation buffer. Per the SSE spec, consecutive `data:`
+  // lines within a single event (terminated by a blank line) concatenate with
+  // a literal newline between them.
+  let pendingDataLines: string[] = [];
 
-  const ingest = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed.startsWith("data:")) return;
-    const payload = trimmed.slice(5).trim();
+  const flushEvent = () => {
+    if (pendingDataLines.length === 0) return;
+    const payload = pendingDataLines.join("\n").trim();
+    pendingDataLines = [];
     if (!payload || payload === "[DONE]") return;
     let parsed: unknown;
     try {
@@ -110,6 +152,7 @@ export async function proxyGeminiStream(params: {
     } catch {
       return;
     }
+    chunksSeen += 1;
     const summary = summariseChunk(parsed);
     if (summary.finishReason) finishReason = summary.finishReason;
     if (summary.usageMetadata) lastUsage = summary.usageMetadata;
@@ -139,16 +182,35 @@ export async function proxyGeminiStream(params: {
     }
   };
 
+  const ingestLine = (raw: string) => {
+    // Per SSE spec: blank line terminates the current event.
+    if (raw === "" || raw === "\r") {
+      flushEvent();
+      return;
+    }
+    // Comment lines start with ":" — discard.
+    if (raw.startsWith(":")) return;
+    if (raw.startsWith("data:")) {
+      // Drop a single optional leading space after the colon.
+      const value = raw.slice(5).startsWith(" ") ? raw.slice(6) : raw.slice(5);
+      pendingDataLines.push(value);
+      return;
+    }
+    // Other field types (event:, id:, retry:) are unused upstream; ignore.
+  };
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
     buffered += decoder.decode(value, { stream: true });
     const lines = buffered.split("\n");
     buffered = lines.pop() ?? "";
-    for (const line of lines) ingest(line);
+    for (const line of lines) ingestLine(line.replace(/\r$/, ""));
   }
   buffered += decoder.decode();
-  if (buffered.trim()) ingest(buffered);
+  if (buffered) ingestLine(buffered.replace(/\r$/, ""));
+  // Final flush in case the stream ended without a trailing blank line.
+  flushEvent();
 
   if (!finishReason) {
     params.onEvent("error", {
@@ -160,17 +222,45 @@ export async function proxyGeminiStream(params: {
 
   params.onEvent("done", { type: "done", finishReason });
 
+  // Build a usage object. If Gemini never sent `usageMetadata` (some preview
+  // models, or a stream that hits finishReason on a chunk without usage), we
+  // estimate from character counts so settle won't fall back to charging the
+  // floor of 1 credit on a real chat.
+  let usage: StreamResult["usage"];
+  let usageEstimated = false;
+  if (lastUsage) {
+    usage = {
+      promptTokens: lastUsage.promptTokenCount ?? 0,
+      candidatesTokens: lastUsage.candidatesTokenCount ?? 0,
+      totalTokens: lastUsage.totalTokenCount ?? 0,
+    };
+  } else {
+    const estOutput = Math.max(0, Math.ceil((emittedAnswer.length + emittedThought.length) / 4));
+    const estInput =
+      typeof params.estimatedInputTokens === "number" && params.estimatedInputTokens > 0
+        ? params.estimatedInputTokens
+        : 0;
+    // Structured warning so operators can spot models that drop usage.
+    console.warn(
+      JSON.stringify({
+        msg: "gemini.stream.usage_missing",
+        model: params.model,
+        chunksSeen,
+        finishReason,
+        estInput,
+        estOutput,
+      }),
+    );
+    usage = { promptTokens: estInput, candidatesTokens: estOutput, totalTokens: estInput + estOutput };
+    usageEstimated = true;
+  }
+
   return {
     finishReason,
     answerText: emittedAnswer,
     thoughtText: emittedThought,
     modelContentParts: accumulatedParts,
-    usage: lastUsage
-      ? {
-          promptTokens: lastUsage.promptTokenCount ?? 0,
-          candidatesTokens: lastUsage.candidatesTokenCount ?? 0,
-          totalTokens: lastUsage.totalTokenCount ?? 0,
-        }
-      : undefined,
+    usage,
+    usageEstimated,
   };
 }

@@ -43,4 +43,23 @@ describe("decodeJwsPayload", () => {
     const jws = forgeJws({ transactionId: "x", productId: "p", purchaseDate: "not-a-number" });
     expect(decodeJwsPayload(jws).purchaseDate).toBeUndefined();
   });
+
+  it("rejects numeric transactionId / productId (must be strings)", () => {
+    const jws = forgeJws({ transactionId: 0, productId: 0 });
+    const decoded = decodeJwsPayload(jws);
+    expect(decoded.transactionID).toBeUndefined();
+    expect(decoded.productID).toBeUndefined();
+  });
+
+  it("rejects the literal string '0' for transactionId / productId", () => {
+    const jws = forgeJws({ transactionId: "0", productId: "0" });
+    const decoded = decodeJwsPayload(jws);
+    expect(decoded.transactionID).toBeUndefined();
+    expect(decoded.productID).toBeUndefined();
+  });
+
+  it("rejects empty / whitespace-only transactionId", () => {
+    const jws = forgeJws({ transactionId: "   ", productId: "p" });
+    expect(decodeJwsPayload(jws).transactionID).toBeUndefined();
+  });
 });

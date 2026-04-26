@@ -23,7 +23,8 @@ export function newActivationCode(): string {
 }
 
 export function newPairingToken(): string {
-  return randomBytes(5).toString("hex").toUpperCase().match(/.{1,5}/g)!.join("-");
+  // 16 bytes → 32 hex chars → grouped 5/5/5/5/5/5/2 with dashes for readability.
+  return randomBytes(16).toString("hex").toUpperCase().match(/.{1,5}/g)!.join("-");
 }
 
 export function newRequestId(): string {

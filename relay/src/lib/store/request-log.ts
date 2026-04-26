@@ -23,6 +23,7 @@ export type LogCategory =
 
 export interface ActivityEntry {
   id: string;
+  edgeRequestID?: string;
   timestamp: string;
   level: LogLevel;
   category: LogCategory;
@@ -49,6 +50,11 @@ export interface ActivityEntry {
   requestBody?: unknown;
   responseSummary?: string;
   events?: { type: string; data: unknown; at: string }[];
+  appVersion?: string;
+  appBuild?: string;
+  osVersion?: string;
+  deviceModel?: string;
+  locale?: string;
 }
 
 export interface DebugEntry {

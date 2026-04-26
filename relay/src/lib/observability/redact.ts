@@ -34,3 +34,20 @@ export function redactSensitive(text: string, extraPatterns: RegExp[] = []): str
   }
   return out;
 }
+
+/** Compile a list of redaction-rule strings into RegExps, skipping invalid entries. */
+export function compileRedactionPatterns(
+  rules: { name: string; pattern: string; enabled: boolean }[] | undefined,
+): RegExp[] {
+  if (!rules) return [];
+  const out: RegExp[] = [];
+  for (const r of rules) {
+    if (!r.enabled) continue;
+    try {
+      out.push(new RegExp(r.pattern, "g"));
+    } catch {
+      // Skip invalid user-provided patterns silently.
+    }
+  }
+  return out;
+}

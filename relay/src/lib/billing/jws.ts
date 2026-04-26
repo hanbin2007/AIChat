@@ -1,9 +1,15 @@
 /**
  * StoreKit JWS decoder. Matches the macOS AIChat Relay's behaviour:
- * decode the base64url payload to read transactionID / productID / etc., but
- * DO NOT cryptographically verify the signature in the default stub mode.
- * Strict verification is reserved for v1.2.
+ * decode the base64url payload to read transactionID / productID / etc.
+ *
+ * In production (`NODE_ENV === "production"`) we refuse to load unless
+ * `RELAY_BILLING_MODE === "apple"`. The "stub" mode is only safe for local
+ * development. Switching to "apple" wires in real Apple JWS verification —
+ * the verifier itself is provided externally; this module enforces the env
+ * gate and continues to decode the payload.
  */
+
+import { config } from "@/lib/config";
 
 export interface DecodedTransaction {
   transactionID?: string;
@@ -15,6 +21,16 @@ export interface DecodedTransaction {
   revocationDate?: string;
   appAccountToken?: string;
 }
+
+function assertProductionMode(): void {
+  if (config.nodeEnv !== "production") return;
+  if (config.billingMode !== "apple") {
+    throw new Error(
+      "[jws] RELAY_BILLING_MODE must be 'apple' in production — refusing to accept stub StoreKit transactions.",
+    );
+  }
+}
+assertProductionMode();
 
 function base64urlDecodeJson<T>(part: string): T | null {
   try {
@@ -28,31 +44,50 @@ function base64urlDecodeJson<T>(part: string): T | null {
 }
 
 export function decodeJwsPayload(jws: string): DecodedTransaction {
+  // Re-assert at decode time so a runtime env flip is also caught.
+  assertProductionMode();
   const parts = jws.split(".");
   if (parts.length !== 3) return {};
   const payload = base64urlDecodeJson<Record<string, unknown>>(parts[1]) ?? {};
-  const pick = (...keys: string[]): string | undefined => {
+  // Strict pickString: reject numbers, empty strings, the literal "0".
+  const pickString = (...keys: string[]): string | undefined => {
     for (const k of keys) {
       const v = payload[k];
-      if (typeof v === "string" || typeof v === "number") return String(v);
+      if (typeof v !== "string") continue;
+      const trimmed = v.trim();
+      if (!trimmed || trimmed === "0") continue;
+      return trimmed;
     }
     return undefined;
   };
-  const pickDate = (...keys: string[]): string | undefined => {
-    const value = pick(...keys);
-    if (!value) return undefined;
-    const ms = Number(value);
-    if (!Number.isFinite(ms)) return undefined;
-    return new Date(ms).toISOString();
+  const pickFreeString = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = payload[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+    return undefined;
+  };
+  const pickEpoch = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = payload[k];
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+        return new Date(v).toISOString();
+      }
+      if (typeof v === "string") {
+        const ms = Number(v);
+        if (Number.isFinite(ms) && ms > 0) return new Date(ms).toISOString();
+      }
+    }
+    return undefined;
   };
   return {
-    transactionID: pick("transactionId"),
-    originalTransactionID: pick("originalTransactionId"),
-    productID: pick("productId"),
-    environment: pick("environment"),
-    purchaseDate: pickDate("purchaseDate"),
-    expirationDate: pickDate("expiresDate", "expirationDate"),
-    revocationDate: pickDate("revocationDate"),
-    appAccountToken: pick("appAccountToken"),
+    transactionID: pickString("transactionId"),
+    originalTransactionID: pickString("originalTransactionId"),
+    productID: pickString("productId"),
+    environment: pickFreeString("environment"),
+    purchaseDate: pickEpoch("purchaseDate"),
+    expirationDate: pickEpoch("expiresDate", "expirationDate"),
+    revocationDate: pickEpoch("revocationDate"),
+    appAccountToken: pickFreeString("appAccountToken"),
   };
 }

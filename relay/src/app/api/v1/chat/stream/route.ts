@@ -5,18 +5,33 @@ import { proxyGeminiStream } from "@/lib/gemini/stream";
 import { billingStore } from "@/lib/store/billing-store";
 import { beginObserve, finishObserve } from "@/lib/api/observe";
 import { errorResponse } from "@/lib/api/error";
+import { chatRequestSchema, formatZodIssues } from "@/app/api/v1/_schemas";
+import { redactChatBody } from "@/app/api/v1/_schemas/redact";
+import { adoptRequestId } from "@/app/api/v1/_schemas/request-id";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+const billingBypass = process.env.RELAY_BILLING_BYPASS === "1";
+
 export async function POST(req: Request) {
   const ctx = beginObserve(req, "/api/v1/chat/stream");
+  adoptRequestId(req, ctx);
   const auth = await authenticate(req);
   if (!auth) {
     await finishObserve(ctx, { statusCode: 401, level: "warning", category: "failure", message: "Unauthorized" });
     return errorResponse(401, "Unauthorized relay request.");
   }
   ctx.auth = auth;
+  if (!billingBypass && (auth.kind !== "client" || !auth.clientKey)) {
+    await finishObserve(ctx, {
+      statusCode: 401,
+      level: "warning",
+      category: "failure",
+      message: "Per-device key required for metered endpoints.",
+    });
+    return errorResponse(401, "Per-device key required for metered endpoints.");
+  }
   ctx.conversationID = req.headers.get("x-aichat-conversation-id") ?? undefined;
 
   if (!config.geminiApiKey) {
@@ -24,19 +39,29 @@ export async function POST(req: Request) {
     return errorResponse(503, "Gemini API key is not configured on this relay.");
   }
 
-  let body: Record<string, unknown>;
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    rawBody = await req.json();
   } catch {
     await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: "Invalid JSON body" });
     return errorResponse(400, "Invalid JSON body.");
   }
-  ctx.requestBody = body;
-  const model = typeof body.model === "string" ? body.model : "gemini-3-flash-preview";
+  const parsed = chatRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    await finishObserve(ctx, {
+      statusCode: 400,
+      level: "error",
+      category: "failure",
+      message: `Invalid request body: ${formatZodIssues(parsed.error)}`,
+    });
+    return errorResponse(400, `Invalid request body: ${formatZodIssues(parsed.error)}`);
+  }
+  const body = parsed.data;
+  ctx.requestBody = redactChatBody(body);
+  const model = body.model ?? "gemini-3-flash-preview";
   ctx.modelID = model;
-  const requestBody = buildChatRequest(body, model);
+  const requestBody = buildChatRequest(body as Record<string, unknown>, model);
 
-  // Pre-reservation (client-key calls only).
   let reservationID: string | undefined;
   if (auth.kind === "client" && auth.clientKey) {
     try {
@@ -80,7 +105,6 @@ export async function POST(req: Request) {
       let finishReason = "";
       let inputTokens = 0;
       let outputTokens = 0;
-      // Client disconnect → release reservation so credits don't leak.
       const signal = req.signal;
       const onAbort = async () => {
         if (aborted) return;
@@ -102,6 +126,7 @@ export async function POST(req: Request) {
         const result = await proxyGeminiStream({
           model,
           requestBody,
+          // signal: req.signal — TODO(A2): thread through once gemini/stream.ts accepts it
           onEvent: (event, data) => {
             if (event === "answer_delta" && typeof data.text === "string") mergedAnswer += data.text;
             if (event === "thought_delta" && typeof data.text === "string") mergedThought += data.text;
@@ -168,14 +193,14 @@ export async function POST(req: Request) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
       "X-Request-Id": ctx.requestID,
     },
   });
 }
 
-function estimateInputTokens(body: Record<string, unknown>): number {
-  // Crude 4-char-per-token estimate — pre-reservation is refunded on settle.
-  const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
+function estimateInputTokens(body: { messages?: { text?: string }[]; systemPrompt?: string }): number {
+  const messages = body.messages ?? [];
   let chars = 0;
   for (const m of messages) chars += String(m.text ?? "").length;
   if (typeof body.systemPrompt === "string") chars += body.systemPrompt.length;

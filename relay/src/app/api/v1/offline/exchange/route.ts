@@ -1,38 +1,37 @@
 import { billingStore } from "@/lib/store/billing-store";
-import { pick } from "@/lib/gemini/dual-key";
 import { beginObserve, finishObserve } from "@/lib/api/observe";
 import { errorResponse, jsonResponse } from "@/lib/api/error";
-import type { DevicePlatform } from "@/lib/billing/types";
+import { offlineExchangeRequestSchema, formatZodIssues } from "@/app/api/v1/_schemas";
+import { redactBillingBody } from "@/app/api/v1/_schemas/redact";
+import { adoptRequestId } from "@/app/api/v1/_schemas/request-id";
 
 export const runtime = "nodejs";
 
-const VALID_PLATFORMS: DevicePlatform[] = ["iPhone", "watch", "mac", "unknown"];
-
 export async function POST(req: Request) {
   const ctx = beginObserve(req, "/api/v1/offline/exchange");
-  let body: Record<string, unknown>;
+  adoptRequestId(req, ctx);
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    rawBody = await req.json();
   } catch {
+    await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: "Invalid JSON body" });
     return errorResponse(400, "Invalid JSON body.");
   }
-  const activationCode = pick<string>(body, "activationCode", "activation_code");
-  const deviceID = pick<string>(body, "deviceID", "device_id");
-  const rawPlatform = pick<string>(body, "platform") ?? "unknown";
-  const fingerprint = pick<string>(body, "activationFingerprint", "activation_fingerprint");
-  if (!activationCode || !deviceID) {
-    await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: "Missing activation or device" });
-    return errorResponse(400, "Missing activationCode or deviceID.");
+  ctx.requestBody = redactBillingBody(rawBody);
+  const parsed = offlineExchangeRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    const message = formatZodIssues(parsed.error);
+    await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message });
+    return errorResponse(400, message);
   }
-  const platform: DevicePlatform = VALID_PLATFORMS.includes(rawPlatform as DevicePlatform)
-    ? (rawPlatform as DevicePlatform)
-    : "unknown";
+  const body = parsed.data;
+
   try {
     const result = await billingStore().exchangeOffline({
-      activationCode,
-      deviceID,
-      platform,
-      fingerprint,
+      activationCode: body.activationCode,
+      deviceID: body.deviceID,
+      platform: body.platform,
+      fingerprint: body.activationFingerprint,
     });
     const status = await billingStore().getAccountStatus(result.key);
     await finishObserve(ctx, { statusCode: 200, level: "success", category: "billing", message: "offline activation" });

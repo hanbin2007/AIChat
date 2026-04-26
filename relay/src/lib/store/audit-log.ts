@@ -9,6 +9,16 @@ import { config } from "@/lib/config";
 import { uuid } from "@/lib/ids";
 import { readJsonFile, writeJsonFileAtomic, WriteQueue } from "./persistence";
 
+function requireSessionSecret(): string {
+  const s = config.sessionSecret;
+  if (!s || Buffer.byteLength(s, "utf8") < 32) {
+    throw new Error(
+      "[audit-log] RELAY_SESSION_SECRET must be set and >= 32 bytes — refusing to fall back to a hard-coded constant.",
+    );
+  }
+  return s;
+}
+
 export interface AuditEntry {
   id: string;
   timestamp: string;
@@ -48,7 +58,7 @@ class AuditLog {
         prevHash,
         hash: "",
       };
-      const mac = createHmac("sha256", config.sessionSecret || "relay-audit");
+      const mac = createHmac("sha256", requireSessionSecret());
       mac.update(JSON.stringify({ ...entry, hash: undefined }));
       entry.hash = mac.digest("base64url");
       this.entries.push(entry);

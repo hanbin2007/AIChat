@@ -28,6 +28,17 @@ describe("id generators", () => {
     expect(newPairingToken()).toMatch(/^[0-9A-F]+(-[0-9A-F]+)+$/);
   });
 
+  it("newPairingToken carries >=128 bits of entropy", () => {
+    const t = newPairingToken();
+    const hex = t.replace(/-/g, "");
+    // 16 random bytes → 32 hex chars.
+    expect(hex.length).toBeGreaterThanOrEqual(32);
+    // Sanity: 1k draws are unique.
+    const seen = new Set<string>();
+    for (let i = 0; i < 1000; i++) seen.add(newPairingToken());
+    expect(seen.size).toBe(1000);
+  });
+
   it("newRequestId has the req_ prefix", () => {
     expect(newRequestId()).toMatch(/^req_[0-9a-f]{16}$/);
   });

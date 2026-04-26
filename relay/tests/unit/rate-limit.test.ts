@@ -39,4 +39,20 @@ describe("rate limiter", () => {
     expect(limiter.check("a", 1).allowed).toBe(false);
     expect(limiter.check("b", 1).allowed).toBe(true);
   });
+
+  it("acquireConcurrent honours the configured cap", () => {
+    const limiter = rateLimiter();
+    expect(limiter.acquireConcurrent("k", 2)).toBe(true);
+    expect(limiter.acquireConcurrent("k", 2)).toBe(true);
+    expect(limiter.acquireConcurrent("k", 2)).toBe(false);
+    limiter.releaseConcurrent("k");
+    expect(limiter.acquireConcurrent("k", 2)).toBe(true);
+  });
+
+  it("acquireConcurrent treats cap <= 0 as unlimited", () => {
+    const limiter = rateLimiter();
+    for (let i = 0; i < 50; i++) {
+      expect(limiter.acquireConcurrent("k", 0)).toBe(true);
+    }
+  });
 });

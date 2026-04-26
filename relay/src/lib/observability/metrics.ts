@@ -8,10 +8,19 @@ interface CounterState {
   labels?: Record<string, string>;
 }
 
+interface RingBuffer {
+  data: number[];
+  head: number;
+  size: number;
+  cap: number;
+}
+
+const HISTOGRAM_CAP = 1024;
+
 class Metrics {
   private counters = new Map<string, CounterState>();
   private gauges = new Map<string, number>();
-  private histograms = new Map<string, number[]>();
+  private histograms = new Map<string, RingBuffer>();
 
   incCounter(name: string, by = 1, labels?: Record<string, string>) {
     const key = this.key(name, labels);
@@ -24,16 +33,20 @@ class Metrics {
   }
 
   observe(name: string, value: number) {
-    const arr = this.histograms.get(name) ?? [];
-    arr.push(value);
-    if (arr.length > 1024) arr.shift();
-    this.histograms.set(name, arr);
+    let ring = this.histograms.get(name);
+    if (!ring) {
+      ring = { data: new Array<number>(HISTOGRAM_CAP), head: 0, size: 0, cap: HISTOGRAM_CAP };
+      this.histograms.set(name, ring);
+    }
+    ring.data[ring.head] = value;
+    ring.head = (ring.head + 1) % ring.cap;
+    if (ring.size < ring.cap) ring.size += 1;
   }
 
   percentile(name: string, p: number): number {
-    const arr = this.histograms.get(name);
-    if (!arr || arr.length === 0) return 0;
-    const sorted = [...arr].sort((a, b) => a - b);
+    const ring = this.histograms.get(name);
+    if (!ring || ring.size === 0) return 0;
+    const sorted = ring.data.slice(0, ring.size).sort((a, b) => a - b);
     const index = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
     return sorted[index];
   }

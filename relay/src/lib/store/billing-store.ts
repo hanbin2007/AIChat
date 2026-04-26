@@ -21,6 +21,7 @@ import {
   newPairingToken,
   uuid,
 } from "@/lib/ids";
+import { metrics } from "@/lib/observability/metrics";
 import { DEFAULT_PLANS, DEFAULT_POLICY } from "@/lib/billing/defaults";
 import { decodeJwsPayload } from "@/lib/billing/jws";
 import { creditsForUsage, maxOutputTokensForModel, rateForModel } from "@/lib/billing/metering";
@@ -46,6 +47,18 @@ import { readJsonFile, writeJsonFileAtomic, WriteQueue } from "./persistence";
 const FILE = () => path.join(config.dataDir, "billing.json");
 const USAGE_CAP = 500;
 const PAIRING_TTL_MS = 10 * 60 * 1000;
+
+/** Typed error for billing-side rejections. Routes map `statusCode` → HTTP. */
+export class BillingError extends Error {
+  statusCode: number;
+  code: string;
+  constructor(statusCode: number, code: string, message?: string) {
+    super(message ?? code);
+    this.name = "BillingError";
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
 
 interface State {
   accounts: Record<string, Account>;
@@ -132,6 +145,39 @@ class BillingStore {
         .sort()[0];
       acc.creditExpiresAt = nextExpiry;
     }
+    // auto-transition accounts whose every grant has expired and have no
+    // future grant queued. Mutates state directly — must NOT call back into
+    // compact().
+    this.expireAccountsIfStaleInternal(now);
+  }
+
+  /**
+   * Walks every account; flips `state` to `expired` when the account is
+   * currently `active` AND every grant has either expired (per `expiresAt`)
+   * or is fully drained, AND there is no future-dated grant left to start.
+   * Public wrapper retained for explicit callers; the same logic also runs
+   * inside `compact()`.
+   */
+  expireAccountsIfStale(): void {
+    this.expireAccountsIfStaleInternal(clockNow());
+  }
+
+  private expireAccountsIfStaleInternal(now: Date): void {
+    const nowMs = now.getTime();
+    for (const acc of Object.values(this.state.accounts)) {
+      if (acc.state !== "active") continue;
+      const grants = acc.grantIDs.map((id) => this.state.grants[id]).filter((g): g is Grant => !!g);
+      if (grants.length === 0) continue;
+      const allExpired = grants.every((g) => {
+        if (g.remainingCredits <= 0) return true;
+        if (!g.expiresAt) return false;
+        return new Date(g.expiresAt).getTime() < nowMs;
+      });
+      const hasFuture = grants.some((g) => g.expiresAt && new Date(g.expiresAt).getTime() >= nowMs && g.remainingCredits > 0);
+      if (allExpired && !hasFuture) {
+        acc.state = "expired";
+      }
+    }
   }
 
   private async persist() {
@@ -142,6 +188,11 @@ class BillingStore {
     return this.queue.run(async () => {
       await this.ensureLoaded();
       const result = mutator();
+      // Mutators may or may not have called compact() themselves; running it
+      // unconditionally here keeps invariants (account.creditBalance,
+      // expired-grant zeroing, account auto-expiry) up to date on every
+      // persisted write.
+      this.compact();
       await this.persist();
       return result;
     });
@@ -276,10 +327,13 @@ class BillingStore {
     return this.write(() => {
       const decoded = decodeJwsPayload(params.signedTransactionInfo);
       if (!decoded.transactionID || !decoded.productID) {
-        throw new Error("Malformed StoreKit transaction payload.");
+        throw new BillingError(400, "malformed_transaction", "Malformed StoreKit transaction payload.");
       }
       const now = iso();
       const plan = this.state.plans.find((p) => p.productID === decoded.productID);
+      if (!plan) {
+        throw new BillingError(400, "unknown_product", `No plan matches productID ${decoded.productID}.`);
+      }
       const accountID =
         params.accountID ??
         (decoded.originalTransactionID &&
@@ -299,7 +353,7 @@ class BillingStore {
           keyIDs: [],
           grantIDs: [],
           createdAt: now,
-          planID: plan?.id,
+          planID: plan.id,
           originalTransactionID: decoded.originalTransactionID,
           appAccountToken: decoded.appAccountToken,
         };
@@ -307,7 +361,7 @@ class BillingStore {
       } else {
         account.source = "subscription";
         account.state = decoded.revocationDate ? "paused" : "active";
-        account.planID = plan?.id ?? account.planID;
+        account.planID = plan.id ?? account.planID;
         account.originalTransactionID = decoded.originalTransactionID ?? account.originalTransactionID;
       }
 
@@ -361,7 +415,7 @@ class BillingStore {
       };
 
       // Grant credits — cap expiry at expirationDate + 1 month to match macOS.
-      const credits = plan?.monthlyCredits ?? 20_000;
+      const credits = plan.monthlyCredits;
       const expiresAt = decoded.expirationDate
         ? new Date(new Date(decoded.expirationDate).getTime() + 30 * 86400 * 1000).toISOString()
         : undefined;
@@ -541,7 +595,14 @@ class BillingStore {
   }): Promise<UsageRecord> {
     return this.write(() => {
       const account = this.state.accounts[params.key.accountID];
-      if (!account) throw new Error("Account not found.");
+      if (!account) throw new BillingError(404, "account_not_found");
+      // Force-zero any expired grants and re-aggregate the balance BEFORE we
+      // check for inactive state — otherwise an expired account with stale
+      // creditBalance > 0 could slip through.
+      this.compactExpiredGrants(account);
+      if (account.state !== "active") {
+        throw new BillingError(402, "account_inactive", `Account state is ${account.state}.`);
+      }
       const rate = rateForModel(this.state.policy, params.modelID);
       const reserved = creditsForUsage(this.state.policy, rate, {
         inputTokens: params.estimatedInputTokens,
@@ -550,7 +611,7 @@ class BillingStore {
         audioInput: params.audioInput,
       });
       if (account.creditBalance < reserved) {
-        throw Object.assign(new Error("Insufficient credits."), { statusCode: 402 });
+        throw new BillingError(402, "insufficient_credits");
       }
       this.debitGrants(account, reserved);
       const record: UsageRecord = {
@@ -573,6 +634,26 @@ class BillingStore {
     });
   }
 
+  /**
+   * Lazy-compact: zero any grants whose expiresAt is in the past, then
+   * recompute the account's `creditBalance`. Same effect as `compact()` but
+   * scoped to a single account so we can run it on the hot reserve path
+   * without scanning every account.
+   */
+  private compactExpiredGrants(account: Account, now: Date = clockNow()): void {
+    const nowMs = now.getTime();
+    let total = 0;
+    for (const id of account.grantIDs) {
+      const g = this.state.grants[id];
+      if (!g) continue;
+      if (g.expiresAt && new Date(g.expiresAt).getTime() < nowMs) {
+        g.remainingCredits = 0;
+      }
+      if (g.remainingCredits > 0) total += g.remainingCredits;
+    }
+    account.creditBalance = total;
+  }
+
   async settleCredits(params: {
     requestID: string;
     inputTokens: number;
@@ -580,12 +661,20 @@ class BillingStore {
     searchCount: number;
     audioInput: boolean;
     modelID?: string;
+    finishReason?: string;
   }): Promise<UsageRecord> {
     return this.write(() => {
       const record = this.state.usage.find((r) => r.requestID === params.requestID);
-      if (!record) throw new Error("Usage record missing.");
+      if (!record) throw new BillingError(404, "usage_record_missing");
       const account = record.accountID ? this.state.accounts[record.accountID] : undefined;
-      if (!account) return clone(record);
+      if (!account) {
+        // Account vanished between reserve and settle — refund into the void
+        // is impossible; drop the orphaned reservation so we don't leak it
+        // forever in the on-disk usage list.
+        this.state.usage = this.state.usage.filter((r) => r.requestID !== record.requestID);
+        this.compact();
+        return clone({ ...record, settledCredits: 0, reservedCredits: 0 });
+      }
       const rate = rateForModel(this.state.policy, params.modelID ?? record.modelID);
       const actual = creditsForUsage(this.state.policy, rate, {
         inputTokens: params.inputTokens,
@@ -605,6 +694,16 @@ class BillingStore {
       record.settledCredits = actual;
       account.lastUsageAt = iso();
       this.compact();
+      // Per-account/model/finishReason settled-credit counter for operability.
+      try {
+        metrics().incCounter("relay_chat_credits_settled", actual, {
+          accountID: account.accountID,
+          modelID: params.modelID ?? record.modelID ?? "unknown",
+          finishReason: params.finishReason ?? "unknown",
+        });
+      } catch {
+        /* metrics is best-effort */
+      }
       return clone(record);
     });
   }
@@ -671,12 +770,14 @@ class BillingStore {
     return this.write(() => {
       const acc = this.state.accounts[accountID];
       if (!acc) throw new Error("Account not found.");
-      Object.assign(acc, {
-        displayName: patch.displayName ?? acc.displayName,
-        adminNote: patch.adminNote ?? acc.adminNote,
-        state: patch.state ?? acc.state,
-        planID: patch.planID ?? acc.planID,
-      });
+      if (typeof patch.displayName === "string" || patch.displayName === undefined) {
+        if (patch.displayName !== undefined) acc.displayName = patch.displayName;
+      }
+      if (typeof patch.adminNote === "string" || patch.adminNote === undefined) {
+        if (patch.adminNote !== undefined) acc.adminNote = patch.adminNote;
+      }
+      if (patch.state) acc.state = patch.state;
+      if (patch.planID !== undefined) acc.planID = patch.planID;
       return clone(acc);
     });
   }
@@ -685,7 +786,8 @@ class BillingStore {
     return this.write(() => {
       const d = this.state.devices[deviceID];
       if (!d) throw new Error("Device not found.");
-      Object.assign(d, { alias: patch.alias ?? d.alias, note: patch.note ?? d.note });
+      if (patch.alias !== undefined) d.alias = patch.alias;
+      if (patch.note !== undefined) d.note = patch.note;
       return clone(d);
     });
   }
@@ -694,7 +796,8 @@ class BillingStore {
     return this.write(() => {
       const k = this.state.keys[keyID];
       if (!k) throw new Error("Key not found.");
-      Object.assign(k, { state: patch.state ?? k.state, note: patch.note ?? k.note });
+      if (patch.state) k.state = patch.state;
+      if (patch.note !== undefined) k.note = patch.note;
       return clone(k);
     });
   }

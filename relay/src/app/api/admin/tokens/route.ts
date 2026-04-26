@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     expiresAt?: string;
   } | null;
   if (!body?.label || !body?.scope) return errorResponse(400, "label + scope required.");
-  const token = await settingsStore().issueToken({
+  const issued = await settingsStore().issueToken({
     label: body.label,
     scope: body.scope,
     rpmLimit: body.rpmLimit,
@@ -25,9 +25,16 @@ export async function POST(req: Request) {
     actor: guard.session.sub,
     role: guard.session.role,
     action: "tokens.issue",
-    target: token.id,
+    target: issued.token.id,
   });
-  return jsonResponse(200, token);
+  return jsonResponse(200, {
+    id: issued.token.id,
+    label: issued.token.label,
+    prefix: issued.token.valuePrefix,
+    scope: issued.token.scope,
+    value: issued.plaintext,
+    createdAt: issued.token.createdAt,
+  });
 }
 
 export async function DELETE(req: Request) {
