@@ -51,9 +51,17 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: "true"
           prompt: ${{ steps.prompt.outputs.content }}
           claude_args: |
             --model claude-opus-4-7[1m]
-            --effort xhigh
             --max-turns 80
             --allowedTools Bash,Read,Grep,Glob,Task
+
+      - name: Upload Claude session log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-output
+          path: /home/runner/work/_temp/claude-execution-output.json
+          if-no-files-found: warn
