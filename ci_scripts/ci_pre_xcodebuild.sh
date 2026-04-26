@@ -9,6 +9,16 @@ set -eu
 # Only meaningful for archive workflows. PR/test workflows can run this
 # too — agvtool just no-ops if the value is unchanged.
 
+# Apple's test-without-building action runs on a fresh runner that never
+# had a clone, so CI_PRIMARY_REPOSITORY_PATH is unset there. Without this
+# guard `set -eu` aborts the whole pipeline (the .xctestproducts already
+# carries the version baked in during build-for-testing — nothing to do
+# on the test runner).
+if [ -z "${CI_PRIMARY_REPOSITORY_PATH:-}" ]; then
+  echo "ci_pre_xcodebuild: no repo on this runner (test-without-building); nothing to do"
+  exit 0
+fi
+
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 
 if [ -z "${CI_BUILD_NUMBER:-}" ]; then
