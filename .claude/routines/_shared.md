@@ -87,23 +87,20 @@ python3 .claude/routines/scripts/asc.py build-log --run "$RUN_ID"
 python3 .claude/routines/scripts/asc.py get "/v1/ciBuildRuns/$RUN_ID"
 ```
 
-Required env vars on every routine that calls ASC (mark secrets in the
-Routines UI):
-- `ASC_KEY_ID` — 10-char key id (secret)
-- `ASC_ISSUER_ID` — issuer UUID (secret)
-- `ASC_PRIVATE_KEY` — full PEM contents of the `.p8` (secret), including
+Required env vars / secrets on every job that calls ASC:
+- `ASC_KEY_ID` — 10-char key id
+- `ASC_ISSUER_ID` — issuer UUID
+- `ASC_PRIVATE_KEY` — full PEM contents of the `.p8`, including
   `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----`
-- `ASC_PRODUCT_ID` — only on routines that talk to Xcode Cloud (secret)
-- `ASC_BASE_URL` — **required from Routines.** Anthropic's sandbox
-  returns 503 for `api.appstoreconnect.apple.com` even at "Full"
-  network tier (apple.com is not on the egress allowlist; possibly
-  also Apple-side IP filtering). Set this to the relay's bridge —
-  `https://ai.origenclub.cn/api/asc` — and `asc.py` rewrites every API
-  call through there. The JWT is end-to-end; the relay just forwards
-  bytes. Leave unset for local invocations from a Mac.
+- `ASC_PRODUCT_ID` — only on jobs that talk to Xcode Cloud
 
 `ASC_APP_ID` is hardcoded in `asc.py` (`DEFAULT_APP_ID`); override with
 the env var only if you fork this for a different app.
+
+`ASC_BASE_URL` exists as an escape hatch for sandboxes that can't reach
+`api.appstoreconnect.apple.com` directly — it points `asc.py` at the
+relay's `/api/asc` proxy. GitHub-hosted runners reach Apple directly,
+so leave it unset there.
 
 ## Per-fix state (no state file needed)
 
