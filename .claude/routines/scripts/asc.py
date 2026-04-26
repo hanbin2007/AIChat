@@ -87,11 +87,30 @@ def _dedup_hash(kind: str, payload: str, build_ver: str) -> str:
     return h[:12]
 
 
+_PRERELEASE_CACHE: dict[str, str] = {}
+
+
+def _marketing_version(build_id: str) -> str:
+    """Marketing version (e.g., 2.2) lives on the build's preReleaseVersion;
+    the feedback list endpoint rejects nested includes so we resolve here.
+    Cached per process to avoid N+1 calls when many feedbacks share a build.
+    """
+    if build_id in _PRERELEASE_CACHE:
+        return _PRERELEASE_CACHE[build_id]
+    try:
+        pr = asc_get(f"/v1/builds/{build_id}/preReleaseVersion").get("data") or {}
+        ver = pr.get("attributes", {}).get("version", "?")
+    except Exception:
+        ver = "?"
+    _PRERELEASE_CACHE[build_id] = ver
+    return ver
+
+
 def _resolve_build(included: list[dict], build_id: str) -> str:
     for item in included:
         if item.get("type") == "builds" and item.get("id") == build_id:
-            a = item.get("attributes", {})
-            return f"{a.get('version','?')}({a.get('buildNumber','?')})"
+            build_no = item.get("attributes", {}).get("version", "?")
+            return f"{_marketing_version(build_id)}({build_no})"
     return build_id  # fall back to raw id if not included
 
 
@@ -125,16 +144,19 @@ def list_feedback(since_iso: str) -> list[dict]:
     Returns items with `created > since_iso`, sorted ascending by created.
     """
     app_id = _env("ASC_APP_ID", DEFAULT_APP_ID)
-    common_q = (
-        f"filter[app]={app_id}&limit=200&sort=-createdDate"
-        "&include=build,tester"
-    )
+    # The top-level /v1/betaFeedback*Submissions endpoints only support
+    # GET_INSTANCE/DELETE; listing must go through the app relationship
+    # path or Apple returns 403 "does not allow GET_COLLECTION".
+    common_q = "limit=200&sort=-createdDate&include=build,tester"
 
     ss_data, ss_inc = _fetch_until(
-        f"/v1/betaFeedbackScreenshotSubmissions?{common_q}", since_iso
+        f"/v1/apps/{app_id}/betaFeedbackScreenshotSubmissions?{common_q}",
+        since_iso,
     )
+    # Crash list does not allow `include=crashLog`; fetch per-instance below.
     cr_data, cr_inc = _fetch_until(
-        f"/v1/betaFeedbackCrashSubmissions?{common_q},crashLog", since_iso
+        f"/v1/apps/{app_id}/betaFeedbackCrashSubmissions?{common_q}",
+        since_iso,
     )
 
     items = []
@@ -173,11 +195,17 @@ def list_feedback(since_iso: str) -> list[dict]:
             "hash": _dedup_hash("screenshot", payload, build_ver),
         })
 
-    # Crash log texts are in included[] as `betaFeedbackCrashLogs`.
-    def _crash_stack_head(crash_log_id: str) -> str:
-        for item in cr_inc:
-            if (item.get("type") == "betaFeedbackCrashLogs"
-                    and item.get("id") == crash_log_id):
+    # `include=crashLog` is rejected on the list endpoint, so we resolve the
+    # crash log id via the per-instance fetch then download the log content.
+    def _crash_stack_head(crash_id: str) -> str:
+        try:
+            inst = asc_get(
+                f"/v1/betaFeedbackCrashSubmissions/{crash_id}?include=crashLog"
+            )
+        except Exception:
+            return ""
+        for item in inst.get("included", []):
+            if item.get("type") == "betaFeedbackCrashLogs":
                 text = item.get("attributes", {}).get("content", "") or ""
                 lines = [ln for ln in text.splitlines() if ln.strip()]
                 return "\n".join(lines[:5])
@@ -192,10 +220,7 @@ def list_feedback(since_iso: str) -> list[dict]:
                      .get("build", {})
                      .get("data", {}) or {}).get("id", "")
         build_ver = _resolve_build(cr_inc, build_id) if build_id else "unknown"
-        crash_log_id = (d.get("relationships", {})
-                         .get("crashLog", {})
-                         .get("data", {}) or {}).get("id", "")
-        stack_head = _crash_stack_head(crash_log_id) if crash_log_id else ""
+        stack_head = _crash_stack_head(d.get("id", ""))
         items.append({
             "kind": "crash",
             "id": d.get("id"),
