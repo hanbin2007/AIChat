@@ -1,51 +1,88 @@
-# Relay Gateway
+# AIChat Relay — Next.js Gateway
 
-现在仓库里有两种 relay 方案：
+Enterprise-grade relay server for [AIChat](..) clients. Wire-compatible 1:1
+with the macOS `AIChat Relay` app: paths, request shapes, SSE event names, and
+Gemini request transforms all match, so existing Watch / iPhone / Mac builds
+can switch to this server by changing only `AI_RELAY_BASE_URL`.
 
-- 推荐：`AIChat Relay` macOS 原生 app，带 UI、日志和一键启动
-- 备用：当前目录下的 Node 示例服务
+- **Stack**: Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS ·
+  Material Design 3
+- **Storage**: atomic JSON snapshots on disk (`RELAY_DATA_DIR`). No external
+  database required. Repository layer is abstracted so Postgres/Redis is a
+  drop-in for larger deployments.
+- **Scope**: holds `GEMINI_API_KEY`, enforces bearer auth, meters credits,
+  issues activation keys / pairing tokens, decodes StoreKit JWS, streams SSE
+  to clients, and provides a full admin console.
 
-如果你就是要在 mac 上开箱即用地跑服务端，优先直接打开 Xcode 的 `AIChat Relay` scheme。
-
-## macOS App
-
-```bash
-xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platform=macOS" build
-```
-
-桌面 app 会负责：
-
-- 保存 `GEMINI_API_KEY`
-- 生成和保存 `RELAY_BEARER_TOKEN`
-- 启动本地 HTTP relay
-- 显示 `localhost` / 局域网地址
-- 提供客户端可直接复制的 `xcconfig` 配置片段
-
-## Node Fallback
-
-这是给 Apple Watch 客户端准备的最小中继服务。作用：
-
-- 在服务端持有 `GEMINI_API_KEY`
-- 对客户端做 Bearer 鉴权
-- 把 Gemini 的 SSE 流转换成 `answer_delta` / `thought_delta` 事件流
-
-## 启动
+## Quick start
 
 ```bash
-export GEMINI_API_KEY=your-gemini-key
-export RELAY_BEARER_TOKEN=your-relay-token
-node relay/server.mjs
+cp .env.example .env     # fill in GEMINI_API_KEY, RELAY_BEARER_TOKEN, RELAY_SESSION_SECRET
+npm install
+npm run dev              # http://localhost:8787
 ```
 
-## 客户端配置
+On first boot visit <http://localhost:8787/setup> to create the admin account.
 
-在 `Config/Secrets.xcconfig` 里填：
+## Point the Watch app at this relay
+
+In `Config/Secrets.xcconfig`:
 
 ```xcconfig
-AI_BACKEND_MODE = relay
-AI_RELAY_BASE_URL = http:/$()/127.0.0.1:8787
-AI_RELAY_BEARER_TOKEN = your-relay-token
-GEMINI_MODEL = gemini-3-flash-preview
+AI_BACKEND_MODE      = relay
+AI_RELAY_BASE_URL    = http:/$()/127.0.0.1:8787
+AI_RELAY_BEARER_TOKEN = <value of RELAY_BEARER_TOKEN>
+GEMINI_MODEL         = gemini-3-flash-preview
 ```
 
-注意：`.xcconfig` 里的 `//` 会被当成注释，所以这里不能直接写 `http://...`。
+(The `//` in URLs must be written as `/$()/` because xcconfig treats `//` as
+a comment.)
+
+## Endpoints
+
+| Path | Method | Purpose |
+|------|--------|---------|
+| `/api/health` | GET | Liveness probe |
+| `/api/v1/billing/catalog` | GET | Plans + metering policy (public) |
+| `/api/v1/account/status` | GET | Account/device snapshot |
+| `/api/v1/chat/stream` | POST | SSE chat stream |
+| `/api/v1/audio/transcribe` | POST | Audio → text |
+| `/api/v1/memory/extract` | POST | Conversation memory JSON |
+| `/api/v1/activation/bootstrap` | POST | Trial activation |
+| `/api/v1/billing/purchase/prepare` | POST | StoreKit pre-check |
+| `/api/v1/billing/purchase/submit` | POST | Submit JWS transaction |
+| `/api/v1/billing/restore` | POST | Restore purchases |
+| `/api/v1/account/pairing-token` | POST | 10-minute device-pair code |
+| `/api/v1/account/join-paired` | POST | Redeem pairing code |
+| `/api/v1/offline/exchange` | POST | Offline activation code |
+
+All SSE frames use the same event names as the macOS relay:
+`answer_delta`, `thought_delta`, `model_content`, `attachment`, `done`, `error`.
+
+## Admin console
+
+After login, the following pages are available (`⌘1..⌘0` jumps):
+
+- **Dashboard** — launch checklist, KPIs, system status, recent activity
+- **Requests** — live tail, history search, conversation reconstruction
+- **Playground** — exercise `/v1/chat/stream` from the browser
+- **Accounts** — accounts / devices / keys / activation codes / pairing tokens
+- **Billing Studio** — visualised pricing policy + plan editor + simulator
+- **Observability** — usage analytics, audit log, diagnostics bundle
+- **Models** — Gemini catalogue + capability toggles + default parameters
+- **Settings** — 8 visual configuration groups
+- **Docs** — API reference with copy-paste examples
+- **About** — version + diagnostics download
+
+## Docker
+
+```bash
+docker compose up -d
+```
+
+The compose file mounts a named volume at `/data` so billing state survives
+restarts. Health is polled on `/api/health`.
+
+## License
+
+See repository root.
