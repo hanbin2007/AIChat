@@ -1,0 +1,133 @@
+name: tf-react
+
+# Reacts to owner activity on TestFlight-sourced issues:
+#
+#   1. Owner adds a label              → process label intent (defer / dismissed / regression)
+#   2. Owner closes an issue           → treat as dismiss if not yet shipped
+#   3. Owner posts a comment           → parse intent (approve / defer / dismiss / refine)
+#
+# This complements tf-autofix.yml, which handles the auto-fix-approved label add
+# and Xcode Cloud check_run completions for autofix branches.
+#
+# Lives in Actions (not Routines) because Claude Code Routines does not yet
+# expose the issue_comment webhook — only issues / pull_request / release /
+# schedule. Comment-driven intent (the most ergonomic owner path) requires
+# this event, so the whole tf-react logic moved here for consistency.
+
+on:
+  issues:
+    types: [labeled, closed]
+  issue_comment:
+    types: [created]
+
+jobs:
+  resolve:
+    # Filter out events that don't apply, then forward the relevant payload
+    # fields as outputs so the downstream job (and concurrency key) can read
+    # them without re-parsing github.event.
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.ctx.outputs.proceed }}
+      issue_number: ${{ steps.ctx.outputs.issue_number }}
+      event_action: ${{ steps.ctx.outputs.event_action }}
+      label_name: ${{ steps.ctx.outputs.label_name }}
+      actor: ${{ steps.ctx.outputs.actor }}
+    steps:
+      - name: Resolve event
+        id: ctx
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          ISSUE_LABELS: ${{ toJSON(github.event.issue.labels) }}
+        run: |
+          set -euo pipefail
+
+          emit_skip() {
+            echo "$1"
+            { echo "proceed=false"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # Owner-only: anyone able to comment on / label public issues could
+          # otherwise trigger billed Claude runs with issues:write.
+          if [ "$SENDER_LOGIN" != "$REPO_OWNER" ]; then
+            emit_skip "Sender '$SENDER_LOGIN' is not owner '$REPO_OWNER'; skipping."
+          fi
+
+          # Only TestFlight-sourced issues. Filter on the issue's label set
+          # rather than the event payload so this works for issue_comment
+          # (where the label that fired isn't part of the payload).
+          if ! echo "$ISSUE_LABELS" | jq -e '.[] | select(.name == "source:testflight-api")' > /dev/null; then
+            emit_skip "Issue does not carry source:testflight-api label; skipping."
+          fi
+
+          # Never react to events on the persistent state-carrier issue.
+          if echo "$ISSUE_LABELS" | jq -e '.[] | select(.name == "meta-state")' > /dev/null; then
+            emit_skip "meta-state issue; skipping."
+          fi
+
+          # tf-autofix.yml already owns auto-fix-approved label adds. Don't
+          # double-fire — tf-react would just exit-noop per its prompt anyway.
+          if [ "$EVENT_NAME" = "issues" ] \
+             && [ "$EVENT_ACTION" = "labeled" ] \
+             && [ "$LABEL_NAME" = "auto-fix-approved" ]; then
+            emit_skip "auto-fix-approved label is handled by tf-autofix.yml; skipping."
+          fi
+
+          {
+            echo "proceed=true"
+            echo "issue_number=$ISSUE_NUMBER"
+            echo "event_action=$EVENT_ACTION"
+            echo "label_name=$LABEL_NAME"
+            echo "actor=$SENDER_LOGIN"
+          } >> "$GITHUB_OUTPUT"
+
+  react:
+    needs: resolve
+    if: needs.resolve.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    # Serialize per issue: label-add and a near-simultaneous comment from the
+    # owner shouldn't race each other on the same issue body / labels.
+    concurrency:
+      group: tf-react-issue-${{ needs.resolve.outputs.issue_number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble prompt (_shared.md + tf-react.md)
+        id: prompt
+        run: |
+          set -euo pipefail
+          {
+            echo 'content<<PROMPT_EOF'
+            cat .claude/routines/_shared.md
+            printf '\n\n---\n\n'
+            cat .claude/routines/tf-react.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.resolve.outputs.issue_number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ needs.resolve.outputs.event_action }}
+          LABEL_NAME: ${{ needs.resolve.outputs.label_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ACTOR: ${{ needs.resolve.outputs.actor }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.content }}
+          allowed_tools: "Bash,Read,Grep,Glob"
