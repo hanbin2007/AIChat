@@ -67,6 +67,7 @@ jobs:
           MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: ${{ steps.prompt.outputs.content }}
           allowed_tools: "Bash,Read,Grep,Glob"
           claude_args: |
