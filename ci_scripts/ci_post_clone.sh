@@ -4,6 +4,15 @@ set -eu
 # Xcode Cloud runs this immediately after the repo is cloned, before any
 # Xcode resolution. Working directory: $CI_PRIMARY_REPOSITORY_PATH/ci_scripts.
 # We rewrite to repo root so paths match local dev.
+
+# test-without-building runs on a fresh runner that never had a clone;
+# the post-clone hook still fires there, but with no repo to act on.
+# Skip cleanly so `set -eu` doesn't kill the pipeline.
+if [ -z "${CI_PRIMARY_REPOSITORY_PATH:-}" ]; then
+  echo "ci_post_clone: no repo on this runner (test-without-building); nothing to do"
+  exit 0
+fi
+
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 
 # Config/Secrets.xcconfig is gitignored locally. In the cloud we synthesize

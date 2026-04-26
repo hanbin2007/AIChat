@@ -40,7 +40,12 @@ jobs:
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           SENDER_LOGIN: ${{ github.event.sender.login }}
           REPO_OWNER: ${{ github.repository_owner }}
-          BRANCH: ${{ github.event.check_run.check_suite.head_branch }}
+          # check_suite.head_branch is unreliable when a SHA is reachable
+          # from multiple refs — observed on 2026-04-26 reporting an old
+          # diagnostic branch name for an autofix/issue-* SHA. Prefer the
+          # PR's head.ref via the check_run.pull_requests array; fall back
+          # to head_branch only when no PR is associated.
+          BRANCH: ${{ github.event.check_run.pull_requests[0].head.ref || github.event.check_run.check_suite.head_branch }}
           CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
           CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
           CHECK_NAME: ${{ github.event.check_run.name }}
@@ -63,8 +68,11 @@ jobs:
             fi
           elif [ "$EVENT_NAME" = "check_run" ] \
                && [[ "$BRANCH" =~ ^autofix/issue-([0-9]+)$ ]]; then
+            # Apple's Xcode Cloud reports test failures as `action_required`
+            # (it wants a human to look) rather than `failure`. We treat it
+            # as terminal here so the autofix routine can iterate.
             case "$CHECK_CONCLUSION" in
-              success|failure|cancelled|timed_out)
+              success|failure|cancelled|timed_out|action_required)
                 proceed=true
                 issue_number="${BASH_REMATCH[1]}"
                 {

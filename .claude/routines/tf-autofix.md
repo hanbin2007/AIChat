@@ -58,9 +58,13 @@ lowercased value to handle both.
 | no | — | — | **Start** |
 | yes | `in_progress` / `queued` | any | exit noop (still building) |
 | yes | `success` | any | **Merge** |
-| yes | `failure` / `cancelled` / `timed_out` | < 3 | **Iterate** |
-| yes | `failure` / `cancelled` / `timed_out` | ≥ 3 | **Fail** |
+| yes | `failure` / `cancelled` / `timed_out` / `action_required` | < 3 | **Iterate** |
+| yes | `failure` / `cancelled` / `timed_out` / `action_required` | ≥ 3 | **Fail** |
 | yes | no check yet | any | exit noop (give Xcode Cloud 5 min) |
+
+> Apple's Xcode Cloud reports test failures with conclusion
+> `action_required` (it expects a human to acknowledge/retry) rather
+> than `failure`. Treat both as terminal-fail for the iteration count.
 
 Fetch state:
 ```bash
