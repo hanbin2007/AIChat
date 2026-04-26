@@ -24,6 +24,10 @@ fastlane/AuthKey_*.p8
 # ASC API key — never commit
 AuthKey_*.p8
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Claude routine work files
 .claude/routines/state/
 .claude/settings.local.json
