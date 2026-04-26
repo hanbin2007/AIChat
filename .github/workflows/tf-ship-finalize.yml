@@ -70,8 +70,15 @@ jobs:
         id: prompt
         run: |
           set -euo pipefail
+          # The action's default `claude_code` system-prompt preset reads
+          # markdown specs as docs/role-assignment unless an imperative
+          # directive opens the user message. See debug/tf-triage-diagnostics.
           {
             echo 'content<<PROMPT_EOF'
+            echo 'Execute the SHIP-FINALIZE routine described below right now on the check_run that fired this workflow (env vars CHECK_CONCLUSION, CHECK_DETAILS_URL, CHECK_NAME, COMMIT_SHA). Use the available tools (Bash, Read, Grep, Glob) as needed. Do not ask for confirmation. End with the summary line specified in the routine.'
+            echo
+            echo '---'
+            echo
             cat .claude/routines/_shared.md
             printf '\n\n---\n\n'
             cat .claude/routines/tf-ship-finalize.md
@@ -97,4 +104,3 @@ jobs:
             --model claude-opus-4-7[1m]
             --max-turns 30
             --allowedTools Bash,Read,Grep,Glob
-            --effort xhigh
