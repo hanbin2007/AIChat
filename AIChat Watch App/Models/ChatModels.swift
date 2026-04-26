@@ -29,6 +29,7 @@ nonisolated enum ChatMessageStatus: String, Codable, Hashable {
     case sent
     case streaming
     case failed
+    case cancelled
 }
 
 nonisolated enum ContextMode: String, Codable, Hashable, CaseIterable, Identifiable {

@@ -70,7 +70,7 @@ actor RelayAccessRepository {
         }
 
         record.statusData = try encoder.encode(status)
-        record.relayKeyValue = status.key?.keyValue.nonEmptyTrimmed
+        record.relayKeyValue = status.key?.keyValue?.nonEmptyTrimmed
         record.updatedAt = .now
         try context.save()
     }
@@ -115,7 +115,7 @@ actor RelayAccessRepository {
         storedState(appGroupIdentifier: appGroupIdentifier)?
             .status?
             .key?
-            .keyValue
+            .keyValue?
             .nonEmptyTrimmed
     }
 

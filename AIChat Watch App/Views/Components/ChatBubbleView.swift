@@ -233,7 +233,7 @@ struct ChatBubbleView: View, Equatable {
                     )
                 }
 
-                if message.status == .failed, displayedText.isEmpty {
+                if (message.status == .failed || message.status == .cancelled), displayedText.isEmpty {
                     Text("Stopped")
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.8))
@@ -1204,6 +1204,7 @@ private struct AttachmentImageViewer: View {
                             minHeight: geometry.size.height,
                             alignment: .center
                         )
+                        .privacySensitive()
                 }
                 .background(Color.black.ignoresSafeArea())
                 #if !os(watchOS)

@@ -412,6 +412,8 @@ final class ChatStore: ObservableObject {
     private var initialLoadTask: Task<Void, Never>?
     private var conversationIndexByID: [UUID: Int] = [:]
     private var sendTasks: [UUID: Task<Void, Never>] = [:]
+    private var transcriptionTasks: [UUID: Task<Void, Never>] = [:]
+    private var lastStreamingSyncPush: [UUID: Date] = [:]
 
     init(
         repository: ConversationRepository,
@@ -596,7 +598,11 @@ final class ChatStore: ObservableObject {
     var activationStatusMessage: String { activationBilling.activationStatusMessage }
     var activationAllowedModelIDs: Set<String>? { activationBilling.activationAllowedModelIDs }
 
-    func loadConversationsIfNeeded() async {
+    func loadConversationsIfNeeded(force: Bool = false) async {
+        if force {
+            hasLoadedConversations = false
+            startupError = nil
+        }
         if hasLoadedConversations { return }
         if let inFlight = initialLoadTask {
             await inFlight.value
@@ -975,6 +981,8 @@ final class ChatStore: ObservableObject {
 
         sendTasks[id]?.cancel()
         sendTasks[id] = nil
+        transcriptionTasks[id]?.cancel()
+        transcriptionTasks[id] = nil
         conversation.clearMessages()
         drafts[id] = ConversationDraft()
         conversationErrors[id] = nil
@@ -1130,6 +1138,11 @@ final class ChatStore: ObservableObject {
               isTranscribing(conversationID: conversationID) == false,
               let conversation = conversation(id: conversationID)
         else {
+            return false
+        }
+
+        if let lastAssistant = conversation.messages.last(where: { $0.role == .assistant }),
+           lastAssistant.status == .cancelled {
             return false
         }
 
@@ -1400,6 +1413,10 @@ final class ChatStore: ObservableObject {
     func stopSending(in conversationID: UUID) {
         conversationErrors[conversationID] = nil
         sendTasks[conversationID]?.cancel()
+        transcriptionTasks[conversationID]?.cancel()
+        if transcriptionTasks[conversationID] != nil {
+            transcribingConversationIDs.remove(conversationID)
+        }
     }
 
     func sendRecordedAudio(_ audioAttachment: ChatAttachment, in conversationID: UUID) async {
@@ -1447,25 +1464,57 @@ final class ChatStore: ObservableObject {
             includesContext: isTranscriptionContextEnabled,
             existingDraftText: drafts[conversationID]?.text ?? ""
         )
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runTranscriptionAttempts(
+                audioAttachment: audioAttachment,
+                conversationID: conversationID,
+                requestConversation: currentConversation,
+                configuration: transcriptionConfiguration,
+                service: transcriptionService
+            )
+        }
+        transcriptionTasks[conversationID] = task
+        defer {
+            if transcriptionTasks[conversationID] == task {
+                transcriptionTasks[conversationID] = nil
+            }
+        }
+        await task.value
+    }
+
+    private func runTranscriptionAttempts(
+        audioAttachment: ChatAttachment,
+        conversationID: UUID,
+        requestConversation: ConversationThread,
+        configuration: VoiceTranscriptionConfiguration,
+        service: AITranscriptionService
+    ) async {
         let maximumRetryCount = sendFailureRetryLimit
         var finalError: Error?
         var attemptCount = 0
 
         for attempt in 0...maximumRetryCount {
+            if Task.isCancelled { break }
             attemptCount = attempt + 1
 
             if attempt > 0 {
                 let delay = sendRetryDelayNanoseconds(attempt)
                 if delay > 0 {
-                    try? await Task.sleep(nanoseconds: delay)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        break
+                    }
                 }
             }
 
             do {
-                let transcription = try await transcriptionService.transcribeUserAudio(
+                let transcription = try await service.transcribeUserAudio(
                     audioAttachment,
-                    in: currentConversation,
-                    using: transcriptionConfiguration
+                    in: requestConversation,
+                    using: configuration
                 )
 
                 transcribingConversationIDs.remove(conversationID)
@@ -1480,6 +1529,8 @@ final class ChatStore: ObservableObject {
             } catch {
                 finalError = error
 
+                if error is CancellationError { break }
+
                 let hasRemainingRetries = attempt < maximumRetryCount
                 guard hasRemainingRetries, shouldRetryTranscription(after: error) else {
                     break
@@ -1488,7 +1539,7 @@ final class ChatStore: ObservableObject {
         }
 
         transcribingConversationIDs.remove(conversationID)
-        if let finalError {
+        if let finalError, finalError is CancellationError == false {
             conversationErrors[conversationID] = failureMessage(
                 from: finalError,
                 automaticRetryCount: max(0, attemptCount - 1),
@@ -1641,6 +1692,8 @@ final class ChatStore: ObservableObject {
     private func deleteConversation(id: UUID, deletedAt candidateDeletedAt: Date? = nil, sync: Bool) async {
         sendTasks[id]?.cancel()
         sendTasks[id] = nil
+        transcriptionTasks[id]?.cancel()
+        transcriptionTasks[id] = nil
         setConversations(conversations.filter { $0.id != id })
         drafts[id] = nil
         conversationErrors[id] = nil
@@ -1880,6 +1933,8 @@ final class ChatStore: ObservableObject {
         for conversationID in removedConversationIDs {
             sendTasks[conversationID]?.cancel()
             sendTasks[conversationID] = nil
+            transcriptionTasks[conversationID]?.cancel()
+            transcriptionTasks[conversationID] = nil
             drafts[conversationID] = nil
             conversationErrors[conversationID] = nil
             sendingConversationIDs.remove(conversationID)
@@ -2059,7 +2114,7 @@ final class ChatStore: ObservableObject {
 
         if let error = error as? RelayAPIError {
             switch error {
-            case .missingConfiguration, .truncated, .storeKitProductUnavailable:
+            case .missingConfiguration, .truncated, .storeKitProductUnavailable, .directModeUnsupported:
                 return false
             case .invalidResponse, .remote, .emptyResponse, .incompleteResponse:
                 return true
@@ -2092,15 +2147,16 @@ final class ChatStore: ObservableObject {
                 return
             }
 
-            defer {
-                self.sendTasks[conversationID] = nil
-                self.sendingConversationIDs.remove(conversationID)
-            }
-
             await operation(self)
         }
 
         sendTasks[conversationID] = task
+        defer {
+            if sendTasks[conversationID] == task {
+                sendTasks[conversationID] = nil
+                sendingConversationIDs.remove(conversationID)
+            }
+        }
         await task.value
     }
 
@@ -2383,6 +2439,7 @@ final class ChatStore: ObservableObject {
 
         defer {
             replyPersistenceController.endStreamingReplyPersistence(replyPersistenceToken)
+            lastStreamingSyncPush[conversationID] = nil
         }
 
         currentConversation.append(
@@ -2494,7 +2551,12 @@ final class ChatStore: ObservableObject {
                         )
 
                         if let streamingConversation = conversation(id: conversationID) {
-                            await persist(streamingConversation, sync: false)
+                            let lastSyncPushAt = lastStreamingSyncPush[conversationID] ?? .distantPast
+                            let shouldPushSync = Date().timeIntervalSince(lastSyncPushAt) > 4.0
+                            await persist(streamingConversation, sync: shouldPushSync)
+                            if shouldPushSync {
+                                lastStreamingSyncPush[conversationID] = Date()
+                            }
                         }
 
                         lastPersistAt = now
@@ -2538,6 +2600,9 @@ final class ChatStore: ObservableObject {
                         await completionFeedbackProvider.notifyCompletion(of: .assistantReplyCompleted)
                     }
                 }
+                Task { @MainActor [weak self] in
+                    await self?.activationBilling.refreshActivationState()
+                }
                 return
             } catch {
                 streamingPacer.cancel()
@@ -2565,6 +2630,7 @@ final class ChatStore: ObservableObject {
             )
         }
 
+        let resolvedStatus: ChatMessageStatus = finalError is CancellationError ? .cancelled : .failed
         mutateConversation(id: conversationID) { conversation in
             if finalStreamedText.isEmpty,
                finalStreamedThoughtSummary.isEmpty,
@@ -2581,7 +2647,7 @@ final class ChatStore: ObservableObject {
                         modelResponseParts: finalStreamedModelResponseParts,
                         createdAt: conversation.messages.first(where: { $0.id == assistantMessageID })?.createdAt ?? assistantMessageCreatedAt,
                         attachments: finalStreamedAttachments,
-                        status: .failed
+                        status: resolvedStatus
                     )
                 )
             }

@@ -70,6 +70,20 @@ struct ConversationListView: View {
                         )
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
+
+                        Button {
+                            Task { await chatStore.loadConversationsIfNeeded(force: true) }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.clockwise")
+                                Text("Retry")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("conversation.list.startup-error.retry")
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(Color.clear)
                     }
 
                     if chatStore.conversationListItems.isEmpty {

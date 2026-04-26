@@ -10,6 +10,11 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+private struct ToolSettingsDraft: Equatable {
+    var usesGoogleSearch: Bool
+    var usesCodeExecution: Bool
+}
+
 private enum ComposerLayout {
     static let messagesToComposerSpacing: CGFloat = 4
     static let expandedBottomInset: CGFloat = 1
@@ -99,9 +104,17 @@ struct ConversationDetailView: View {
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
     @State private var lastAutoScrollAt = Date.distantPast
+    @Environment(\.redactionReasons) private var redactionReasons
     #if DEBUG
     @ObservedObject private var backgroundReplyDebugProbe = UITestBackgroundReplyDebugProbe.shared
     #endif
+
+    private var redactedNavigationTitle: String {
+        if redactionReasons.contains(.privacy) {
+            return "Chat"
+        }
+        return chatStore.conversation(id: conversationID)?.title ?? "Chat"
+    }
 
     var body: some View {
         ZStack {
@@ -144,7 +157,7 @@ struct ConversationDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "Chat")
+        .navigationTitle(redactedNavigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -1892,6 +1905,7 @@ private struct DraftAttachmentPill: View {
                     .scaledToFill()
                     .frame(width: size, height: size)
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous))
+                    .privacySensitive()
             } else {
                 RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
                     .fill(
