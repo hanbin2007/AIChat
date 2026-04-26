@@ -1,3 +1,8 @@
-Routine update.
+Fixes #1: prewarm markdown cache in finalize
+  Feedback: "有概率消息生成完之后不自动进行markdown渲染"
 
-Please submit feedback directly inside TestFlight — every report is mirrored to a GitHub issue for follow-up.
+Fixes #2: relay connection status indicator (relay-only)
+  Feedback: "增加是否与服务器连接正常的状态显示"
+
+Fixes #3: AOD privacy redaction for chat/thought/list/composer
+  Feedback: "将手表端app的界面定义为包含隐私内容的，使得手表熄屏进入常亮显示后自动模糊"
