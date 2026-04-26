@@ -263,7 +263,20 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var resolvedRelayBearerToken: String? {
-        relayBearerToken ?? RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier)
+        // Production builds MUST authenticate with a per-device `rk_` key
+        // (issued via /v1/activation/bootstrap, StoreKit purchase, or pairing).
+        // The env-baked `relayBearerToken` is a DEBUG-only dev shortcut against
+        // a relay you control; admin tokens on the metered endpoints are now
+        // rejected server-side.
+        if let stored = RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier),
+           stored.isEmpty == false {
+            return stored
+        }
+        #if DEBUG
+        return relayBearerToken
+        #else
+        return nil
+        #endif
     }
 
     private var hasValidRelayBaseURL: Bool {

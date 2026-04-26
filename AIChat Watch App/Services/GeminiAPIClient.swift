@@ -41,121 +41,16 @@ struct GeminiAPIClient: AIStreamingService {
     var maxInlineAttachmentBytes: Int = 4_000_000
 
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        // Direct Gemini access from the watch is deprecated. The relay
+        // (`RelayAIClient`) is the only supported streaming path; calling
+        // Gemini directly would bypass billing/expiry/auth and would require
+        // baking `GEMINI_API_KEY` into the shipped binary. The enum case
+        // `AIBackendMode.direct` is retained for source compatibility, but
+        // any attempt to actually stream through this client now fails
+        // closed. `makeRequestBody` / `contextWindow` are still callable
+        // (used by tests and by `RelayAIClient` for request shaping).
         AsyncThrowingStream { continuation in
-            let streamTask = Task {
-                do {
-                    guard let apiKey = configuration.geminiAPIKey else {
-                        throw GeminiAPIError.missingAPIKey
-                    }
-
-                    let runtimeConfiguration = conversation.resolvedAIConfiguration(defaultModel: configuration.geminiModel)
-
-                    var request = URLRequest(
-                        url: URL(
-                            string: "https://generativelanguage.googleapis.com/v1beta/models/\(runtimeConfiguration.model):streamGenerateContent?alt=sse"
-                        )!
-                    )
-                    request.httpMethod = "POST"
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-
-                    let encoder = JSONEncoder()
-                    encoder.keyEncodingStrategy = .convertToSnakeCase
-                    request.httpBody = try encoder.encode(makeRequestBody(for: conversation))
-
-                    let (bytes, response) = try await session.bytes(for: request)
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw GeminiAPIError.invalidResponse
-                    }
-
-                    guard (200...299).contains(httpResponse.statusCode) else {
-                        let errorData = try await readAllBytes(from: bytes)
-                        throw geminiError(from: errorData)
-                    }
-
-                    let decoder = JSONDecoder()
-                    decoder.keyDecodingStrategy = .convertFromSnakeCase
-
-                    var accumulatedText = ""
-                    var accumulatedThoughtSummary = ""
-                    var emittedAttachmentKeys: Set<String> = []
-                    var latestModelResponseParts: [GeminiPartPayload]?
-                    var finishReason: String?
-
-                    for try await line in bytes.lines {
-                        let trimmedLine = line.trimmed
-                        guard trimmedLine.hasPrefix("data:") else {
-                            continue
-                        }
-
-                        let payload = String(trimmedLine.dropFirst(5)).trimmed
-                        guard payload.isEmpty == false, payload != "[DONE]" else {
-                            continue
-                        }
-
-                        guard let data = payload.data(using: .utf8) else {
-                            continue
-                        }
-
-                        let responseEnvelope = try decoder.decode(GeminiGenerateContentResponse.self, from: data)
-                        let streamChunk = extractChunk(from: responseEnvelope)
-                        if let chunkFinishReason = streamChunk.finishReason {
-                            finishReason = chunkFinishReason
-                        }
-                        if let modelResponseParts = streamChunk.modelResponseParts,
-                           modelResponseParts.isEmpty == false {
-                            latestModelResponseParts = mergeGeminiStreamModelResponseParts(
-                                previousParts: latestModelResponseParts,
-                                incomingParts: modelResponseParts
-                            )
-                        }
-
-                        for attachment in extractImageAttachments(from: responseEnvelope, emittedKeys: &emittedAttachmentKeys) {
-                            continuation.yield(.attachment(attachment))
-                        }
-
-                        if let thoughtDelta = normalizedDelta(
-                            chunkText: streamChunk.thoughtSummary ?? "",
-                            currentText: &accumulatedThoughtSummary
-                        ),
-                        thoughtDelta.isEmpty == false {
-                            continuation.yield(.thoughtDelta(thoughtDelta))
-                        }
-
-                        if let answerDelta = normalizedDelta(
-                            chunkText: streamChunk.answerText ?? "",
-                            currentText: &accumulatedText
-                        ),
-                        answerDelta.isEmpty == false {
-                            continuation.yield(.answerDelta(answerDelta))
-                        }
-                    }
-
-                    if let completionError = geminiCompletionError(for: finishReason) {
-                        throw completionError
-                    }
-
-                    guard accumulatedText.nonEmptyTrimmed != nil ||
-                            emittedAttachmentKeys.isEmpty == false ||
-                            latestModelResponseParts?.isEmpty == false
-                    else {
-                        throw GeminiAPIError.emptyResponse
-                    }
-
-                    if let latestModelResponseParts, latestModelResponseParts.isEmpty == false {
-                        continuation.yield(.modelResponseParts(latestModelResponseParts))
-                    }
-
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-
-            continuation.onTermination = { _ in
-                streamTask.cancel()
-            }
+            continuation.finish(throwing: AIServiceError.directModeUnsupported)
         }
     }
 

@@ -125,46 +125,16 @@ struct GeminiTranscriptionService: AITranscriptionService {
         in conversation: ConversationThread,
         using transcriptionConfiguration: VoiceTranscriptionConfiguration
     ) async throws -> VoiceTranscriptionResult {
-        guard audioAttachment.isAudio else {
-            throw VoiceTranscriptionError.invalidAudio
-        }
-
-        guard let apiKey = configuration.geminiAPIKey else {
-            throw GeminiAPIError.missingAPIKey
-        }
-
-        var request = URLRequest(url: requestURL(for: transcriptionConfiguration.model))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-
-        let prompt = VoiceTranscriptionPromptBuilder.prompt(
-            for: conversation,
-            customPrompt: transcriptionConfiguration.customPrompt,
-            includesContext: transcriptionConfiguration.includesContext,
-            existingDraftText: transcriptionConfiguration.existingDraftText,
-            maxContextMessages: maxContextMessages,
-            maxContextCharacters: maxContextCharacters
-        )
-        request.httpBody = try await makeRequestBodyData(
-            prompt: prompt,
-            audioAttachment: audioAttachment,
-            model: transcriptionConfiguration.model
-        )
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiAPIError.invalidResponse
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw geminiAPIError(from: data)
-        }
-
-        return try parseTranscriptionResponse(
-            data,
-            requestedModel: transcriptionConfiguration.model
-        )
+        // Direct Gemini transcription is deprecated. The relay is the only
+        // supported transcription path (`RelayTranscriptionService`); going
+        // direct would require shipping `GEMINI_API_KEY` in the binary and
+        // bypass billing entirely. Helpers (`makeRequestBody`,
+        // `parseTranscriptionResponse`, `requestURL`) remain callable for
+        // tests and for any code that still needs to shape the payload.
+        _ = audioAttachment
+        _ = conversation
+        _ = transcriptionConfiguration
+        throw AIServiceError.directModeUnsupported
     }
 
     func parseTranscriptionResponse(

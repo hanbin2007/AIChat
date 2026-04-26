@@ -80,6 +80,8 @@ final class ActivationBillingService: ObservableObject {
             return "已过期"
         case .inactive:
             return "未激活"
+        case .unknown(let raw):
+            return raw
         }
     }
 
@@ -112,10 +114,12 @@ final class ActivationBillingService: ObservableObject {
             return false
         }
 
-        if configuration.relayBearerToken != nil {
-            return true
-        }
-
+        // Managed relay access means an active server-side account with at
+        // least one usable grant — NOT just "we have a token in the env".
+        // The env-baked bearer (admin token) used to short-circuit this check
+        // and disable both client- and server-side billing/expiry gates;
+        // admin tokens are now rejected on metered endpoints, so the only
+        // meaningful signal is the relay-issued account/key state.
         guard let account = relayAccountStatus?.account,
               let key = relayAccountStatus?.key
         else {
@@ -438,6 +442,8 @@ final class ActivationBillingService: ObservableObject {
                 return "订阅或 credit 已过期。"
             case .inactive:
                 return "当前设备尚未完成在线激活。"
+            case .unknown(let raw):
+                return "未知账户状态：\(raw)"
             }
         }
 
@@ -605,6 +611,8 @@ final class ActivationBillingService: ObservableObject {
             return "订阅"
         case .offlineManual:
             return "离线导入"
+        case .unknown(let raw):
+            return raw
         }
     }
 
