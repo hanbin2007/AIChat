@@ -25,6 +25,11 @@ enum AIChatDeepLink: Equatable {
         }
     }
 
+    /// Cap defensive max length on the `?code=` query value so a megabyte URL
+    /// can never reach the activation pipeline. Any legitimate activation code
+    /// (legacy 35-byte Crockford or compact 46-letter) sits well under this.
+    private static let maxActivationCodeQueryLength = 256
+
     private static func activationCode(from url: URL) -> String? {
         let normalizedPath = url.path.lowercased()
         guard normalizedPath.isEmpty || normalizedPath == "/" || normalizedPath == "/import" else {
@@ -34,6 +39,10 @@ enum AIChatDeepLink: Equatable {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let code = components.queryItems?.first(where: { $0.name == "code" })?.value
         else {
+            return nil
+        }
+
+        guard code.count <= maxActivationCodeQueryLength else {
             return nil
         }
 

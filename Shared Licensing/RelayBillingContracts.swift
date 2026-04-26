@@ -1,4 +1,11 @@
 import Foundation
+import os
+
+private let relayBillingContractLog = Logger(subsystem: "com.aichat.shared", category: "RelayBillingContracts")
+
+/// Wire format version negotiated between Swift clients and the TS relay server.
+/// Increment alongside any breaking change to the contracts in this file.
+nonisolated let RelayContractVersion: Int = 2
 
 private extension KeyedDecodingContainer {
     nonisolated func decodeFirstPresent<T: Decodable>(
@@ -31,23 +38,132 @@ private extension KeyedDecodingContainer {
     }
 }
 
-nonisolated enum RelayAccessSource: String, Codable, CaseIterable, Sendable {
+/// TS contract: `"trial" | "subscription" | "offlineManual"` (see `relay/src/lib/billing/types.ts:8`).
+/// Carries an `unknown(rawValue)` fallback so a future server-side enum value (e.g. `"promo"`)
+/// does not silently nuke the entire `RelayAccountStatusResponse` once `try?` traps are removed.
+nonisolated enum RelayAccessSource: RawRepresentable, Codable, Hashable, Sendable, CaseIterable {
     case trial
     case subscription
     case offlineManual
+    case unknown(String)
+
+    static var allCases: [RelayAccessSource] {
+        [.trial, .subscription, .offlineManual]
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "trial": self = .trial
+        case "subscription": self = .subscription
+        case "offlineManual": self = .offlineManual
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .trial: return "trial"
+        case .subscription: return "subscription"
+        case .offlineManual: return "offlineManual"
+        case .unknown(let value): return value
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self.init(rawValue: raw)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
-nonisolated enum RelayAccountState: String, Codable, CaseIterable, Sendable {
+/// TS contract: `"active" | "paused" | "expired" | "inactive"` (see `relay/src/lib/billing/types.ts`).
+nonisolated enum RelayAccountState: RawRepresentable, Codable, Hashable, Sendable, CaseIterable {
     case active
     case paused
     case expired
     case inactive
+    case unknown(String)
+
+    static var allCases: [RelayAccountState] {
+        [.active, .paused, .expired, .inactive]
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "active": self = .active
+        case "paused": self = .paused
+        case "expired": self = .expired
+        case "inactive": self = .inactive
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .active: return "active"
+        case .paused: return "paused"
+        case .expired: return "expired"
+        case .inactive: return "inactive"
+        case .unknown(let value): return value
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self.init(rawValue: raw)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
-nonisolated enum RelayKeyState: String, Codable, CaseIterable, Sendable {
+/// TS contract: `"active" | "paused" | "revoked"` (see `relay/src/lib/billing/types.ts`).
+nonisolated enum RelayKeyState: RawRepresentable, Codable, Hashable, Sendable, CaseIterable {
     case active
     case paused
     case revoked
+    case unknown(String)
+
+    static var allCases: [RelayKeyState] {
+        [.active, .paused, .revoked]
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "active": self = .active
+        case "paused": self = .paused
+        case "revoked": self = .revoked
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .active: return "active"
+        case .paused: return "paused"
+        case .revoked: return "revoked"
+        case .unknown(let value): return value
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self.init(rawValue: raw)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 nonisolated enum RelayDevicePlatform: String, Codable, CaseIterable, Sendable {
@@ -91,6 +207,18 @@ nonisolated struct RelayCatalogResponse: Codable, Equatable, Sendable {
     var meteringPolicy: RelayMeteringPolicySnapshot
 }
 
+/// TODO(contract-versioning): wire this through the network layer once the relay
+/// server starts emitting `meta.schemaVersion`. Today the type is unused but
+/// reserved so we can opt-in without another contract churn round.
+nonisolated struct RelayContractEnvelope<T: Decodable>: Decodable, Sendable where T: Sendable {
+    let meta: Meta?
+    let payload: T
+
+    nonisolated struct Meta: Decodable, Sendable {
+        let schemaVersion: Int?
+    }
+}
+
 nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
     var accountID: UUID
     var displayName: String?
@@ -103,6 +231,12 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
     var creditBalance: Int
     var creditExpiresAt: Date?
     var lastUsageAt: Date?
+    /// Optional on Swift even though TS marks them required, so older watch builds
+    /// keep decoding when the server adds these. See `relay/src/lib/billing/types.ts:24-27`.
+    var deviceIDs: [String]?
+    var keyIDs: [String]?
+    var grantIDs: [String]?
+    var createdAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case accountID
@@ -128,6 +262,17 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
         case creditExpiresAtSnake = "credit_expires_at"
         case lastUsageAt
         case lastUsageAtSnake = "last_usage_at"
+        case deviceIDs
+        case deviceIDsConverted = "deviceIds"
+        case deviceIDsSnake = "device_ids"
+        case keyIDs
+        case keyIDsConverted = "keyIds"
+        case keyIDsSnake = "key_ids"
+        case grantIDs
+        case grantIDsConverted = "grantIds"
+        case grantIDsSnake = "grant_ids"
+        case createdAt
+        case createdAtSnake = "created_at"
     }
 
     init(
@@ -141,7 +286,11 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
         appAccountToken: UUID?,
         creditBalance: Int,
         creditExpiresAt: Date?,
-        lastUsageAt: Date?
+        lastUsageAt: Date?,
+        deviceIDs: [String]? = nil,
+        keyIDs: [String]? = nil,
+        grantIDs: [String]? = nil,
+        createdAt: Date? = nil
     ) {
         self.accountID = accountID
         self.displayName = displayName
@@ -154,6 +303,10 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
         self.creditBalance = creditBalance
         self.creditExpiresAt = creditExpiresAt
         self.lastUsageAt = lastUsageAt
+        self.deviceIDs = deviceIDs
+        self.keyIDs = keyIDs
+        self.grantIDs = grantIDs
+        self.createdAt = createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -175,6 +328,10 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
         creditBalance = try container.decodeFirstPresent(Int.self, forKeys: [.creditBalance, .creditBalanceSnake])
         creditExpiresAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.creditExpiresAt, .creditExpiresAtSnake])
         lastUsageAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.lastUsageAt, .lastUsageAtSnake])
+        deviceIDs = try container.decodeIfPresentFirst([String].self, forKeys: [.deviceIDs, .deviceIDsConverted, .deviceIDsSnake])
+        keyIDs = try container.decodeIfPresentFirst([String].self, forKeys: [.keyIDs, .keyIDsConverted, .keyIDsSnake])
+        grantIDs = try container.decodeIfPresentFirst([String].self, forKeys: [.grantIDs, .grantIDsConverted, .grantIDsSnake])
+        createdAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.createdAt, .createdAtSnake])
     }
 
     func encode(to encoder: Encoder) throws {
@@ -190,6 +347,10 @@ nonisolated struct RelayAccountSummary: Codable, Equatable, Hashable, Sendable {
         try container.encode(creditBalance, forKey: .creditBalance)
         try container.encodeIfPresent(creditExpiresAt, forKey: .creditExpiresAt)
         try container.encodeIfPresent(lastUsageAt, forKey: .lastUsageAt)
+        try container.encodeIfPresent(deviceIDs, forKey: .deviceIDs)
+        try container.encodeIfPresent(keyIDs, forKey: .keyIDs)
+        try container.encodeIfPresent(grantIDs, forKey: .grantIDs)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
     }
 }
 
@@ -200,6 +361,8 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
     var note: String?
     var keyID: UUID?
     var lastSeenAt: Date?
+    /// TS contract requires `accountID`. Kept optional on Swift so older builds keep decoding.
+    var accountID: UUID?
 
     private enum CodingKeys: String, CodingKey {
         case deviceID
@@ -213,6 +376,9 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
         case keyIDSnake = "key_id"
         case lastSeenAt
         case lastSeenAtSnake = "last_seen_at"
+        case accountID
+        case accountIDConverted = "accountId"
+        case accountIDSnake = "account_id"
     }
 
     init(
@@ -221,7 +387,8 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
         alias: String?,
         note: String?,
         keyID: UUID?,
-        lastSeenAt: Date?
+        lastSeenAt: Date?,
+        accountID: UUID? = nil
     ) {
         self.deviceID = deviceID
         self.platform = platform
@@ -229,6 +396,7 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
         self.note = note
         self.keyID = keyID
         self.lastSeenAt = lastSeenAt
+        self.accountID = accountID
     }
 
     init(from decoder: Decoder) throws {
@@ -239,6 +407,7 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
         note = try container.decodeIfPresent(String.self, forKey: .note)
         keyID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.keyID, .keyIDConverted, .keyIDSnake])
         lastSeenAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.lastSeenAt, .lastSeenAtSnake])
+        accountID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
     }
 
     func encode(to encoder: Encoder) throws {
@@ -249,16 +418,22 @@ nonisolated struct RelayDeviceSummary: Codable, Equatable, Hashable, Sendable {
         try container.encodeIfPresent(note, forKey: .note)
         try container.encodeIfPresent(keyID, forKey: .keyID)
         try container.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
     }
 }
 
 nonisolated struct RelayKeySummary: Codable, Equatable, Hashable, Sendable {
     var keyID: UUID
-    var keyValue: String
+    /// `keyValue` is being phased out; the server stops echoing it post-A1 strip. Kept optional
+    /// so historic responses still decode and so existing callers compile unchanged.
+    var keyValue: String?
     var state: RelayKeyState
     var source: RelayAccessSource
     var note: String?
     var issuedAt: Date
+    /// TS additions — required server-side, optional on Swift for forward compat.
+    var accountID: UUID?
+    var lastUsedAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case keyID
@@ -271,15 +446,22 @@ nonisolated struct RelayKeySummary: Codable, Equatable, Hashable, Sendable {
         case note
         case issuedAt
         case issuedAtSnake = "issued_at"
+        case accountID
+        case accountIDConverted = "accountId"
+        case accountIDSnake = "account_id"
+        case lastUsedAt
+        case lastUsedAtSnake = "last_used_at"
     }
 
     init(
         keyID: UUID,
-        keyValue: String,
+        keyValue: String?,
         state: RelayKeyState,
         source: RelayAccessSource,
         note: String?,
-        issuedAt: Date
+        issuedAt: Date,
+        accountID: UUID? = nil,
+        lastUsedAt: Date? = nil
     ) {
         self.keyID = keyID
         self.keyValue = keyValue
@@ -287,26 +469,32 @@ nonisolated struct RelayKeySummary: Codable, Equatable, Hashable, Sendable {
         self.source = source
         self.note = note
         self.issuedAt = issuedAt
+        self.accountID = accountID
+        self.lastUsedAt = lastUsedAt
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         keyID = try container.decodeFirstPresent(UUID.self, forKeys: [.keyID, .keyIDConverted, .keyIDSnake])
-        keyValue = try container.decodeFirstPresent(String.self, forKeys: [.keyValue, .keyValueSnake])
+        keyValue = try container.decodeIfPresentFirst(String.self, forKeys: [.keyValue, .keyValueSnake])
         state = try container.decode(RelayKeyState.self, forKey: .state)
         source = try container.decode(RelayAccessSource.self, forKey: .source)
         note = try container.decodeIfPresent(String.self, forKey: .note)
         issuedAt = try container.decodeFirstPresent(Date.self, forKeys: [.issuedAt, .issuedAtSnake])
+        accountID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
+        lastUsedAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.lastUsedAt, .lastUsedAtSnake])
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(keyID, forKey: .keyID)
-        try container.encode(keyValue, forKey: .keyValue)
+        try container.encodeIfPresent(keyValue, forKey: .keyValue)
         try container.encode(state, forKey: .state)
         try container.encode(source, forKey: .source)
         try container.encodeIfPresent(note, forKey: .note)
         try container.encode(issuedAt, forKey: .issuedAt)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
+        try container.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
     }
 }
 
@@ -318,6 +506,9 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
     var grantedAt: Date
     var expiresAt: Date?
     var note: String?
+    /// TS additions — required server-side, optional on Swift for forward compat.
+    var accountID: UUID?
+    var sourceTransactionID: String?
 
     private enum CodingKeys: String, CodingKey {
         case grantID
@@ -333,6 +524,12 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
         case expiresAt
         case expiresAtSnake = "expires_at"
         case note
+        case accountID
+        case accountIDConverted = "accountId"
+        case accountIDSnake = "account_id"
+        case sourceTransactionID
+        case sourceTransactionIDConverted = "sourceTransactionId"
+        case sourceTransactionIDSnake = "source_transaction_id"
     }
 
     init(
@@ -342,7 +539,9 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
         remainingCredits: Int,
         grantedAt: Date,
         expiresAt: Date?,
-        note: String?
+        note: String?,
+        accountID: UUID? = nil,
+        sourceTransactionID: String? = nil
     ) {
         self.grantID = grantID
         self.source = source
@@ -351,6 +550,8 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
         self.grantedAt = grantedAt
         self.expiresAt = expiresAt
         self.note = note
+        self.accountID = accountID
+        self.sourceTransactionID = sourceTransactionID
     }
 
     init(from decoder: Decoder) throws {
@@ -362,6 +563,11 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
         grantedAt = try container.decodeFirstPresent(Date.self, forKeys: [.grantedAt, .grantedAtSnake])
         expiresAt = try container.decodeIfPresentFirst(Date.self, forKeys: [.expiresAt, .expiresAtSnake])
         note = try container.decodeIfPresent(String.self, forKey: .note)
+        accountID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
+        sourceTransactionID = try container.decodeIfPresentFirst(
+            String.self,
+            forKeys: [.sourceTransactionID, .sourceTransactionIDConverted, .sourceTransactionIDSnake]
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -373,19 +579,28 @@ nonisolated struct RelayGrantSummary: Codable, Equatable, Hashable, Sendable {
         try container.encode(grantedAt, forKey: .grantedAt)
         try container.encodeIfPresent(expiresAt, forKey: .expiresAt)
         try container.encodeIfPresent(note, forKey: .note)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
+        try container.encodeIfPresent(sourceTransactionID, forKey: .sourceTransactionID)
     }
 }
 
 nonisolated struct RelayUsageSummary: Codable, Equatable, Hashable, Sendable {
     var requestID: UUID
     var endpoint: String
-    var modelID: String
+    /// TS contract: `modelID?: string` (`relay/src/lib/billing/types.ts:71`). A single null model
+    /// in `recentUsage` previously crashed the entire response decode and silently nuked the list
+    /// because `RelayAccountStatusResponse.init` swallowed it with `try?`.
+    var modelID: String?
     var inputTokens: Int
     var outputTokens: Int
     var reservedCredits: Int
     var settledCredits: Int
     var searchCount: Int
     var createdAt: Date
+    /// TS additions — optional both sides.
+    var accountID: UUID?
+    var deviceID: String?
+    var keyID: UUID?
 
     private enum CodingKeys: String, CodingKey {
         case requestID
@@ -407,18 +622,30 @@ nonisolated struct RelayUsageSummary: Codable, Equatable, Hashable, Sendable {
         case searchCountSnake = "search_count"
         case createdAt
         case createdAtSnake = "created_at"
+        case accountID
+        case accountIDConverted = "accountId"
+        case accountIDSnake = "account_id"
+        case deviceID
+        case deviceIDConverted = "deviceId"
+        case deviceIDSnake = "device_id"
+        case keyID
+        case keyIDConverted = "keyId"
+        case keyIDSnake = "key_id"
     }
 
     init(
         requestID: UUID,
         endpoint: String,
-        modelID: String,
+        modelID: String?,
         inputTokens: Int,
         outputTokens: Int,
         reservedCredits: Int,
         settledCredits: Int,
         searchCount: Int,
-        createdAt: Date
+        createdAt: Date,
+        accountID: UUID? = nil,
+        deviceID: String? = nil,
+        keyID: UUID? = nil
     ) {
         self.requestID = requestID
         self.endpoint = endpoint
@@ -429,32 +656,41 @@ nonisolated struct RelayUsageSummary: Codable, Equatable, Hashable, Sendable {
         self.settledCredits = settledCredits
         self.searchCount = searchCount
         self.createdAt = createdAt
+        self.accountID = accountID
+        self.deviceID = deviceID
+        self.keyID = keyID
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         requestID = try container.decodeFirstPresent(UUID.self, forKeys: [.requestID, .requestIDConverted, .requestIDSnake])
         endpoint = try container.decode(String.self, forKey: .endpoint)
-        modelID = try container.decodeFirstPresent(String.self, forKeys: [.modelID, .modelIDConverted, .modelIDSnake])
+        modelID = try container.decodeIfPresentFirst(String.self, forKeys: [.modelID, .modelIDConverted, .modelIDSnake])
         inputTokens = try container.decodeFirstPresent(Int.self, forKeys: [.inputTokens, .inputTokensSnake])
         outputTokens = try container.decodeFirstPresent(Int.self, forKeys: [.outputTokens, .outputTokensSnake])
         reservedCredits = try container.decodeFirstPresent(Int.self, forKeys: [.reservedCredits, .reservedCreditsSnake])
         settledCredits = try container.decodeFirstPresent(Int.self, forKeys: [.settledCredits, .settledCreditsSnake])
         searchCount = try container.decodeFirstPresent(Int.self, forKeys: [.searchCount, .searchCountSnake])
         createdAt = try container.decodeFirstPresent(Date.self, forKeys: [.createdAt, .createdAtSnake])
+        accountID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
+        deviceID = try container.decodeIfPresentFirst(String.self, forKeys: [.deviceID, .deviceIDConverted, .deviceIDSnake])
+        keyID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.keyID, .keyIDConverted, .keyIDSnake])
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(requestID, forKey: .requestID)
         try container.encode(endpoint, forKey: .endpoint)
-        try container.encode(modelID, forKey: .modelID)
+        try container.encodeIfPresent(modelID, forKey: .modelID)
         try container.encode(inputTokens, forKey: .inputTokens)
         try container.encode(outputTokens, forKey: .outputTokens)
         try container.encode(reservedCredits, forKey: .reservedCredits)
         try container.encode(settledCredits, forKey: .settledCredits)
         try container.encode(searchCount, forKey: .searchCount)
         try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
+        try container.encodeIfPresent(deviceID, forKey: .deviceID)
+        try container.encodeIfPresent(keyID, forKey: .keyID)
     }
 }
 
@@ -488,12 +724,23 @@ nonisolated struct RelayAccountStatusResponse: Codable, Equatable, Sendable {
     }
 
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        account = try? container.decodeIfPresent(RelayAccountSummary.self, forKey: .account)
-        device = try? container.decodeIfPresent(RelayDeviceSummary.self, forKey: .device)
-        key = try? container.decodeIfPresent(RelayKeySummary.self, forKey: .key)
-        grants = (try? container.decodeIfPresent([RelayGrantSummary].self, forKey: .grants)) ?? []
-        recentUsage = (try? container.decodeIfPresent([RelayUsageSummary].self, forKey: .recentUsage)) ?? []
+        do {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // `account` is genuinely optional on the wire (no online account bound yet).
+            account = try container.decodeIfPresent(RelayAccountSummary.self, forKey: .account)
+            // `device` and `key` follow the same per-device-binding convention.
+            device = try container.decodeIfPresent(RelayDeviceSummary.self, forKey: .device)
+            key = try container.decodeIfPresent(RelayKeySummary.self, forKey: .key)
+            // TS sends `grants` and `recentUsage` as required arrays (possibly empty). Decode strictly
+            // — silent fallbacks here are exactly how prior schema drift hid online-billing visibility.
+            grants = try container.decodeIfPresent([RelayGrantSummary].self, forKey: .grants) ?? []
+            recentUsage = try container.decodeIfPresent([RelayUsageSummary].self, forKey: .recentUsage) ?? []
+        } catch {
+            relayBillingContractLog.error(
+                "RelayAccountStatusResponse decode failed: \(String(describing: error), privacy: .public)"
+            )
+            throw error
+        }
     }
 }
 

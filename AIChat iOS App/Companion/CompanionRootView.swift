@@ -25,6 +25,8 @@ struct CompanionRootView: View {
     @State private var bottomSurfaceHeight: CGFloat = 0
     @State private var importedActivationCode = ""
     @State private var isShowingActivationCenter = false
+    @State private var pendingWatchTransferCode: String?
+    @State private var shouldAutoSendImportedCodeToWatch = false
 
     init(initialSelectedConversationID: UUID? = nil) {
         _selectedConversationID = State(initialValue: initialSelectedConversationID)
@@ -63,10 +65,33 @@ struct CompanionRootView: View {
         .sheet(isPresented: $isShowingActivationCenter) {
             CompanionActivationCenterView(
                 prefilledActivationCode: importedActivationCode,
-                autoSendToWatch: true
+                autoSendToWatch: shouldAutoSendImportedCodeToWatch
             )
             .id(importedActivationCode)
             .environmentObject(chatStore)
+        }
+        .alert(
+            L10n.tr("activation.companion.confirm_watch_send.title"),
+            isPresented: Binding(
+                get: { pendingWatchTransferCode != nil },
+                set: { newValue in
+                    if newValue == false {
+                        pendingWatchTransferCode = nil
+                    }
+                }
+            ),
+            presenting: pendingWatchTransferCode
+        ) { code in
+            Button(L10n.tr("activation.companion.confirm_watch_send.confirm")) {
+                pendingWatchTransferCode = nil
+                openActivationCenter(with: code, autoSendToWatch: true)
+            }
+            Button(L10n.tr("activation.companion.confirm_watch_send.review"), role: .cancel) {
+                pendingWatchTransferCode = nil
+                openActivationCenter(with: code, autoSendToWatch: false)
+            }
+        } message: { _ in
+            Text(L10n.tr("activation.companion.confirm_watch_send.message"))
         }
         .onPreferenceChange(CompanionBottomSurfaceHeightKey.self) { height in
             bottomSurfaceHeight = height
@@ -123,8 +148,15 @@ struct CompanionRootView: View {
     private func handleDeepLink(_ deepLink: AIChatDeepLink) {
         switch deepLink {
         case let .activationImport(activationCode):
-            importedActivationCode = activationCode
-            isShowingActivationCenter = true
+            // Deep links can come from any app or the URL bar — never auto-push
+            // the code over WatchConnectivity without an explicit user prompt.
+            // The in-app share-sheet path goes through `openActivationCenter`
+            // directly and may opt-in to auto-send.
+            if chatStore.canTransferActivationCodeToPairedWatch {
+                pendingWatchTransferCode = activationCode
+            } else {
+                openActivationCenter(with: activationCode, autoSendToWatch: false)
+            }
         case .newConversation:
             guard chatStore.isReadOnlyMode == false else {
                 return
@@ -132,6 +164,12 @@ struct CompanionRootView: View {
 
             createConversation()
         }
+    }
+
+    private func openActivationCenter(with code: String, autoSendToWatch: Bool) {
+        importedActivationCode = code
+        shouldAutoSendImportedCodeToWatch = autoSendToWatch
+        isShowingActivationCenter = true
     }
 }
 

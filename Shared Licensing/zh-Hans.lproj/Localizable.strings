@@ -70,6 +70,7 @@
 "error.relay.empty_response" = "Relay 返回了空回复。";
 "error.relay.storekit_product_unavailable" = "App Store 找不到商品 %@。请确认产品已在 App Store Connect 上架，或为模拟器配置 StoreKit 测试文件。";
 "error.relay.incomplete_finish" = "Relay 返回了未完成的结束状态（%@）。";
+"error.relay.direct_mode_unsupported" = "当前版本不支持 Direct 后端模式。";
 "error.transcription.unavailable" = "当前配置下暂时无法使用语音转录。";
 "error.transcription.invalid_audio" = "录音文件无法用于转录。";
 "error.transcription.empty" = "Gemini 没有返回可用的转录结果。";
@@ -399,3 +400,33 @@
 "请求码格式不正确" = "请求码格式不正确";
 "错误" = "错误";
 "限制发送次数" = "限制发送次数";
+
+/* Companion Activation Center */
+"activation.center.title" = "激活与订阅";
+"activation.center.section.online_account" = "在线账户";
+"activation.center.section.online_plans" = "在线购买";
+"activation.center.section.recent_usage" = "最近用量";
+"activation.center.purchase.success" = "购买成功，在线额度已更新。";
+"activation.center.purchase.pending" = "购买已提交，等待 App Store 确认。";
+"activation.center.purchase.cancelled" = "已取消购买。";
+"activation.center.request_access.trial" = "申请试用";
+"activation.center.request_access.refresh" = "刷新在线权限";
+"activation.center.request_access.reapply" = "重新申请使用";
+"activation.center.request_access.failure" = "申请失败：%@";
+"activation.center.request_access.submitted_no_status" = "申请已提交，但暂未返回账户状态。";
+"activation.center.request_access.result_prefix" = "申请结果：%@";
+"activation.center.request_access.balance" = "余额 %d credits";
+"activation.center.request_access.expires" = "到期 %@";
+"activation.center.restore.success" = "恢复完成，账户状态已刷新。";
+
+/* Activation deep-link confirmation */
+"activation.companion.confirm_watch_send.title" = "把激活码发送到 Apple Watch？";
+"activation.companion.confirm_watch_send.message" = "刚才通过链接打开了一个激活码。可以选择直接发到已配对的手表，或先在 iPhone 端确认。";
+"activation.companion.confirm_watch_send.confirm" = "发送到手表";
+"activation.companion.confirm_watch_send.review" = "先查看";
+
+/* Watch Widget */
+"widget.new_conversation.title" = "新对话";
+"widget.new_conversation.subtitle" = "一键打开 AIChat";
+"widget.new_conversation.display_name" = "新对话";
+"widget.new_conversation.description" = "一键进入 AIChat 并开始一条新会话。";

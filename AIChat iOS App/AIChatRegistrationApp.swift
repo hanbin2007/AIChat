@@ -68,6 +68,8 @@ struct AIChatRegistrationApp: App {
 
                 Task {
                     await chatStore.refreshRemoteSyncState()
+                    await chatStore.refreshActivationState()
+                    await chatStore.refreshRelayCatalog()
                 }
             }
             #else

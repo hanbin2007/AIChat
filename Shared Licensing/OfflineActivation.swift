@@ -30,9 +30,26 @@ nonisolated enum OfflineActivation {
         return components.date ?? Date(timeIntervalSince1970: 1_735_689_600)
     }()
 
-    // Replace this seed before shipping. The same seed must remain in the
-    // watch verifier and the offline key generator.
-    private static let sharedSecretSeed = "AIChat-Offline-Activation-2026-Replace-Me"
+    // TODO(security): replace HMAC with a server-issued Ed25519 signature so the
+    // secret never ships in any client. The Bundle-based fallback below is a
+    // stopgap; production builds MUST set OFFLINE_ACTIVATION_SIGNING_SEED in
+    // xcconfig (Config/Secrets.xcconfig and the Watch Widget Info.plist). The
+    // same seed must remain in the watch verifier and the offline key generator
+    // until that epic lands.
+    private static let signingSeedInfoKey = "OFFLINE_ACTIVATION_SIGNING_SEED"
+
+    private static var sharedSecretSeed: String {
+        guard
+            let seed = Bundle.main.object(forInfoDictionaryKey: signingSeedInfoKey) as? String,
+            seed.isEmpty == false
+        else {
+            // Production builds MUST configure this — see Config/Secrets.xcconfig.example.
+            // We fail loudly rather than silently accept a default seed (which previously
+            // shipped baked into the binary and could mint unlimited activation codes).
+            fatalError("\(signingSeedInfoKey) is required. See Config/Secrets.xcconfig.example.")
+        }
+        return seed
+    }
 
     private static var signingKey: SymmetricKey {
         let digest = SHA256.hash(data: Data(sharedSecretSeed.utf8))

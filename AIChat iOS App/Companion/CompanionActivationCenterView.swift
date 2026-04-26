@@ -163,7 +163,7 @@ struct CompanionActivationCenterView: View {
                     }
                 }
             }
-            .navigationTitle("激活与订阅")
+            .navigationTitle(L10n.tr("activation.center.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -186,7 +186,7 @@ struct CompanionActivationCenterView: View {
 
     @ViewBuilder
     private var onlineAccountSection: some View {
-        Section("在线账户") {
+        Section(L10n.tr("activation.center.section.online_account")) {
             if let account = chatStore.relayAccountStatus?.account {
                 LabeledContent("来源", value: sourceText(chatStore.relayAccountStatus?.key?.source))
                 LabeledContent("状态", value: accountStateText(account.state))
@@ -234,7 +234,7 @@ struct CompanionActivationCenterView: View {
 
     @ViewBuilder
     private var onlinePlansSection: some View {
-        Section("在线购买") {
+        Section(L10n.tr("activation.center.section.online_plans")) {
             if let plans = chatStore.relayCatalog?.plans, plans.isEmpty == false {
                 ForEach(plans) { plan in
                     HStack(alignment: .top, spacing: 12) {
@@ -279,10 +279,10 @@ struct CompanionActivationCenterView: View {
     @ViewBuilder
     private var recentUsageSection: some View {
         if let usage = chatStore.relayAccountStatus?.recentUsage, usage.isEmpty == false {
-            Section("最近用量") {
+            Section(L10n.tr("activation.center.section.recent_usage")) {
                 ForEach(usage.prefix(5), id: \.requestID) { entry in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("\(entry.endpoint) • \(entry.modelID)")
+                        Text("\(entry.endpoint) • \(entry.modelID ?? "—")")
                             .font(.subheadline.weight(.medium))
                         Text("in \(entry.inputTokens) • out \(entry.outputTokens) • \(entry.settledCredits) credits")
                             .font(.footnote)
@@ -420,11 +420,11 @@ struct CompanionActivationCenterView: View {
         do {
             switch try await chatStore.purchaseRelayPlan(id: planID) {
             case .completed:
-                feedbackMessage = "购买成功，在线额度已更新。"
+                feedbackMessage = L10n.tr("activation.center.purchase.success")
             case .pending:
-                feedbackMessage = "购买已提交，等待 App Store 确认。"
+                feedbackMessage = L10n.tr("activation.center.purchase.pending")
             case .cancelled:
-                feedbackMessage = "已取消购买。"
+                feedbackMessage = L10n.tr("activation.center.purchase.cancelled")
             }
         } catch {
             feedbackMessage = error.localizedDescription
@@ -433,9 +433,11 @@ struct CompanionActivationCenterView: View {
 
     private var requestAccessButtonTitle: String {
         guard let account = chatStore.relayAccountStatus?.account else {
-            return "申请试用"
+            return L10n.tr("activation.center.request_access.trial")
         }
-        return account.state == .active && account.creditBalance > 0 ? "刷新在线权限" : "重新申请使用"
+        return account.state == .active && account.creditBalance > 0
+            ? L10n.tr("activation.center.request_access.refresh")
+            : L10n.tr("activation.center.request_access.reapply")
     }
 
     private func requestManagedRelayAccess() async {
@@ -446,19 +448,30 @@ struct CompanionActivationCenterView: View {
             let status = try await chatStore.requestManagedRelayAccess()
             feedbackMessage = relayAccessResultMessage(from: status)
         } catch {
-            feedbackMessage = "申请失败：\(error.localizedDescription)"
+            feedbackMessage = L10n.format(
+                "activation.center.request_access.failure",
+                error.localizedDescription
+            )
         }
     }
 
     private func relayAccessResultMessage(from status: RelayAccountStatusResponse?) -> String {
         guard let account = status?.account else {
-            return "申请已提交，但暂未返回账户状态。"
+            return L10n.tr("activation.center.request_access.submitted_no_status")
         }
 
-        var parts = ["申请结果：\(accountStateText(account.state))", "余额 \(account.creditBalance) credits"]
+        var parts = [
+            L10n.format("activation.center.request_access.result_prefix", accountStateText(account.state)),
+            L10n.format("activation.center.request_access.balance", account.creditBalance)
+        ]
 
         if let expiration = account.creditExpiresAt {
-            parts.append("到期 \(expiration.formatted(date: .abbreviated, time: .shortened))")
+            parts.append(
+                L10n.format(
+                    "activation.center.request_access.expires",
+                    expiration.formatted(date: .abbreviated, time: .shortened)
+                )
+            )
         }
 
         if let note = account.adminNote?.nonEmptyTrimmed {
@@ -474,7 +487,7 @@ struct CompanionActivationCenterView: View {
 
         do {
             _ = try await chatStore.restoreRelayPurchases()
-            feedbackMessage = "恢复完成，账户状态已刷新。"
+            feedbackMessage = L10n.tr("activation.center.restore.success")
         } catch {
             feedbackMessage = error.localizedDescription
         }
@@ -493,6 +506,8 @@ struct CompanionActivationCenterView: View {
             return "订阅"
         case .offlineManual:
             return "离线导入"
+        case .unknown(let raw):
+            return raw
         case nil:
             return "unknown"
         }
@@ -508,6 +523,8 @@ struct CompanionActivationCenterView: View {
             return "已过期"
         case .inactive:
             return "未激活"
+        case .unknown(let raw):
+            return raw
         }
     }
 

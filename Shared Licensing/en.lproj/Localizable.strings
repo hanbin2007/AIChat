@@ -70,6 +70,7 @@
 "error.relay.empty_response" = "Relay returned an empty reply.";
 "error.relay.storekit_product_unavailable" = "App Store can't find product %@. Verify the product is live in App Store Connect, or provide a StoreKit configuration file for the simulator.";
 "error.relay.incomplete_finish" = "Relay reported incomplete finish (%@).";
+"error.relay.direct_mode_unsupported" = "Direct backend mode is not supported in this build.";
 "error.transcription.unavailable" = "Voice transcription isn't available in the current setup.";
 "error.transcription.invalid_audio" = "The recorded audio couldn't be prepared for transcription.";
 "error.transcription.empty" = "Gemini didn't return a usable transcript.";
@@ -400,3 +401,33 @@
 "请求码格式不正确" = "Invalid request code format";
 "错误" = "Error";
 "限制发送次数" = "Limit Sends";
+
+/* Companion Activation Center */
+"activation.center.title" = "Activation & Subscription";
+"activation.center.section.online_account" = "Online Account";
+"activation.center.section.online_plans" = "Online Plans";
+"activation.center.section.recent_usage" = "Recent Usage";
+"activation.center.purchase.success" = "Purchase complete. Online credits have been updated.";
+"activation.center.purchase.pending" = "Purchase submitted. Waiting for App Store confirmation.";
+"activation.center.purchase.cancelled" = "Purchase cancelled.";
+"activation.center.request_access.trial" = "Request Trial";
+"activation.center.request_access.refresh" = "Refresh Online Access";
+"activation.center.request_access.reapply" = "Re-request Access";
+"activation.center.request_access.failure" = "Request failed: %@";
+"activation.center.request_access.submitted_no_status" = "Request submitted, but no account status was returned yet.";
+"activation.center.request_access.result_prefix" = "Result: %@";
+"activation.center.request_access.balance" = "Balance %d credits";
+"activation.center.request_access.expires" = "Expires %@";
+"activation.center.restore.success" = "Restore complete. Account status has been refreshed.";
+
+/* Activation deep-link confirmation */
+"activation.companion.confirm_watch_send.title" = "Send activation code to your watch?";
+"activation.companion.confirm_watch_send.message" = "An activation code was opened from a deep link. You can send it to the paired watch automatically, or review it on iPhone first.";
+"activation.companion.confirm_watch_send.confirm" = "Send to Watch";
+"activation.companion.confirm_watch_send.review" = "Review First";
+
+/* Watch Widget */
+"widget.new_conversation.title" = "New Chat";
+"widget.new_conversation.subtitle" = "Open AIChat";
+"widget.new_conversation.display_name" = "New Chat";
+"widget.new_conversation.description" = "Tap to launch AIChat and start a new conversation.";
