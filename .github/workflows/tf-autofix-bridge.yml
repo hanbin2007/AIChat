@@ -1,0 +1,61 @@
+name: tf-autofix-bridge
+
+# Converts Xcode Cloud's check_run.completed events into a workflow_dispatch
+# call on tf-autofix.yml. Necessary because anthropics/claude-code-action@v1
+# rejects check_run as an "Unsupported event type", so we can't invoke
+# Claude directly from a check_run-triggered workflow.
+#
+# Pure routing — no Claude invocation here. Owner-permission and label
+# enforcement are unchanged from when this lived in tf-autofix.yml.
+
+on:
+  check_run:
+    types: [completed]
+
+permissions:
+  actions: write   # gh workflow run dispatch
+  contents: read
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    env:
+      # check_suite.head_branch is unreliable when a SHA is reachable from
+      # multiple refs; prefer the PR's head.ref via the check_run.pull_requests
+      # array. See PR #34 / 2026-04-26 incident.
+      BRANCH: ${{ github.event.check_run.pull_requests[0].head.ref || github.event.check_run.check_suite.head_branch }}
+      CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
+      CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
+      CHECK_NAME: ${{ github.event.check_run.name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Resolve and dispatch
+        run: |
+          set -euo pipefail
+
+          # Only autofix/issue-<N> branches are interesting here.
+          if ! [[ "$BRANCH" =~ ^autofix/issue-([0-9]+)$ ]]; then
+            echo "BRANCH '$BRANCH' is not an autofix branch; skipping."
+            exit 0
+          fi
+          ISSUE_NUMBER="${BASH_REMATCH[1]}"
+
+          # Apple's Xcode Cloud reports test failures as `action_required`
+          # (not `failure`) — accept it as terminal so the autofix routine
+          # can iterate.
+          case "$CHECK_CONCLUSION" in
+            success|failure|cancelled|timed_out|action_required)
+              ;;
+            *)
+              echo "check_run conclusion '$CHECK_CONCLUSION' not terminal; skipping."
+              exit 0
+              ;;
+          esac
+
+          gh workflow run tf-autofix.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f issue_number="$ISSUE_NUMBER" \
+            -f check_conclusion="$CHECK_CONCLUSION" \
+            -f check_details_url="$CHECK_DETAILS_URL" \
+            -f check_name="$CHECK_NAME"

@@ -1,0 +1,49 @@
+name: tf-ship-finalize-bridge
+
+# Converts Xcode Cloud's `Ship to TestFlight` check_run.completed event on
+# main into a workflow_dispatch call on tf-ship-finalize.yml. Necessary
+# because anthropics/claude-code-action@v1 rejects check_run as an
+# "Unsupported event type", so we can't invoke Claude directly from a
+# check_run-triggered workflow.
+
+on:
+  check_run:
+    types: [completed]
+
+permissions:
+  actions: write   # gh workflow run dispatch
+  contents: read
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: ${{ github.event.check_run.check_suite.head_branch }}
+      CHECK_NAME: ${{ github.event.check_run.name }}
+      CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
+      CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
+      HEAD_SHA: ${{ github.event.check_run.head_sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Resolve and dispatch
+        run: |
+          set -euo pipefail
+
+          # Filter to ship-relevant checks before paying for the dispatch.
+          # Xcode Cloud reports its checks as "Xcode Cloud / <Workflow Name>".
+          if [ "$BRANCH" != "main" ]; then
+            echo "BRANCH '$BRANCH' is not main; skipping."
+            exit 0
+          fi
+          if ! [[ "$CHECK_NAME" =~ ^Xcode\ Cloud[[:space:]]*/[[:space:]]*Ship\ to\ TestFlight$ ]]; then
+            echo "CHECK_NAME '$CHECK_NAME' is not the ship workflow; skipping."
+            exit 0
+          fi
+
+          gh workflow run tf-ship-finalize.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f main_sha="$HEAD_SHA" \
+            -f check_conclusion="$CHECK_CONCLUSION" \
+            -f check_details_url="$CHECK_DETAILS_URL" \
+            -f check_name="$CHECK_NAME"
