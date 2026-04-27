@@ -20,6 +20,10 @@ xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,i
 
 # Run watch UI tests
 xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" -only-testing:"AIChat Watch AppUITests" test
+
+# UI-test-only schemes (used by Xcode Cloud to surface screenshots)
+xcodebuild -scheme "AIChat Watch UITests" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test
+xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,name=iPhone 17" test
 ```
 
 **Known-good simulator (verified 2026-04-19):**
@@ -85,3 +89,5 @@ Chinese (zh-Hans) and English via `L10n.swift` in `Shared Licensing/`. Use `L10n
 ### UI Test Infrastructure
 
 UI tests use environment variable `AIChat_UI_TEST_SCENARIO` to bootstrap specific `ChatStore` configurations with seeded data and mock streaming services. Test scenarios are defined in `AIChatApp.swift` under `UITestBootstrap`.
+
+**When you make UI-affecting changes, the change MUST be exercised by a test in `AIChat Watch AppUITests` or `AIChat iOS AppUITests` that calls `attachScreenshot(app, named:)` at the relevant moment.** Xcode Cloud runs the dedicated `AIChat Watch UITests` / `AIChat iOS UITests` schemes, and `ci_scripts/ci_post_xcodebuild.sh` extracts every `XCTAttachment` screenshot from the resulting `.xcresult` into `ci_artifacts/ui-screenshots/`, which Xcode Cloud publishes as downloadable artifacts on the build report and PR check page. No screenshot attachment ⇒ no visual review surface for the UI change.
