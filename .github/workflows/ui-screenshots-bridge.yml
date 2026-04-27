@@ -1,0 +1,72 @@
+name: ui-screenshots-bridge
+
+# Routes Xcode Cloud check_run completions for PR builds into a
+# workflow_dispatch on ui-screenshots.yml. Pure routing — no Claude or
+# secret-bearing work happens here. Same shape as tf-autofix-bridge.yml.
+#
+# The downstream workflow (ui-screenshots.yml) is no-op when the build
+# didn't ship a ci_artifacts/ui-screenshots/ bundle, so this bridge can
+# fire on every Xcode Cloud check without forcing per-workflow filters
+# in App Store Connect.
+
+on:
+  check_run:
+    types: [completed]
+
+permissions:
+  actions: write   # gh workflow run dispatch
+  contents: read
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    env:
+      CHECK_NAME: ${{ github.event.check_run.name }}
+      CHECK_CONCLUSION: ${{ github.event.check_run.conclusion }}
+      CHECK_DETAILS_URL: ${{ github.event.check_run.details_url }}
+      CHECK_APP_SLUG: ${{ github.event.check_run.app.slug }}
+      PR_NUMBER: ${{ github.event.check_run.pull_requests[0].number }}
+      HEAD_SHA: ${{ github.event.check_run.head_sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Resolve and dispatch
+        run: |
+          set -euo pipefail
+
+          # Only Xcode Cloud check_runs have an ASC build run id encoded
+          # in details_url. The app slug is the most reliable filter.
+          if [ "$CHECK_APP_SLUG" != "appstore-connect" ] \
+             && ! printf '%s' "$CHECK_NAME" | grep -qi 'xcode cloud'; then
+            echo "Not an Xcode Cloud check (app=$CHECK_APP_SLUG, name=$CHECK_NAME); skipping."
+            exit 0
+          fi
+
+          # No PR ⇒ nowhere to post screenshots; main-branch builds skip.
+          if [ -z "${PR_NUMBER:-}" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "check_run not associated with a PR; skipping."
+            exit 0
+          fi
+
+          # Apple reports test failures as action_required; treat any
+          # terminal-ish state as worth fetching screenshots from.
+          case "$CHECK_CONCLUSION" in
+            success|failure|action_required|neutral) ;;
+            *)
+              echo "check_run conclusion '$CHECK_CONCLUSION' not terminal; skipping."
+              exit 0
+              ;;
+          esac
+
+          RUN_ID="${CHECK_DETAILS_URL##*/}"
+          if [ -z "$RUN_ID" ]; then
+            echo "Could not parse run id from details_url=$CHECK_DETAILS_URL; skipping."
+            exit 0
+          fi
+
+          gh workflow run ui-screenshots.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f pr_number="$PR_NUMBER" \
+            -f run_id="$RUN_ID" \
+            -f head_sha="$HEAD_SHA" \
+            -f check_name="$CHECK_NAME"

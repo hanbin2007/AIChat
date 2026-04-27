@@ -1,0 +1,174 @@
+name: ui-screenshots
+
+# Pulls the ci_artifacts/ui-screenshots/ bundle off an Xcode Cloud build
+# run via the ASC API, uploads the PNGs as a GHA artifact, and posts a
+# summary comment on the PR. Runs on ubuntu — no macOS minutes burned.
+#
+# Triggered by ui-screenshots-bridge.yml on every Xcode Cloud
+# check_run.completed for a PR. The job is a clean no-op if the build
+# didn't carry a screenshot bundle (i.e. the workflow didn't run
+# AIChat Watch UITests / AIChat iOS UITests), so it's safe to fire wide.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to post results on"
+        required: true
+      run_id:
+        description: "Xcode Cloud ciBuildRun id"
+        required: true
+      head_sha:
+        description: "Head commit SHA"
+        required: false
+      check_name:
+        description: "Originating check name"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  fetch-and-post:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ui-screenshots-pr-${{ inputs.pr_number }}
+      cancel-in-progress: true
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      RUN_ID: ${{ inputs.run_id }}
+      HEAD_SHA: ${{ inputs.head_sha }}
+      CHECK_NAME: ${{ inputs.check_name }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      ASC_PRODUCT_ID: ${{ secrets.ASC_PRODUCT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout (need asc.py + scripts)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: List Xcode Cloud build artifacts
+        id: list
+        run: |
+          set -euo pipefail
+          mkdir -p .ui-screenshots
+          python3 .claude/routines/scripts/asc.py artifacts --run "$RUN_ID" \
+            > .ui-screenshots/artifacts.json
+          echo "artifact_count=$(jq 'length' .ui-screenshots/artifacts.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Download and extract image attachments
+        id: extract
+        run: |
+          set -euo pipefail
+          OUT=.ui-screenshots/images
+          mkdir -p "$OUT"
+
+          # Xcode Cloud surfaces ci_artifacts/ as ARCHIVE-typed artifacts
+          # (one zip per top-level directory). Pull every archive that has
+          # a usable downloadUrl and open them; we'll filter for images
+          # afterwards. Anything else (LOG/LOGARCHIVE) is ignored.
+          jq -r '.[] | select(.downloadUrl != null and (.fileType // "" | ascii_upcase) == "ARCHIVE") | [.fileName, .downloadUrl] | @tsv' \
+            .ui-screenshots/artifacts.json > .ui-screenshots/archives.tsv
+
+          archive_count=$(wc -l < .ui-screenshots/archives.tsv | tr -d ' ')
+          echo "Considering $archive_count archive(s) from build run $RUN_ID"
+
+          while IFS=$'\t' read -r name url; do
+            [ -n "${url:-}" ] || continue
+            safe_name=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')
+            tmp=".ui-screenshots/_dl_${safe_name}"
+            mkdir -p "$tmp"
+            echo "Downloading $name"
+            curl -fsSL "$url" -o "$tmp/archive.zip" || {
+              echo "  download failed; skipping"
+              continue
+            }
+            # Archives may be plain zip (ci_artifacts contents) or .xcresult
+            # bundles (ZIP under the hood). unzip handles both.
+            unzip -q -o "$tmp/archive.zip" -d "$tmp/unpacked" || {
+              echo "  unzip failed; skipping"
+              continue
+            }
+            # Look only inside ui-screenshots subtrees — avoids hauling
+            # screenshots out of unrelated archives if Xcode ever bundles
+            # other test attachments alongside them.
+            find "$tmp/unpacked" -type d -iname 'ui-screenshots' -print | while read -r dir; do
+              find "$dir" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) -print0 \
+                | while IFS= read -r -d '' img; do
+                    base=$(basename "$img")
+                    cp -n "$img" "$OUT/$base"
+                  done
+            done
+            rm -rf "$tmp"
+          done < .ui-screenshots/archives.tsv
+
+          image_count=$(find "$OUT" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) | wc -l | tr -d ' ')
+          echo "image_count=$image_count" >> "$GITHUB_OUTPUT"
+          echo "Extracted $image_count screenshot(s)"
+
+      - name: Upload screenshots as workflow artifact
+        if: steps.extract.outputs.image_count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ inputs.run_id }}
+          path: .ui-screenshots/images/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Post (or update) PR comment
+        if: steps.extract.outputs.image_count != '0'
+        env:
+          IMAGE_COUNT: ${{ steps.extract.outputs.image_count }}
+        run: |
+          set -euo pipefail
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          marker="<!-- ui-screenshots-bot:run=${RUN_ID} -->"
+
+          {
+            printf '%s\n' "$marker"
+            printf '### UI screenshots from Xcode Cloud\n\n'
+            printf '%s screenshot file(s) from build run `%s`' "$IMAGE_COUNT" "$RUN_ID"
+            if [ -n "${HEAD_SHA:-}" ]; then
+              printf ' on commit `%s`' "${HEAD_SHA:0:7}"
+            fi
+            printf '.\n\n'
+            printf '%s' '**Files:**'
+            printf '\n\n'
+            (cd .ui-screenshots/images && ls | sort) | sed 's/^/- `/' | sed 's/$/`/'
+            printf '\nDownload: [ui-screenshots-%s](%s#artifacts)\n' "$RUN_ID" "$run_url"
+            if [ -n "${CHECK_NAME:-}" ]; then
+              printf '\n_From check: %s_\n' "$CHECK_NAME"
+            fi
+          } > .ui-screenshots/comment.md
+
+          # Update the existing comment for this build run if one is there;
+          # otherwise create a fresh one. Keeps the PR tidy across reruns.
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+                      --paginate --jq ".[] | select(.body | contains(\"$marker\")) | .id" \
+                      | head -n1 || true)
+
+          if [ -n "$existing" ]; then
+            gh api -X PATCH \
+              "repos/$GITHUB_REPOSITORY/issues/comments/$existing" \
+              -F body=@.ui-screenshots/comment.md >/dev/null
+            echo "Updated existing comment $existing"
+          else
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body-file .ui-screenshots/comment.md
+            echo "Posted new comment"
+          fi
+
+      - name: No-op summary
+        if: steps.extract.outputs.image_count == '0'
+        run: |
+          echo "Build run $RUN_ID carried no ui-screenshots bundle (probably not a UI-test workflow). Nothing to post."
