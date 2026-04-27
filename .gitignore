@@ -1,5 +1,6 @@
 DerivedData/
 .artifacts/
+ci_artifacts/
 .build/
 /build/
 .package-cache/
