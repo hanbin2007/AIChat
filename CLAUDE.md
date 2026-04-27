@@ -90,4 +90,11 @@ Chinese (zh-Hans) and English via `L10n.swift` in `Shared Licensing/`. Use `L10n
 
 UI tests use environment variable `AIChat_UI_TEST_SCENARIO` to bootstrap specific `ChatStore` configurations with seeded data and mock streaming services. Test scenarios are defined in `AIChatApp.swift` under `UITestBootstrap`.
 
-**When you make UI-affecting changes, the change MUST be exercised by a test in `AIChat Watch AppUITests` or `AIChat iOS AppUITests` that calls `attachScreenshot(app, named:)` at the relevant moment.** Xcode Cloud runs the dedicated `AIChat Watch UITests` / `AIChat iOS UITests` schemes, and `ci_scripts/ci_post_xcodebuild.sh` extracts every `XCTAttachment` screenshot from the resulting `.xcresult` into `ci_artifacts/ui-screenshots/`, which Xcode Cloud publishes as downloadable artifacts on the build report and PR check page. No screenshot attachment ⇒ no visual review surface for the UI change.
+**When you make UI-affecting changes, the change MUST be exercised by a test in `AIChat Watch AppUITests` or `AIChat iOS AppUITests` that calls `attachScreenshot(app, named:)` at the relevant moment.** Round-trip:
+
+1. Xcode Cloud runs the dedicated `AIChat Watch UITests` / `AIChat iOS UITests` schemes.
+2. `ci_scripts/ci_post_xcodebuild.sh` pulls every `XCTAttachment` screenshot from the `.xcresult` into `ci_artifacts/ui-screenshots/` (Xcode Cloud uploads `ci_artifacts/` as build artifacts).
+3. `.github/workflows/ui-screenshots-bridge.yml` catches the Xcode Cloud `check_run.completed` and dispatches `ui-screenshots.yml`.
+4. `ui-screenshots.yml` calls `python3 .claude/routines/scripts/asc.py artifacts --run "$RUN_ID"` to fetch the bundle via the ASC API, uploads PNGs as a workflow artifact, and posts (or updates) a single PR comment marked `<!-- ui-screenshots-bot:run=<id> -->`.
+
+No screenshot attachment in the test ⇒ no visual review surface for the UI change.

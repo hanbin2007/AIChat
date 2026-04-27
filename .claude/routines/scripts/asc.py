@@ -259,6 +259,33 @@ def build_log_urls(run_id: str) -> list[str]:
     return urls
 
 
+def list_artifacts(run_id: str) -> list[dict]:
+    """All artifacts attached to a build run's actions, with download URLs.
+
+    Used by the GitHub Actions ui-screenshots bridge to find the
+    ci_artifacts/ui-screenshots/ bundle published by ci_post_xcodebuild.sh.
+    """
+    actions = asc_get(f"/v1/ciBuildRuns/{run_id}/actions").get("data", [])
+    out: list[dict] = []
+    for a in actions:
+        action_attrs = a.get("attributes") or {}
+        action_id = a.get("id")
+        arts = asc_get(f"/v1/ciBuildActions/{action_id}/artifacts").get("data", [])
+        for art in arts:
+            attrs = art.get("attributes") or {}
+            out.append({
+                "actionId": action_id,
+                "actionName": action_attrs.get("name"),
+                "actionType": action_attrs.get("actionType"),
+                "actionStatus": action_attrs.get("completionStatus"),
+                "fileName": attrs.get("fileName"),
+                "fileType": attrs.get("fileType"),
+                "fileSize": attrs.get("fileSize"),
+                "downloadUrl": attrs.get("downloadUrl"),
+            })
+    return out
+
+
 # ---------------- CLI ----------------
 
 def main():
@@ -278,6 +305,10 @@ def main():
                         help="Print downloadable log URLs for a buildRun")
     bl.add_argument("--run", required=True)
 
+    arts = sub.add_parser("artifacts",
+                          help="List all artifacts of a buildRun as JSON")
+    arts.add_argument("--run", required=True)
+
     args = p.parse_args()
 
     if args.cmd == "jwt":
@@ -289,6 +320,8 @@ def main():
     elif args.cmd == "build-log":
         for u in build_log_urls(args.run):
             print(u)
+    elif args.cmd == "artifacts":
+        print(json.dumps(list_artifacts(args.run), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
