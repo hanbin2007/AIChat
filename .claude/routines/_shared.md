@@ -49,9 +49,17 @@ pinned GitHub issue labeled `meta-state`, title
 ```json
 {
   "last_feedback_iso": "2026-04-23T00:00:00Z",
-  "last_ship_iso":     "2026-04-23T00:00:00Z"
+  "last_ship_iso":     "2026-04-23T00:00:00Z",
+  "processed_feedback_ids": ["ALszOk...", "..."]
 }
 ```
+
+`processed_feedback_ids` is an ID-level guard for `tf-triage`: a
+FIFO-trimmed list (cap 200) of ASC submission ids that have already
+been seen. It exists because the `[hash:<12>]` title search has
+historically missed duplicates and the `last_feedback_iso` cursor
+alone isn't strict enough — late-arriving items inside the same
+30-min poll window slipped through and got refiled.
 
 **Read**:
 ```

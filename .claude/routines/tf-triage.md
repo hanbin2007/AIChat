@@ -53,16 +53,34 @@ Env vars on this routine:
    `sha256(stack_head || build_version)` for crashes).
 
 3. **Dedup against existing issues.**
-   For each item, search GitHub for `[hash:<12>]` in issue titles:
+
+   Two layers — the second matters because GitHub search tokenizes
+   `[hash:abc]` unreliably and historically missed dupes (issues #29
+   #30 #42 etc were each filed twice because `--search` came up empty).
+
+   3a. **ID-level guard.** Read `processed_feedback_ids` from the
+   `meta-state` issue body (array of ASC submission ids, capped at
+   the most recent 200). If the current item's `id` is already in
+   the list, skip outright — no GH calls, no dedup search.
+
+   3b. **Hash-level dedup via list + jq, never `--search`.**
    ```bash
-   gh issue list --repo hanbin2007/AIChat --state all \
-     --search "[hash:$HASH] in:title" --json number,state,labels
+   HIT=$(gh issue list --repo hanbin2007/AIChat --state all \
+           --label source:testflight-api --limit 200 \
+           --json number,state,title \
+         | jq -r --arg h "$HASH" \
+             '.[] | select(.title | contains("[hash:"+$h+"]")) | "\(.number)\t\(.state)"' \
+         | head -1)
    ```
-   - Open issue with same hash → comment
-     `@hanbin2007 New duplicate submission: <id>, build <ver>`. Skip.
-   - Closed issue with same hash → reopen, add label `regression`,
-     comment as above. Skip.
-   - Miss → proceed to step 4.
+   - `HIT` empty → miss → proceed to step 4.
+   - `HIT` matches an **OPEN** issue → comment
+     `@hanbin2007 New duplicate submission: <id>, build <ver>`. Skip
+     filing.
+   - `HIT` matches a **CLOSED** issue → reopen it, add label
+     `regression`, comment as above. Skip filing.
+
+   In every branch, append the current item's `id` to
+   `processed_feedback_ids` (drop oldest entries past 200).
 
 4. **Investigate (misses only).**
    - Classify: `tf-bug` / `tf-feature` / `tf-other`.
@@ -97,7 +115,9 @@ Env vars on this routine:
 
 6. **Update state.** Set `last_feedback_iso` to the highest `created`
    value seen (even for duplicates, so we don't reprocess them).
-   Write back to the `meta-state` issue body.
+   Persist the updated `processed_feedback_ids` list (FIFO-trimmed
+   to the 200 most recent entries). Write back to the `meta-state`
+   issue body as one JSON write — partial writes lose the cursor.
 
 ## Caps
 

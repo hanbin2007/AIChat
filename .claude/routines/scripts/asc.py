@@ -83,7 +83,15 @@ def asc_get(path: str) -> dict:
 # ---------------- TestFlight feedback ----------------
 
 def _dedup_hash(kind: str, payload: str, build_ver: str) -> str:
-    h = hashlib.sha256(f"{payload}||{build_ver}".encode()).hexdigest()
+    # Build version is intentionally NOT in the hash. The same complaint
+    # surfacing on a newer build must collapse to the same hash so the
+    # triage routine recognizes it (and reopens-as-regression a closed
+    # issue) instead of filing a fresh duplicate. `build_ver` stays in
+    # the signature for API stability — callers still pass it but it
+    # doesn't influence the key. `kind` keeps screenshot vs crash
+    # disjoint even when an empty payload would otherwise collide.
+    _ = build_ver
+    h = hashlib.sha256(f"{kind}||{payload}".encode()).hexdigest()
     return h[:12]
 
 
