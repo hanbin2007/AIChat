@@ -10,13 +10,9 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class ICloudConversationSyncServiceTests: XCTestCase {
-    private let onePixelPNGBase64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
-
     func testReconcileMergesLocalAndCloudStateAndPersistsUnion() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AIChatTests-iCloud-\(UUID().uuidString)", isDirectory: true)
-        let configuration = makeConfiguration()
+        let rootURL = makeTemporaryRootURL(prefix: "AIChatTests-iCloud")
+        let configuration = makeSyncConfiguration()
         let cloudRepository = ConversationRepository(configuration: configuration, rootURL: rootURL)
         let syncService = ICloudConversationSyncService(configuration: configuration, rootURL: rootURL)
 
@@ -90,9 +86,8 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
     }
 
     func testReconcilePrefersNewestDeletionTombstoneOverConversationCopies() async throws {
-        let rootURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AIChatTests-iCloud-Tombstone-\(UUID().uuidString)", isDirectory: true)
-        let configuration = makeConfiguration()
+        let rootURL = makeTemporaryRootURL(prefix: "AIChatTests-iCloud-Tombstone")
+        let configuration = makeSyncConfiguration()
         let cloudRepository = ConversationRepository(configuration: configuration, rootURL: rootURL)
         let syncService = ICloudConversationSyncService(configuration: configuration, rootURL: rootURL)
         let conversationID = UUID()
@@ -132,7 +127,7 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
     }
 
     func testSyncSummaryDetectsMissingAttachmentBlobData() throws {
-        let attachment = try makeImageAttachment()
+        let attachment = try makeOnePixelImageAttachment(suggestedFilename: "sync")
         let blobFilename = "blob-\(attachment.id.uuidString).png"
         let hydratedConversation = ConversationThread(
             title: "Hydrated",
@@ -189,25 +184,7 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
         XCTAssertEqual(hydratedSummary.attachmentCount, metadataOnlySummary.attachmentCount)
     }
 
-    private func makeConfiguration() -> AppConfiguration {
-        AppConfiguration(
-            backendMode: .direct,
-            geminiAPIKey: "test",
-            geminiModel: "gemini-3-flash-preview",
-            geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
-            relayStreamPath: "v1/chat/stream",
-            appGroupIdentifier: nil
-        )
-    }
-
-    private func makeImageAttachment() throws -> ChatAttachment {
-        let data = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
-        return try ChatAttachment.makeModelGeneratedImage(
-            from: data,
-            mimeType: "image/png",
-            suggestedFilename: "sync"
-        )
+    private func makeSyncConfiguration() -> AppConfiguration {
+        makeDirectModeAppConfiguration(geminiModel: "gemini-3-flash-preview")
     }
 }

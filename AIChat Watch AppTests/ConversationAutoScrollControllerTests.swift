@@ -24,14 +24,10 @@ import XCTest
 final class ConversationAutoScrollControllerTests: XCTestCase {
 
     @MainActor
-    func testFreshStateEnablesAutoScroll() async throws {
-        let state = ConversationAutoScrollState()
-        XCTAssertTrue(ConversationAutoScrollController.shouldAutoScroll(state: state))
-    }
-
-    @MainActor
-    func testInterruptedStateDisablesAutoScroll() async throws {
+    func testShouldAutoScrollFollowsInterruptedFlag() async throws {
         var state = ConversationAutoScrollState()
+        XCTAssertTrue(ConversationAutoScrollController.shouldAutoScroll(state: state))
+
         state.isInterrupted = true
         XCTAssertFalse(ConversationAutoScrollController.shouldAutoScroll(state: state))
     }

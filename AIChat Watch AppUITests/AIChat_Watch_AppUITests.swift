@@ -929,23 +929,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitForHittable(
-        _ element: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.isHittable {
-                return true
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        return element.isHittable
-    }
-
-    @MainActor
     private func conversationToolEntry(in app: XCUIApplication) -> XCUIElement {
         let buttonMatch = app.buttons["conversation.tool-entry"].firstMatch
         if buttonMatch.exists {
@@ -1462,54 +1445,4 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         XCTAssertEqual(count, 0, "Detected non-zero hang events for \(context). maxMs=\(maxMilliseconds)")
     }
 
-    @MainActor
-    private func attachDebugHierarchy(_ app: XCUIApplication, named name: String) {
-        let attachment = XCTAttachment(string: app.debugDescription)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
-    @MainActor
-    @discardableResult
-    private func attachScreenshot(_ app: XCUIApplication, named name: String) -> URL? {
-        let screenshot = app.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-
-        let fileURL = screenshotArtifactsDirectory(for: app).appendingPathComponent("\(name).png")
-        do {
-            try screenshot.pngRepresentation.write(to: fileURL)
-            let pathAttachment = XCTAttachment(string: fileURL.path)
-            pathAttachment.name = "\(name)-path"
-            pathAttachment.lifetime = .keepAlways
-            add(pathAttachment)
-            return fileURL
-        } catch {
-            let errorAttachment = XCTAttachment(string: "Failed to persist screenshot \(name): \(error)")
-            errorAttachment.name = "\(name)-write-error"
-            errorAttachment.lifetime = .keepAlways
-            add(errorAttachment)
-            return nil
-        }
-    }
-
-    private func screenshotArtifactsDirectory(for app: XCUIApplication) -> URL {
-        let directory: URL
-        if let configuredRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
-           configuredRoot.isEmpty == false {
-            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
-        } else if let configuredRoot = app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
-           configuredRoot.isEmpty == false {
-            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
-        } else {
-            directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
-        }
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
 }

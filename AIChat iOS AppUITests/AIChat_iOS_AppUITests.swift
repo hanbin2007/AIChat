@@ -142,23 +142,6 @@ final class AIChat_iOS_AppUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitForHittable(
-        _ element: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.isHittable {
-                return true
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        return element.isHittable
-    }
-
-    @MainActor
     private func revealElementIfNeeded(
         _ element: XCUIElement,
         in container: XCUIElement,
@@ -189,47 +172,5 @@ final class AIChat_iOS_AppUITests: XCTestCase {
         }
 
         return element.isHittable
-    }
-
-    @MainActor
-    private func attachDebugHierarchy(_ app: XCUIApplication, named name: String) {
-        let attachment = XCTAttachment(string: app.debugDescription)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
-    @MainActor
-    @discardableResult
-    private func attachScreenshot(_ app: XCUIApplication, named name: String) -> URL? {
-        let screenshot = app.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-
-        let fileURL = screenshotArtifactsDirectory().appendingPathComponent("\(name).png")
-        do {
-            try screenshot.pngRepresentation.write(to: fileURL)
-            let pathAttachment = XCTAttachment(string: fileURL.path)
-            pathAttachment.name = "\(name)-path"
-            pathAttachment.lifetime = .keepAlways
-            add(pathAttachment)
-            return fileURL
-        } catch {
-            let errorAttachment = XCTAttachment(string: "Failed to persist screenshot \(name): \(error)")
-            errorAttachment.name = "\(name)-write-error"
-            errorAttachment.lifetime = .keepAlways
-            add(errorAttachment)
-            return nil
-        }
-    }
-
-    private func screenshotArtifactsDirectory() -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
     }
 }

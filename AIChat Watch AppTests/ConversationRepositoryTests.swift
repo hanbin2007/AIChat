@@ -10,11 +10,8 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class ConversationRepositoryTests: XCTestCase {
-    private let onePixelPNGBase64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
-
     func testSaveLoadAndDeleteConversationPersistsAcrossRestart() async throws {
-        let rootURL = makeRootURL()
+        let rootURL = makeTemporaryRootURL()
         let repository = ConversationRepository(rootURL: rootURL)
         let conversationID = UUID()
         let conversation = ConversationThread(
@@ -44,7 +41,7 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testSaveAndLoadPromptPresets() async throws {
-        let repository = ConversationRepository(rootURL: makeRootURL())
+        let repository = ConversationRepository(rootURL: makeTemporaryRootURL())
         let preset = PromptPreset(
             kind: .conversation,
             title: "Meeting Summary",
@@ -61,7 +58,7 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testSaveAndLoadDeletedConversationTombstones() async throws {
-        let repository = ConversationRepository(rootURL: makeRootURL())
+        let repository = ConversationRepository(rootURL: makeTemporaryRootURL())
         let deletedConversationID = UUID()
         let deletedAt = Date(timeIntervalSince1970: 1_763_000_000)
 
@@ -75,8 +72,8 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testSaveHydratesAttachmentsAndMaterializesExportCache() async throws {
-        let repository = ConversationRepository(rootURL: makeRootURL())
-        let attachment = try makeImageAttachment(suggestedFilename: "persisted")
+        let repository = ConversationRepository(rootURL: makeTemporaryRootURL())
+        let attachment = try makeOnePixelImageAttachment(suggestedFilename: "persisted")
         let conversation = ConversationThread(
             title: "Image Chat",
             messages: [
@@ -102,9 +99,9 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testDeletingConversationCascadesAndRemovesOnlyItsExportedAttachmentBlobs() async throws {
-        let repository = ConversationRepository(rootURL: makeRootURL())
-        let firstAttachment = try makeImageAttachment(suggestedFilename: "first")
-        let secondAttachment = try makeImageAttachment(suggestedFilename: "second")
+        let repository = ConversationRepository(rootURL: makeTemporaryRootURL())
+        let firstAttachment = try makeOnePixelImageAttachment(suggestedFilename: "first")
+        let secondAttachment = try makeOnePixelImageAttachment(suggestedFilename: "second")
         let firstConversation = ConversationThread(
             title: "Delete First",
             messages: [ChatMessage(role: .assistant, text: "First", attachments: [firstAttachment])]
@@ -136,9 +133,9 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testImportAttachmentBlobHydratesConversationBeforePersist() async throws {
-        let rootURL = makeRootURL()
+        let rootURL = makeTemporaryRootURL()
         let repository = ConversationRepository(rootURL: rootURL)
-        let attachment = try makeImageAttachment(suggestedFilename: "remote")
+        let attachment = try makeOnePixelImageAttachment(suggestedFilename: "remote")
         let blobFilename = "remote-attachment.png"
         let temporaryFileURL = rootURL.appendingPathComponent("incoming.png", isDirectory: false)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -177,8 +174,8 @@ final class ConversationRepositoryTests: XCTestCase {
     }
 
     func testLegacyJSONStoreImportsIntoSwiftDataOnFirstLoad() async throws {
-        let rootURL = makeRootURL()
-        let attachment = try makeImageAttachment(suggestedFilename: "legacy")
+        let rootURL = makeTemporaryRootURL()
+        let attachment = try makeOnePixelImageAttachment(suggestedFilename: "legacy")
         let blobFilename = "legacy-\(attachment.id.uuidString).png"
         let attachmentsDirectoryURL = rootURL.appendingPathComponent("attachments", isDirectory: true)
         try FileManager.default.createDirectory(at: attachmentsDirectoryURL, withIntermediateDirectories: true)
@@ -259,20 +256,6 @@ final class ConversationRepositoryTests: XCTestCase {
         let restartedRepository = ConversationRepository(rootURL: rootURL)
         let restartedConversations = try await restartedRepository.loadConversations()
         XCTAssertTrue(restartedConversations.isEmpty)
-    }
-
-    private func makeRootURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    }
-
-    private func makeImageAttachment(suggestedFilename: String) throws -> ChatAttachment {
-        let data = try XCTUnwrap(Data(base64Encoded: onePixelPNGBase64))
-        return try ChatAttachment.makeModelGeneratedImage(
-            from: data,
-            mimeType: "image/png",
-            suggestedFilename: suggestedFilename
-        )
     }
 }
 

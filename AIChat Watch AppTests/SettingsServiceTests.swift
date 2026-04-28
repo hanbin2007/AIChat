@@ -32,6 +32,37 @@ final class SettingsServiceTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    /// Verify that mutating `mutate` on a `SettingsService` is observable via
+    /// `read` after re-instantiating the service against the same UserDefaults
+    /// suite — i.e. that the value round-trips through persistence.
+    @MainActor
+    private func assertPersistsAcrossRestart<Value: Equatable>(
+        mutate: (SettingsService) -> Void,
+        read: (SettingsService) -> Value,
+        expected: Value,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) {
+        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = SettingsService(
+            defaults: defaults,
+            fallbackModel: "gemini-3-flash-preview",
+            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        )
+        mutate(first)
+        XCTAssertEqual(read(first), expected, "first instance", file: file, line: line)
+
+        let second = SettingsService(
+            defaults: defaults,
+            fallbackModel: "gemini-3-flash-preview",
+            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        )
+        XCTAssertEqual(read(second), expected, "after restart", file: file, line: line)
+    }
+
     // MARK: - Send Failure Retry Limit
 
     @MainActor
@@ -56,48 +87,22 @@ final class SettingsServiceTests: XCTestCase {
 
     @MainActor
     func testSendFailureRetryLimitPersistsAcrossRestart() async throws {
-        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let first = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        assertPersistsAcrossRestart(
+            mutate: { $0.updateSendFailureRetryLimit(7) },
+            read: { $0.sendFailureRetryLimit },
+            expected: 7
         )
-        first.updateSendFailureRetryLimit(7)
-        XCTAssertEqual(first.sendFailureRetryLimit, 7)
-
-        let second = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
-        )
-        XCTAssertEqual(second.sendFailureRetryLimit, 7)
     }
 
     // MARK: - Default Conversation Configuration
 
     @MainActor
     func testDefaultConversationModelPersistsAcrossRestart() async throws {
-        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let first = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        assertPersistsAcrossRestart(
+            mutate: { $0.updateDefaultConversationModel("gemini-3.1-pro-preview") },
+            read: { $0.defaultConversationConfiguration.model },
+            expected: "gemini-3.1-pro-preview"
         )
-        first.updateDefaultConversationModel("gemini-3.1-pro-preview")
-        XCTAssertEqual(first.defaultConversationConfiguration.model, "gemini-3.1-pro-preview")
-
-        let second = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
-        )
-        XCTAssertEqual(second.defaultConversationConfiguration.model, "gemini-3.1-pro-preview")
     }
 
     @MainActor
@@ -137,70 +142,31 @@ final class SettingsServiceTests: XCTestCase {
 
     @MainActor
     func testGlobalAutoScrollEnabledPersistsToggle() async throws {
-        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let first = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        assertPersistsAcrossRestart(
+            mutate: { $0.updateGlobalAutoScrollEnabled(false) },
+            read: { $0.isGlobalAutoScrollEnabled },
+            expected: false
         )
-        first.updateGlobalAutoScrollEnabled(false)
-        XCTAssertFalse(first.isGlobalAutoScrollEnabled)
-
-        let second = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
-        )
-        XCTAssertFalse(second.isGlobalAutoScrollEnabled)
     }
 
     // MARK: - Transcription
 
     @MainActor
     func testTranscriptionModelPersists() async throws {
-        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let first = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        assertPersistsAcrossRestart(
+            mutate: { $0.updateTranscriptionModel("gemini-3.1-pro-preview") },
+            read: { $0.transcriptionModel },
+            expected: "gemini-3.1-pro-preview"
         )
-        first.updateTranscriptionModel("gemini-3.1-pro-preview")
-        XCTAssertEqual(first.transcriptionModel, "gemini-3.1-pro-preview")
-
-        let second = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
-        )
-        XCTAssertEqual(second.transcriptionModel, "gemini-3.1-pro-preview")
     }
 
     @MainActor
     func testTranscriptionCustomPromptPersists() async throws {
-        let suiteName = "AIChatTests.Settings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let first = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
+        assertPersistsAcrossRestart(
+            mutate: { $0.updateTranscriptionCustomPrompt("Names: Tokyo Skytree") },
+            read: { $0.transcriptionCustomPrompt },
+            expected: "Names: Tokyo Skytree"
         )
-        first.updateTranscriptionCustomPrompt("Names: Tokyo Skytree")
-        XCTAssertEqual(first.transcriptionCustomPrompt, "Names: Tokyo Skytree")
-
-        let second = SettingsService(
-            defaults: defaults,
-            fallbackModel: "gemini-3-flash-preview",
-            fallbackTranscriptionModel: "gemini-3-flash-preview"
-        )
-        XCTAssertEqual(second.transcriptionCustomPrompt, "Names: Tokyo Skytree")
     }
 
     @MainActor
