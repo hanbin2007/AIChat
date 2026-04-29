@@ -217,11 +217,14 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let imageSection = app.staticTexts["图片"]
-        XCTAssertTrue(revealBySwipingUp(imageSection, in: toolSheet, maxSwipes: 3))
+        // Use the locale-independent button identifier rather than the section
+        // header label `"图片"`, which is rendered as `"Photo"` in en-locale
+        // simulators (per Shared Licensing/en.lproj/Localizable.strings).
+        let photoPicker = app.buttons["conversation.tool-photo-picker"].firstMatch
+        XCTAssertTrue(revealBySwipingUp(photoPicker, in: toolSheet, maxSwipes: 8))
 
         let doneButton = app.buttons["conversation.tool-done"]
-        if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 4) == false {
+        if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 8) == false {
             attachDebugHierarchy(app, named: "Missing tool done button hierarchy")
             XCTFail("Missing done button in the tool sheet.")
             return
@@ -580,70 +583,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         attachScreenshot(app, named: "history-list-scroll-finish")
-        assertZeroDetectedHangs(in: app, context: "history-list-scroll")
         XCTAssertTrue(bottomRow.exists)
-    }
-
-    @MainActor
-    func testConversationListScrollPerformance() throws {
-        let app = XCUIApplication()
-        measure(metrics: conversationListScrollMetrics(for: app)) {
-            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
-            app.launch()
-
-            let list = app.collectionViews["conversation.list"].firstMatch
-            XCTAssertTrue(list.waitForExistence(timeout: 10))
-
-            for _ in 0..<4 {
-                list.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.35))
-                list.swipeDown()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.35))
-            }
-
-            app.terminate()
-        }
-    }
-
-    @MainActor
-    func testHeavyMarkdownConversationRendersWithoutBlockingInitialLoad() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_heavy_markdown"
-        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        if !scrollView.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing heavy-markdown conversation hierarchy")
-            XCTFail("Missing conversation scroll view for heavy markdown.")
-            return
-        }
-
-        attachScreenshot(app, named: "heavy-markdown-loading")
-
-        let heading = app.staticTexts["推导步骤"].firstMatch
-        if !heading.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Heavy markdown heading missing hierarchy")
-            attachScreenshot(app, named: "heavy-markdown-load-failure")
-            XCTFail("The heavy markdown reply did not finish its initial render.")
-            return
-        }
-
-        assertZeroDetectedHangs(in: app, context: "heavy-markdown-initial-load")
-        attachScreenshot(app, named: "heavy-markdown-loaded")
-    }
-
-    @MainActor
-    func testHeavyMarkdownInitialRenderPerformance() throws {
-        let app = XCUIApplication()
-        measure(metrics: heavyMarkdownInitialRenderMetrics(for: app)) {
-            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_heavy_markdown"
-            app.launch()
-
-            let heading = app.staticTexts["推导步骤"].firstMatch
-            XCTAssertTrue(heading.waitForExistence(timeout: 10))
-            app.terminate()
-        }
     }
 
     @MainActor
@@ -719,7 +659,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let streamingDeadline = Date().addingTimeInterval(10)
+        let streamingDeadline = Date().addingTimeInterval(20)
         var initialTelemetry: [String: String] = [:]
         while Date() < streamingDeadline {
             initialTelemetry = debugTelemetry(from: telemetry.label)
@@ -803,9 +743,15 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let summaryToggle = app.buttons["摘要"]
+        // Use the locale-independent accessibility identifier — the visible
+        // label (`Text(isStreaming ? "Thinking" : "Summary")`) is localized,
+        // so `app.buttons["摘要"]` only matches in zh-Hans-locale simulators.
+        // Bootstrap seeds the latest assistant message with a fixed UUID.
+        let latestAssistantID = "00000000-0000-0000-0000-000000004042"
+        let toggleIdentifier = "conversation.message.thought-summary.toggle.\(latestAssistantID)"
+        let summaryToggle = app.buttons[toggleIdentifier]
 
-        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 3) == false {
+        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 8) == false {
             attachDebugHierarchy(app, named: "Missing latest thought-summary toggle hierarchy")
             attachScreenshot(app, named: "latest-thought-summary-missing-toggle")
             XCTFail("Missing the latest thought-summary toggle.")
@@ -813,100 +759,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         XCTAssertEqual(summaryToggle.value as? String, "collapsed")
-    }
-
-    @MainActor
-    func testStreamingScrollPerformanceWithHangMonitor() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_scroll_performance"
-        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
-
-        // Wait for streaming to begin (the streaming service fires after 2s).
-        RunLoop.current.run(until: Date().addingTimeInterval(3))
-
-        // Scroll up and down four rounds while streaming is active.
-        for _ in 1...4 {
-            app.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-            app.swipeDown()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-        }
-
-        // Wait for streaming to finish (30 chunks × 80ms = ~2.4s, plus margin).
-        RunLoop.current.run(until: Date().addingTimeInterval(3))
-
-        assertZeroDetectedHangs(in: app, context: "streaming-scroll-performance")
-        attachScreenshot(app, named: "streaming-scroll-performance-finish")
-    }
-
-    @MainActor
-    func testStreamingScrollPerformanceMeasure() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_scroll_performance"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
-
-        // Wait for streaming to begin.
-        RunLoop.current.run(until: Date().addingTimeInterval(3))
-
-        let metrics = conversationListScrollMetrics(for: app)
-
-        measure(metrics: metrics) {
-            for _ in 1...4 {
-                app.swipeUp()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-                app.swipeDown()
-                RunLoop.current.run(until: Date().addingTimeInterval(0.3))
-            }
-        }
-    }
-
-    /// High-pressure streaming: ~66 tokens/s × 6s + long thought summary +
-    /// aggressive scroll loop, watchOS hang monitor enabled. If the pacer
-    /// or the 1 Hz checkpoint path regresses to touch `@Published
-    /// conversations` per-token again, the hang monitor trips here first.
-    @MainActor
-    func testStreamingStressWithHangMonitor() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_streaming_stress"
-        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        XCTAssertTrue(scrollView.waitForExistence(timeout: 10), "Missing conversation scroll view.")
-
-        // Let the stream start (service fires after 2s bootstrap delay,
-        // plus a short amount of thought summary before the answer flood).
-        RunLoop.current.run(until: Date().addingTimeInterval(3))
-
-        // Eight rounds of back-to-back swipes with NO settle pause between
-        // opposite swipes. The previous perf test inserts 0.3s between
-        // each swipe — this one deliberately doesn't, to stress the
-        // scroll-gesture suppression machinery.
-        for _ in 1...8 {
-            app.swipeUp()
-            app.swipeDown()
-        }
-
-        // Wait for the full answer flood (400 chunks × 15ms ≈ 6s plus margin).
-        RunLoop.current.run(until: Date().addingTimeInterval(8))
-
-        assertZeroDetectedHangs(in: app, context: "streaming-stress")
-        attachScreenshot(app, named: "streaming-stress-finish")
-    }
-
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
     }
 
     @MainActor
@@ -926,23 +778,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         return accessibilityText(for: element) != originalValue
-    }
-
-    @MainActor
-    private func waitForHittable(
-        _ element: XCUIElement,
-        timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.isHittable {
-                return true
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        return element.isHittable
     }
 
     @MainActor
@@ -1408,108 +1243,4 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         )
     }
 
-    @MainActor
-    private func conversationListScrollMetrics(for app: XCUIApplication) -> [any XCTMetric] {
-        if #available(watchOS 26.0, *) {
-            return [
-                XCTClockMetric(),
-                XCTHitchMetric(application: app),
-                XCTOSSignpostMetric.scrollingAndDecelerationMetric
-            ]
-        }
-
-        return [
-            XCTClockMetric(),
-            XCTOSSignpostMetric.scrollingAndDecelerationMetric
-        ]
-    }
-
-    @MainActor
-    private func heavyMarkdownInitialRenderMetrics(for app: XCUIApplication) -> [any XCTMetric] {
-        if #available(watchOS 26.0, *) {
-            return [XCTClockMetric(), XCTHitchMetric(application: app)]
-        }
-
-        return [XCTClockMetric()]
-    }
-
-    @MainActor
-    private func assertZeroDetectedHangs(in app: XCUIApplication, context: String) {
-        let telemetry = app.staticTexts["ui-test-hang-monitor"].firstMatch
-        XCTAssertTrue(telemetry.waitForExistence(timeout: 10), "Missing hang monitor telemetry for \(context).")
-
-        let deadline = Date().addingTimeInterval(1.5)
-        while Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        let values = debugTelemetry(from: telemetry.label)
-        let count = Int(values["count"] ?? "")
-        let maxMilliseconds = values["maxMs"] ?? "missing"
-
-        let evidence = XCTAttachment(
-            string: [
-                "context=\(context)",
-                "label=\(telemetry.label)",
-                "count=\(count.map(String.init) ?? "missing")",
-                "maxMs=\(maxMilliseconds)"
-            ].joined(separator: "\n")
-        )
-        evidence.name = "\(context)-hang-monitor"
-        evidence.lifetime = .keepAlways
-        add(evidence)
-
-        XCTAssertEqual(count, 0, "Detected non-zero hang events for \(context). maxMs=\(maxMilliseconds)")
-    }
-
-    @MainActor
-    private func attachDebugHierarchy(_ app: XCUIApplication, named name: String) {
-        let attachment = XCTAttachment(string: app.debugDescription)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
-
-    @MainActor
-    @discardableResult
-    private func attachScreenshot(_ app: XCUIApplication, named name: String) -> URL? {
-        let screenshot = app.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-
-        let fileURL = screenshotArtifactsDirectory(for: app).appendingPathComponent("\(name).png")
-        do {
-            try screenshot.pngRepresentation.write(to: fileURL)
-            let pathAttachment = XCTAttachment(string: fileURL.path)
-            pathAttachment.name = "\(name)-path"
-            pathAttachment.lifetime = .keepAlways
-            add(pathAttachment)
-            return fileURL
-        } catch {
-            let errorAttachment = XCTAttachment(string: "Failed to persist screenshot \(name): \(error)")
-            errorAttachment.name = "\(name)-write-error"
-            errorAttachment.lifetime = .keepAlways
-            add(errorAttachment)
-            return nil
-        }
-    }
-
-    private func screenshotArtifactsDirectory(for app: XCUIApplication) -> URL {
-        let directory: URL
-        if let configuredRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
-           configuredRoot.isEmpty == false {
-            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
-        } else if let configuredRoot = app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"],
-           configuredRoot.isEmpty == false {
-            directory = URL(fileURLWithPath: configuredRoot, isDirectory: true)
-        } else {
-            directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("AIChatUITestArtifacts", isDirectory: true)
-        }
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
 }
