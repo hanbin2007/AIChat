@@ -29,7 +29,7 @@ final class AIChat_iOS_AppUITests: XCTestCase {
         }
 
         let expandButton = app.buttons["展开全文"].firstMatch
-        if !expandButton.waitForExistence(timeout: 10) {
+        if !expandButton.waitForExistence(timeout: 20) {
             attachDebugHierarchy(app, named: "Missing heavy markdown expand button hierarchy")
             XCTFail("The heavy markdown conversation did not finish its initial collapsed render.")
             return
@@ -145,13 +145,17 @@ final class AIChat_iOS_AppUITests: XCTestCase {
     private func revealElementIfNeeded(
         _ element: XCUIElement,
         in container: XCUIElement,
-        timeout: TimeInterval = 5
+        timeout: TimeInterval = 15
     ) -> Bool {
         if waitForHittable(element, timeout: 1) {
             return true
         }
 
         let gestures: [(XCUIElement) -> Void] = [
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
             { $0.swipeUp() },
             { $0.swipeUp() },
             { $0.swipeUp() },

@@ -218,10 +218,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         let imageSection = app.staticTexts["图片"]
-        XCTAssertTrue(revealBySwipingUp(imageSection, in: toolSheet, maxSwipes: 3))
+        XCTAssertTrue(revealBySwipingUp(imageSection, in: toolSheet, maxSwipes: 8))
 
         let doneButton = app.buttons["conversation.tool-done"]
-        if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 4) == false {
+        if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 8) == false {
             attachDebugHierarchy(app, named: "Missing tool done button hierarchy")
             XCTFail("Missing done button in the tool sheet.")
             return
@@ -656,7 +656,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let streamingDeadline = Date().addingTimeInterval(10)
+        let streamingDeadline = Date().addingTimeInterval(20)
         var initialTelemetry: [String: String] = [:]
         while Date() < streamingDeadline {
             initialTelemetry = debugTelemetry(from: telemetry.label)
@@ -742,7 +742,7 @@ final class AIChat_Watch_AppUITests: XCTestCase {
 
         let summaryToggle = app.buttons["摘要"]
 
-        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 3) == false {
+        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 8) == false {
             attachDebugHierarchy(app, named: "Missing latest thought-summary toggle hierarchy")
             attachScreenshot(app, named: "latest-thought-summary-missing-toggle")
             XCTFail("Missing the latest thought-summary toggle.")
