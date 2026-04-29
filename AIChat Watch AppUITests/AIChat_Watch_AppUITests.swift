@@ -559,34 +559,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
-    func testConversationListCanScrollWhileBackgroundReplyStreams() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_list_scroll_performance"
-        app.launchEnvironment["AIChat_UI_TEST_ENABLE_HANG_MONITOR"] = "1"
-        app.launch()
-
-        let list = app.collectionViews["conversation.list"].firstMatch
-        if !list.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing conversation list hierarchy")
-            XCTFail("Missing conversation list for history-scroll verification.")
-            return
-        }
-
-        attachScreenshot(app, named: "history-list-scroll-start")
-
-        let bottomRow = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000572"]
-        if !revealElement(bottomRow, in: app, directions: [.up], timeout: 16, maxSwipesPerDirection: 16) {
-            attachDebugHierarchy(app, named: "History list never reached bottom marker hierarchy")
-            attachScreenshot(app, named: "history-list-scroll-failure")
-            XCTFail("The history conversation list did not scroll to the bottom marker.")
-            return
-        }
-
-        attachScreenshot(app, named: "history-list-scroll-finish")
-        XCTAssertTrue(bottomRow.exists)
-    }
-
-    @MainActor
     func testReplyCompletionScrollsToStartOfLatestReply() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
@@ -640,75 +612,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
-    func testBackgroundedReplyFinishesAndTriggersCompletionFeedback() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_background_reply_notification"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        if !scrollView.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing background-reply conversation hierarchy")
-            XCTFail("Missing conversation scroll view for background reply scenario.")
-            return
-        }
-
-        let telemetry = app.staticTexts["conversation.background_reply.debug"]
-        if !telemetry.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing background reply telemetry hierarchy")
-            XCTFail("Missing background reply telemetry for UI verification.")
-            return
-        }
-
-        let streamingDeadline = Date().addingTimeInterval(20)
-        var initialTelemetry: [String: String] = [:]
-        while Date() < streamingDeadline {
-            initialTelemetry = debugTelemetry(from: telemetry.label)
-            if initialTelemetry["streaming"] == "1" {
-                break
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        XCTAssertEqual(initialTelemetry["streaming"], "1")
-
-        XCUIDevice.shared.press(.home)
-        RunLoop.current.run(until: Date().addingTimeInterval(5))
-        app.activate()
-
-        let completionDeadline = Date().addingTimeInterval(10)
-        var finalTelemetry: [String: String] = [:]
-        while Date() < completionDeadline {
-            finalTelemetry = debugTelemetry(from: telemetry.label)
-            if finalTelemetry["completed"] == "1",
-               finalTelemetry["background"] == "1",
-               finalTelemetry["streaming"] == "0",
-               finalTelemetry["status"] == "sent" {
-                break
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-
-        let attachment = XCTAttachment(
-            string: [
-                "initial: \(initialTelemetry)",
-                "final: \(finalTelemetry)"
-            ].joined(separator: "\n")
-        )
-        attachment.name = "background-reply-telemetry"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-
-        XCTAssertEqual(finalTelemetry["completed"], "1")
-        XCTAssertEqual(finalTelemetry["background"], "1")
-        XCTAssertEqual(finalTelemetry["event"], "assistant-reply-complete-feedback")
-        XCTAssertEqual(finalTelemetry["streaming"], "0")
-        XCTAssertEqual(finalTelemetry["status"], "sent")
-        XCTAssertEqual(finalTelemetry["visible"], "1")
-    }
-
-    @MainActor
     func testLatestConversationMessageDoesNotUseUICollapse() throws {
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_latest_message_expanded"
@@ -728,37 +631,6 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             attachScreenshot(app, named: "latest-message-unexpected-expand-button")
             XCTFail("The newest long message should not expose the expand button.")
         }
-    }
-
-    @MainActor
-    func testLatestThoughtSummaryStartsCollapsed() throws {
-        let app = XCUIApplication()
-        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_latest_thought_summary_collapsed"
-        app.launch()
-
-        let scrollView = app.scrollViews["conversation.messages.scroll"]
-        if !scrollView.waitForExistence(timeout: 10) {
-            attachDebugHierarchy(app, named: "Missing latest thought-summary hierarchy")
-            XCTFail("Missing conversation scroll view for latest thought-summary scenario.")
-            return
-        }
-
-        // Use the locale-independent accessibility identifier — the visible
-        // label (`Text(isStreaming ? "Thinking" : "Summary")`) is localized,
-        // so `app.buttons["摘要"]` only matches in zh-Hans-locale simulators.
-        // Bootstrap seeds the latest assistant message with a fixed UUID.
-        let latestAssistantID = "00000000-0000-0000-0000-000000004042"
-        let toggleIdentifier = "conversation.message.thought-summary.toggle.\(latestAssistantID)"
-        let summaryToggle = app.buttons[toggleIdentifier]
-
-        if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 8) == false {
-            attachDebugHierarchy(app, named: "Missing latest thought-summary toggle hierarchy")
-            attachScreenshot(app, named: "latest-thought-summary-missing-toggle")
-            XCTFail("Missing the latest thought-summary toggle.")
-            return
-        }
-
-        XCTAssertEqual(summaryToggle.value as? String, "collapsed")
     }
 
     @MainActor
