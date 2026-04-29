@@ -217,8 +217,11 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let imageSection = app.staticTexts["图片"]
-        XCTAssertTrue(revealBySwipingUp(imageSection, in: toolSheet, maxSwipes: 8))
+        // Use the locale-independent button identifier rather than the section
+        // header label `"图片"`, which is rendered as `"Photo"` in en-locale
+        // simulators (per Shared Licensing/en.lproj/Localizable.strings).
+        let photoPicker = app.buttons["conversation.tool-photo-picker"].firstMatch
+        XCTAssertTrue(revealBySwipingUp(photoPicker, in: toolSheet, maxSwipes: 8))
 
         let doneButton = app.buttons["conversation.tool-done"]
         if revealBySwipingUp(doneButton, in: toolSheet, maxSwipes: 8) == false {
@@ -740,7 +743,13 @@ final class AIChat_Watch_AppUITests: XCTestCase {
             return
         }
 
-        let summaryToggle = app.buttons["摘要"]
+        // Use the locale-independent accessibility identifier — the visible
+        // label (`Text(isStreaming ? "Thinking" : "Summary")`) is localized,
+        // so `app.buttons["摘要"]` only matches in zh-Hans-locale simulators.
+        // Bootstrap seeds the latest assistant message with a fixed UUID.
+        let latestAssistantID = "00000000-0000-0000-0000-000000004042"
+        let toggleIdentifier = "conversation.message.thought-summary.toggle.\(latestAssistantID)"
+        let summaryToggle = app.buttons[toggleIdentifier]
 
         if revealBySwipingUp(summaryToggle, in: scrollView, maxSwipes: 8) == false {
             attachDebugHierarchy(app, named: "Missing latest thought-summary toggle hierarchy")

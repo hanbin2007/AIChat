@@ -29,7 +29,7 @@ final class AIChat_iOS_AppUITests: XCTestCase {
         }
 
         let expandButton = app.buttons["展开全文"].firstMatch
-        if !expandButton.waitForExistence(timeout: 20) {
+        if !expandButton.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing heavy markdown expand button hierarchy")
             XCTFail("The heavy markdown conversation did not finish its initial collapsed render.")
             return

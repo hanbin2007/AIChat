@@ -144,6 +144,11 @@ private struct CompanionUITestBootstrap {
             count: 12
         ).joined(separator: "\n\n")
 
+        // The companion detail view force-expands whichever message is the
+        // latest in the conversation. The heavy-markdown collapse / expand
+        // button only renders for non-latest messages, so we need a trailing
+        // user message after the assistant block — otherwise the expand
+        // button never appears and the UI test asserts on a phantom element.
         return ConversationThread(
             id: conversationID,
             title: "Companion Heavy Markdown",
@@ -152,6 +157,11 @@ private struct CompanionUITestBootstrap {
                     id: UUID(uuidString: "00000000-0000-0000-0000-000000000402") ?? UUID(),
                     role: .assistant,
                     text: repeatedBlock
+                ),
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000403") ?? UUID(),
+                    role: .user,
+                    text: "好的，先这样。"
                 )
             ]
         )
