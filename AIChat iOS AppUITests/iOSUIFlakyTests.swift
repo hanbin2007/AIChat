@@ -94,6 +94,18 @@ final class iOSUIFlakyTests: iOSUIPerformanceTestCase {
         )
     }
 
+    @MainActor
+    func testLaunchPerformance() throws {
+        // `XCTApplicationLaunchMetric` requires multiple successful launches
+        // to compute a baseline; on Xcode Cloud's shared iOS simulators we
+        // see "Received unexpected number of metrics: 0 in iteration..."
+        // when individual launches fail to complete. Same opt-in gate as
+        // the rest of this suite.
+        measure(metrics: [XCTApplicationLaunchMetric()]) {
+            XCUIApplication().launch()
+        }
+    }
+
     // MARK: - Helpers (copied from AIChat_iOS_AppUITests so the suite is self-contained)
 
     @MainActor

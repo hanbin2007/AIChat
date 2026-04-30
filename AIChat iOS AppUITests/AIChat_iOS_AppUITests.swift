@@ -54,13 +54,6 @@ final class AIChat_iOS_AppUITests: XCTestCase {
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
-    }
-
-    @MainActor
     private func revealElementIfNeeded(
         _ element: XCUIElement,
         in container: XCUIElement,
