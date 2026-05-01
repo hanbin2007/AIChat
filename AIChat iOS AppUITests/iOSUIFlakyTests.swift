@@ -14,6 +14,45 @@ import XCTest
 final class iOSUIFlakyTests: iOSUIPerformanceTestCase {
 
     @MainActor
+    func testImageAttachmentRendersAndOpensViewer() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "companion_image_attachment"
+        app.launch()
+
+        let detail = app.scrollViews["companion.conversation.detail"].firstMatch
+        if !detail.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing companion image detail hierarchy")
+            XCTFail("The companion image conversation did not open.")
+            return
+        }
+
+        let attachment = app.descendants(matching: .any)["message.attachment.00000000-0000-0000-0000-000000000413"]
+        if !attachment.waitForExistence(timeout: 10) {
+            attachDebugHierarchy(app, named: "Missing companion image attachment hierarchy")
+            XCTFail("The companion message attachment did not render.")
+            return
+        }
+
+        if revealElementIfNeeded(attachment, in: detail) == false {
+            attachDebugHierarchy(app, named: "Companion image attachment never became hittable")
+            XCTFail("The companion message attachment did not become tappable.")
+            return
+        }
+
+        attachment.tap()
+
+        let viewer = app.descendants(matching: .any)["message.attachment-viewer"]
+        if !viewer.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing companion image viewer hierarchy")
+            XCTFail("The image attachment viewer did not open.")
+            return
+        }
+
+        attachScreenshot(app, named: "companion-image-viewer")
+    }
+
+    @MainActor
     func testHeavyMarkdownConversationRendersWithoutBlockingInitialLoad() throws {
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .portrait
