@@ -339,7 +339,15 @@ final class ChatStore: ObservableObject {
     static let minimumSendFailureRetryLimit = 1
     static let streamingProgressPersistenceInterval: TimeInterval = 1
 
-    @Published private(set) var conversations: [ConversationThread] = []
+    /// Intentionally NOT `@Published`. The 1 Hz streaming-progress checkpoint
+    /// mutates this on the hot path; broadcasting `objectWillChange` per token
+    /// to every `@EnvironmentObject ChatStore` observer hangs the UI thread on
+    /// watchOS. Structural mutations bump `contentRevision` instead; per-token
+    /// streaming reveal goes through `streamingPacer`.
+    private(set) var conversations: [ConversationThread] = []
+    /// Bumped by structural mutations of `conversations` (insert / move / delete
+    /// / finalize / sync) — but NOT by same-index streaming-text updates.
+    @Published private(set) var contentRevision: UInt64 = 0
     @Published private(set) var conversationListItems: [WatchConversationListItem] = []
     @Published private(set) var favoriteConversationListItems: [WatchConversationListItem] = []
     @Published private(set) var startupError: String?
@@ -1690,7 +1698,8 @@ final class ChatStore: ObservableObject {
     private func upsertConversation(
         _ conversation: ConversationThread,
         allowResurrectionFromDeletedState: Bool = false,
-        skipListItemUpdate: Bool = false
+        skipListItemUpdate: Bool = false,
+        silentForObservers: Bool = false
     ) {
         guard shouldAllowConversationMutation(
             for: conversation,
@@ -1714,6 +1723,9 @@ final class ChatStore: ObservableObject {
             if skipListItemUpdate == false {
                 upsertConversationListItem(for: conversation, atConversationIndex: existingConversationIndex)
             }
+            if silentForObservers == false {
+                contentRevision &+= 1
+            }
             return
         }
 
@@ -1735,6 +1747,9 @@ final class ChatStore: ObservableObject {
         if skipListItemUpdate == false {
             upsertConversationListItem(for: conversation, atConversationIndex: insertionIndex)
         }
+        if silentForObservers == false {
+            contentRevision &+= 1
+        }
     }
 
     private func setConversations(_ updatedConversations: [ConversationThread]) {
@@ -1745,6 +1760,7 @@ final class ChatStore: ObservableObject {
         conversations = updatedConversations
         rebuildConversationIndex()
         rebuildConversationListCaches()
+        contentRevision &+= 1
     }
 
     private func mergeStoredAttachmentMetadata(from storedConversation: ConversationThread) {
@@ -1909,6 +1925,7 @@ final class ChatStore: ObservableObject {
     private func mutateConversation(
         id: UUID,
         skipListItemUpdate: Bool = false,
+        silentForObservers: Bool = false,
         mutation: (inout ConversationThread) -> Void
     ) {
         guard var conversation = conversation(id: id) else {
@@ -1916,7 +1933,11 @@ final class ChatStore: ObservableObject {
         }
 
         mutation(&conversation)
-        upsertConversation(conversation, skipListItemUpdate: skipListItemUpdate)
+        upsertConversation(
+            conversation,
+            skipListItemUpdate: skipListItemUpdate,
+            silentForObservers: silentForObservers
+        )
     }
 
     private func upsertAssistantMessage(
@@ -1944,7 +1965,8 @@ final class ChatStore: ObservableObject {
 
         mutateConversation(
             id: conversationID,
-            skipListItemUpdate: status == .streaming
+            skipListItemUpdate: status == .streaming,
+            silentForObservers: status == .streaming
         ) { conversation in
             conversation.upsertMessage(
                 ChatMessage(
