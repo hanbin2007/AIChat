@@ -1284,6 +1284,13 @@ struct ConversationDetailView: View {
             return
         }
 
+        // Off-thread prewarm of the assistant messages the post-sleep budget
+        // will reveal. Without this every visible bubble's `.task(id: text)`
+        // races to parse markdown + segment LaTeX on the main thread when
+        // SwiftUI swaps to the larger render budget — the source of the
+        // 6.3s hang on heavy-history conversations.
+        dispatchInitialHistoryPrewarm(messages: messages)
+
         isPreparingHistory = true
         initialHistoryLoadTask = Task {
             try? await Task.sleep(nanoseconds: ConversationRendering.initialLoadDelayNanoseconds)
@@ -1298,6 +1305,26 @@ struct ConversationDetailView: View {
                 )
                 isPreparingHistory = false
                 initialHistoryLoadTask = nil
+            }
+        }
+    }
+
+    private func dispatchInitialHistoryPrewarm(messages: [ChatMessage]) {
+        let visibleCount = ConversationHistoryRenderBudget.visibleMessageCount(
+            in: messages,
+            budget: ConversationRendering.initialRenderBudget
+        )
+        let prewarmTexts: [String] = messages
+            .suffix(visibleCount)
+            .compactMap { message in
+                guard message.role == .assistant else { return nil }
+                let text = message.cleanedText
+                return text.isEmpty ? nil : text
+            }
+
+        for text in prewarmTexts {
+            Task.detached(priority: .userInitiated) {
+                await AssistantMessageMarkdownView.prewarmIfNeeded(for: text)
             }
         }
     }

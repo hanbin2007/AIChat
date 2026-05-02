@@ -35,7 +35,12 @@ private enum AssistantMessageMarkdownPreparationDecider {
 private actor AssistantMessageMarkdownCache {
     static let shared = AssistantMessageMarkdownCache()
 
-    private let capacity = 12
+    /// Capacity sized to hold a few full conversations' worth of assistant
+    /// messages so historical-scroll into a heavy thread can land on cache
+    /// hits instead of cold parses. 12 was set when only the actively
+    /// streaming bubble seeded the cache; with `prepareInitialHistoryIfNeeded`
+    /// now batch-prewarming visible history, that envelope must grow.
+    private let capacity = 64
     private var cachedContents: [String: MarkdownContent] = [:]
     private var cacheOrder: [String] = []
     private var inFlightTasks: [String: Task<MarkdownContent, Never>] = [:]
