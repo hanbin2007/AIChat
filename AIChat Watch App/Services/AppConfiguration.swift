@@ -263,7 +263,15 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var resolvedRelayBearerToken: String? {
-        relayBearerToken ?? RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier)
+        // Online (relay) mode must authenticate as the user, so the server-issued
+        // key from the local store always wins. The xcconfig `relayBearerToken`
+        // is only honored as a fallback for the deprecated local Mac relay
+        // (where no per-user key exists); never let it shadow a real user key,
+        // otherwise account expiration and credit deduction get bypassed.
+        if let storedKey = RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier) {
+            return storedKey
+        }
+        return relayBearerToken
     }
 
     private var hasValidRelayBaseURL: Bool {

@@ -2571,6 +2571,16 @@ final class ChatStore: ObservableObject {
                         await completionFeedbackProvider.notifyCompletion(of: .assistantReplyCompleted)
                     }
                 }
+
+                // Pull fresh account status so credit balance / expiry reflect
+                // the just-completed request. Server is the source of truth for
+                // deduction; the local cache would otherwise stay stale until
+                // the next launch.
+                if configuration.backendMode == .relay {
+                    Task { [weak self] in
+                        await self?.activationBilling.refreshActivationState()
+                    }
+                }
                 return
             } catch {
                 streamingPacer.cancel()
