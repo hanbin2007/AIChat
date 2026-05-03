@@ -7,9 +7,12 @@
 
 import SwiftUI
 
+/// AIChat ships with a single dark visual identity (watchOS is always dark;
+/// the iOS Companion pins `.preferredColorScheme(.dark)` at the app root).
+/// The whole design system — `DS.Bubble.assistantFill`, `DS.Text.primary` —
+/// is built on the assumption that the backdrop is dark, so this view does
+/// not branch on `colorScheme`.
 struct AppBackdropView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         ZStack {
             LinearGradient(
@@ -48,26 +51,14 @@ struct AppBackdropView: View {
     }
 
     private var backdropColors: [Color] {
-        if colorScheme == .dark {
-            return [
-                Color(red: 0.02, green: 0.03, blue: 0.08),
-                Color(red: 0.04, green: 0.15, blue: 0.22),
-                Color(red: 0.02, green: 0.05, blue: 0.09)
-            ]
-        }
-
-        return [
-            Color(red: 0.96, green: 0.98, blue: 1.0),
-            Color(red: 0.88, green: 0.95, blue: 0.98),
-            Color(red: 0.93, green: 0.96, blue: 0.99)
+        [
+            Color(red: 0.02, green: 0.03, blue: 0.08),
+            Color(red: 0.04, green: 0.15, blue: 0.22),
+            Color(red: 0.02, green: 0.05, blue: 0.09)
         ]
     }
 
-    private var primaryOrbColor: Color {
-        colorScheme == .dark ? Color.cyan.opacity(0.16) : Color.cyan.opacity(0.14)
-    }
+    private var primaryOrbColor: Color { Color.cyan.opacity(0.16) }
 
-    private var secondaryOrbColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
-    }
+    private var secondaryOrbColor: Color { Color.white.opacity(0.08) }
 }

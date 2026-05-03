@@ -389,7 +389,7 @@ final class ChatStore: ObservableObject {
     /// during active scroll gestures.
     private(set) var isStreamingFlushSuppressed = false
 
-    /// Drives per-token reveal at ~30Hz inside the streaming bubble only.
+    /// Drives per-token reveal at ~15Hz inside the streaming bubble only.
     /// Observing this instance is scoped — the rest of the view tree stays
     /// completely quiet during streaming, avoiding the per-flush cascade
     /// that the old 120ms `@Published conversations` mutation caused.

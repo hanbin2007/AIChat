@@ -257,7 +257,7 @@ final class StreamingTextPacerTests: XCTestCase {
 
 private extension StreamingTextPacer.Configuration {
     /// Aggressively short tick interval so tests don't sit waiting on the
-    /// adaptive 30Hz pacing. Keeps suite fast without changing semantics.
+    /// adaptive 15Hz pacing. Keeps suite fast without changing semantics.
     static var fastTestConfiguration: StreamingTextPacer.Configuration {
         StreamingTextPacer.Configuration(
             tickInterval: 0.001,
