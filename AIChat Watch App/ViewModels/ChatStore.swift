@@ -2537,7 +2537,18 @@ final class ChatStore: ObservableObject {
                 // skips the loading placeholder. Without this, a race between the
                 // status flip and the view's .task(id: text) can leave the bubble
                 // stuck on plain text. (Fixes #1)
-                await AssistantMessageMarkdownView.prewarmIfNeeded(for: snapshot.text)
+                //
+                // Key the cache on `ChatMessage.cleanedText` — the same string
+                // the view consumes (trimmed, and merged from
+                // `modelResponseParts` when present). Prewarming with raw
+                // `snapshot.text` would miss the cache for any message with
+                // structured parts and force the slow path.
+                let prewarmKey = ChatMessage(
+                    role: .assistant,
+                    text: snapshot.text,
+                    modelResponseParts: snapshot.modelResponseParts
+                ).cleanedText
+                await AssistantMessageMarkdownView.prewarmIfNeeded(for: prewarmKey)
 
                 upsertAssistantMessage(
                     id: assistantMessageID,

@@ -93,6 +93,16 @@ struct AssistantMessageMarkdownView: View {
 
     @State private var preparedContent: MarkdownContent?
     @State private var preparedText = ""
+    // Bumped on every loadingPlaceholder appearance. SwiftUI's
+    // `.task(id:)` only restarts when the id value changes between
+    // evaluations — same-text reappearance after a cancelled task
+    // would otherwise leave the view stuck on the placeholder forever.
+    @State private var taskGeneration: UInt64 = 0
+
+    private struct PrepareTaskKey: Equatable {
+        let text: String
+        let generation: UInt64
+    }
 
     private var mathFont: Math.Font {
         #if os(watchOS)
@@ -121,8 +131,11 @@ struct AssistantMessageMarkdownView: View {
                     configuredMarkdownView(MarkdownView(preparedContent))
                 } else {
                     loadingPlaceholder
-                        .task(id: text) {
+                        .task(id: PrepareTaskKey(text: text, generation: taskGeneration)) {
                             await prepareMarkdownContent()
+                        }
+                        .onAppear {
+                            taskGeneration &+= 1
                         }
                 }
             } else {
@@ -173,9 +186,13 @@ struct AssistantMessageMarkdownView: View {
 
     @MainActor
     private func prepareMarkdownContent() async {
+        // Atomic swap only — never clear `preparedContent` up front.
+        // A pre-await clear opens a window where the .task gets cancelled
+        // mid-flight (e.g. parent view tree rebuild) and the same
+        // `id: text` will not re-fire a task on re-entry, leaving the
+        // view stuck on the placeholder. The body's `preparedText == text`
+        // guard already hides stale content correctly.
         let currentText = text
-        preparedContent = nil
-        preparedText = ""
 
         if let cachedContent = await AssistantMessageMarkdownCache.shared.cachedContent(for: currentText) {
             guard Task.isCancelled == false, currentText == text else {
