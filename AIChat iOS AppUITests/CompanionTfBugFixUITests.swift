@@ -17,18 +17,28 @@
 //           another conversation.
 //
 //  Each scenario also runs `attachScreenshot` so the Xcode Cloud →
-//  GitHub PR comment bridge surfaces the rendered effect for human
+//  GitHub PR comment bridge can surface the rendered effect for human
 //  review.
+//
+//  Inheriting from `iOSUIPerformanceTestCase` because Apple's shared
+//  iOS Cloud simulators produce repeated launch / sheet / settle flakes
+//  on every PR (see PRs #54 / #55 — the entire iOS UI suite is gated
+//  behind `AICHAT_RUN_PERFORMANCE=1` for that reason). The functional
+//  regression for #32 is *also* covered by `CompanionSelectionReconcilerTests`
+//  in the watchOS unit suite, which runs unconditionally and exercises
+//  the actual decision logic the Cloud UI test would otherwise prove.
+//
+//  To run locally and capture screenshots:
+//      env AICHAT_RUN_PERFORMANCE=1 \
+//          xcodebuild test \
+//          -scheme "AIChat iOS UITests" \
+//          -destination "platform=iOS Simulator,name=iPhone 17" \
+//          -only-testing:"AIChat iOS AppUITests/CompanionTfBugFixUITests"
 //
 
 import XCTest
 
-final class CompanionTfBugFixUITests: XCTestCase {
-
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        continueAfterFailure = false
-    }
+final class CompanionTfBugFixUITests: iOSUIPerformanceTestCase {
 
     // MARK: - #22 streaming fade-in (visual)
 
@@ -179,10 +189,13 @@ final class CompanionTfBugFixUITests: XCTestCase {
             return true
         }
 
-        let gestures: [(XCUIElement) -> Void] = Array(
-            repeating: { $0.swipeUp() },
-            count: 6
-        ) + [
+        let gestures: [(XCUIElement) -> Void] = [
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
             { $0.swipeDown() },
             { $0.swipeDown() }
         ]
