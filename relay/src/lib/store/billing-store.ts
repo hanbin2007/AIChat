@@ -166,6 +166,12 @@ class BillingStore {
     return d ? clone(d) : undefined;
   }
 
+  async findAccount(accountID: string): Promise<Account | undefined> {
+    await this.ensureLoaded();
+    const a = this.state.accounts[accountID];
+    return a ? clone(a) : undefined;
+  }
+
   async getAccountStatus(key: Key): Promise<AccountStatusResponse | null> {
     await this.ensureLoaded();
     const acc = this.state.accounts[key.accountID];
@@ -542,6 +548,15 @@ class BillingStore {
     return this.write(() => {
       const account = this.state.accounts[params.key.accountID];
       if (!account) throw new Error("Account not found.");
+      if (account.state !== "active") {
+        throw Object.assign(new Error(`Account is ${account.state}.`), { statusCode: 402 });
+      }
+      // Time-based grant expiry. compact() zeros expired grants on the next
+      // write but reserveCredits reads creditBalance before that runs, so
+      // the first request after the deadline could otherwise slip through.
+      if (account.creditExpiresAt && new Date(account.creditExpiresAt).getTime() <= clockNow().getTime()) {
+        throw Object.assign(new Error("Credits expired."), { statusCode: 402 });
+      }
       const rate = rateForModel(this.state.policy, params.modelID);
       const reserved = creditsForUsage(this.state.policy, rate, {
         inputTokens: params.estimatedInputTokens,
