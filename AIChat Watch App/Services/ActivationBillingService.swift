@@ -70,6 +70,9 @@ final class ActivationBillingService: ObservableObject {
 
         switch account.state {
         case .active:
+            if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
+                return "已过期"
+            }
             if account.creditBalance > 0 {
                 return "在线可用"
             }
@@ -108,21 +111,7 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var hasManagedRelayAccess: Bool {
-        guard configuration.backendMode == .relay else {
-            return false
-        }
-
-        if configuration.relayBearerToken != nil {
-            return true
-        }
-
-        guard let account = relayAccountStatus?.account,
-              let key = relayAccountStatus?.key
-        else {
-            return false
-        }
-
-        return account.state == .active && key.state == .active && account.creditBalance > 0
+        isManagedRelayAccessActive(for: relayAccountStatus)
     }
 
     var isReadOnlyMode: Bool {
@@ -431,6 +420,9 @@ final class ActivationBillingService: ObservableObject {
 
             switch account.state {
             case .active:
+                if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
+                    return "订阅或 credit 已过期。"
+                }
                 return account.creditBalance > 0 ? nil : "在线额度已用尽。"
             case .paused:
                 return "当前 relay key 已在服务端暂停。"
@@ -532,18 +524,21 @@ final class ActivationBillingService: ObservableObject {
         await shareManagedRelayAccessToCompanionIfPossible()
     }
 
-    private func isManagedRelayAccessActive(for status: RelayAccountStatusResponse?) -> Bool {
+    private func isManagedRelayAccessActive(
+        for status: RelayAccountStatusResponse?,
+        now: Date = .now
+    ) -> Bool {
         guard configuration.backendMode == .relay else {
             return false
-        }
-
-        if configuration.relayBearerToken != nil {
-            return true
         }
 
         guard let account = status?.account,
               let key = status?.key
         else {
+            return false
+        }
+
+        if let expiresAt = account.creditExpiresAt, expiresAt <= now {
             return false
         }
 
