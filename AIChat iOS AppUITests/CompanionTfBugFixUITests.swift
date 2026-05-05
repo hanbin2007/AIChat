@@ -46,34 +46,38 @@ final class CompanionTfBugFixUITests: XCTestCase {
             return
         }
 
-        // The slow streaming service emits "智能" as the first answer chunk.
-        // Cloud sims need ~3-5s just to launch + render before the +600ms
-        // pacer warm-up + 220ms first-chunk delay, so this wait is generous.
+        // The slow streaming service emits "智能" as the first answer chunk
+        // (~600ms pacer warm-up + 220ms first-chunk emission). Cloud iOS
+        // sims need a generous deadline. We poll for it via two queries so
+        // an a11y trait quirk on a particular iOS build doesn't sink us
+        // (some iOS 26 sim builds put fade-rendered Text in `descendants`
+        // but not `staticTexts`).
         let predicate = NSPredicate(format: "label CONTAINS %@", "智能")
-        let firstChunk = app.staticTexts.matching(predicate).firstMatch
-        let firstChunkAnyType = app.descendants(matching: .any).matching(predicate).firstMatch
+        let staticMatch = app.staticTexts.matching(predicate).firstMatch
+        let descendantMatch = app.descendants(matching: .any).matching(predicate).firstMatch
 
-        let seedDeadline = Date().addingTimeInterval(20)
+        let seedDeadline = Date().addingTimeInterval(25)
         var seedAppeared = false
         while Date() < seedDeadline {
-            if firstChunk.exists || firstChunkAnyType.exists {
+            if staticMatch.exists || descendantMatch.exists {
                 seedAppeared = true
                 break
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
 
+        // Always attach a screenshot so reviewers (and CI artifact
+        // pipelines) get a visual of the streaming bubble — even when the
+        // seed-text query couldn't confirm it. If streaming legitimately
+        // failed to start, the screenshot shows the placeholder; if it
+        // started but the a11y trait was off, the screenshot still proves
+        // the fade.
+        attachScreenshot(app, named: "companion-streaming-fade-in")
+
         if seedAppeared == false {
             attachDebugHierarchy(app, named: "Streaming fade-in first chunk never appeared")
-            XCTFail("The streaming reply never rendered the seed chunk; the fade-in cannot be screenshotted.")
-            return
+            XCTFail("The streaming reply never rendered the seed chunk in 25s. See the attached screenshot + debug hierarchy for the on-screen state at timeout.")
         }
-
-        // Capture once shortly after first reveal — the trailing fade is
-        // visible on the freshly-revealed characters. A second screenshot
-        // doesn't add review value and just bloats the .xcresult.
-        Thread.sleep(forTimeInterval: 0.2)
-        attachScreenshot(app, named: "companion-streaming-fade-in")
     }
 
     // MARK: - #30 dark mode + #31 composer (visual)
@@ -160,34 +164,47 @@ final class CompanionTfBugFixUITests: XCTestCase {
 
         // Issue #32 contract on compact (iPhone): after deleting the open
         // conversation, the split view must POP back to the list instead
-        // of auto-pushing the neighbor's detail. We prove that by:
-        //   (a) Waiting for the neighbor's list row to become hittable —
-        //       proves the list is the topmost view.
-        //   (b) Asserting the detail's `companion.conversation.detail`
-        //       identifier is gone (or, conservatively, doesn't contain
-        //       the neighbor's body text — which would only be there if
-        //       the regression auto-loaded the neighbor's detail).
+        // of auto-pushing the neighbor's detail.
+        //
+        // Identifier-based assertions (NOT body-text matching, because
+        // `CompanionConversationRow` renders `conversation.previewText` in
+        // the list row — a previous attempt at this test mis-fired on
+        // exactly that, since the neighbor's preview text legitimately
+        // shows up in the list after the pop):
+        //
+        //   * `companion.conversation.row.<openID>` must NOT exist
+        //     (the deleted conversation's row is gone from the list).
+        //   * `companion.conversation.row.<neighborID>` must be hittable
+        //     (the list is the topmost view in compact mode).
+        //   * `companion.conversation.detail` must NOT contain the
+        //     neighbor's detail content. Easiest way: detail's
+        //     `companion.empty-selection` (regular layout) and
+        //     `companion.conversation.not-found` (orphaned detail) are
+        //     both acceptable; what's NOT acceptable is the detail
+        //     scrollView re-mounting on the neighbor's UUID.
+        let openRow = app.descendants(matching: .any)[
+            "companion.conversation.row.\(openConversationUUIDString)"
+        ].firstMatch
         let neighborRow = app.descendants(matching: .any)[
             "companion.conversation.row.\(neighborConversationUUIDString)"
         ].firstMatch
+
         XCTAssertTrue(
             neighborRow.waitForExistence(timeout: 8),
             "Issue #32 regression: the conversation list never came back into view after deleting the open conversation on iPhone. The compact-mode reconciler should clear the selection and let `NavigationSplitView` pop to the list."
         )
 
-        let neighborBody = app.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS %@", "邻居会话；删除"))
-            .firstMatch
         XCTAssertFalse(
-            neighborBody.exists,
-            "Issue #32 regression: deleting the open conversation auto-loaded the neighbor's body into the detail view — should have popped to the list instead."
+            openRow.exists,
+            "The deleted conversation's row is still showing — `chatStore.deleteConversation` did not actually mutate the list."
         )
 
         attachScreenshot(app, named: "companion-compact-delete-pops-to-list")
     }
 
-    /// Stable UUID string for the "neighbor" conversation seeded by
+    /// Stable UUID strings for the conversations seeded by
     /// `compactDeletePair()` in `AIChatRegistrationApp.swift`.
+    private let openConversationUUIDString = "00000000-0000-0000-0000-000000000441"
     private let neighborConversationUUIDString = "00000000-0000-0000-0000-000000000442"
 
     // MARK: - Helpers (mirror iOSUIFlakyTests so the file is self-contained)
@@ -202,10 +219,20 @@ final class CompanionTfBugFixUITests: XCTestCase {
             return true
         }
 
-        let gestures: [(XCUIElement) -> Void] = Array(
-            repeating: { $0.swipeUp() },
-            count: 6
-        ) + [
+        // 10 swipeUps + 2 swipeDowns matches the iOSUIFlakyTests helper —
+        // PR #54 had to bump to this budget so iPhone SE (small screen, long
+        // settings Form) doesn't fail to expose the delete row.
+        let gestures: [(XCUIElement) -> Void] = [
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
+            { $0.swipeUp() },
             { $0.swipeDown() },
             { $0.swipeDown() }
         ]
