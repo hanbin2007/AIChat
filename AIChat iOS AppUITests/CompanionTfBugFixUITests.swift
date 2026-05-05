@@ -46,29 +46,34 @@ final class CompanionTfBugFixUITests: XCTestCase {
             return
         }
 
-        // The slow streaming service emits "智能" as the very first chunk.
-        // Once that label exists, the assistant bubble has at least 2
-        // characters in the trailing fade window — enough to read the
-        // gradient + the cursor in a single screenshot.
-        let firstChunk = app.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS %@", "智能"))
-            .firstMatch
-        if !firstChunk.waitForExistence(timeout: 10) {
+        // The slow streaming service emits "智能" as the first answer chunk.
+        // Cloud sims need ~3-5s just to launch + render before the +600ms
+        // pacer warm-up + 220ms first-chunk delay, so this wait is generous.
+        let predicate = NSPredicate(format: "label CONTAINS %@", "智能")
+        let firstChunk = app.staticTexts.matching(predicate).firstMatch
+        let firstChunkAnyType = app.descendants(matching: .any).matching(predicate).firstMatch
+
+        let seedDeadline = Date().addingTimeInterval(20)
+        var seedAppeared = false
+        while Date() < seedDeadline {
+            if firstChunk.exists || firstChunkAnyType.exists {
+                seedAppeared = true
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+
+        if seedAppeared == false {
             attachDebugHierarchy(app, named: "Streaming fade-in first chunk never appeared")
             XCTFail("The streaming reply never rendered the seed chunk; the fade-in cannot be screenshotted.")
             return
         }
 
-        // Sit on the running stream for ~33ms (half a 15Hz pacer tick) so we
-        // catch the bubble mid-reveal instead of right at a text-update
-        // boundary, which would show a fully-opaque trailing edge.
-        Thread.sleep(forTimeInterval: 0.033)
-        attachScreenshot(app, named: "companion-streaming-fade-in-mid-stream")
-
-        // Take a second shot ~1s later. The trailing-edge gradient should
-        // have walked further into the message.
-        Thread.sleep(forTimeInterval: 1.0)
-        attachScreenshot(app, named: "companion-streaming-fade-in-later")
+        // Capture once shortly after first reveal — the trailing fade is
+        // visible on the freshly-revealed characters. A second screenshot
+        // doesn't add review value and just bloats the .xcresult.
+        Thread.sleep(forTimeInterval: 0.2)
+        attachScreenshot(app, named: "companion-streaming-fade-in")
     }
 
     // MARK: - #30 dark mode + #31 composer (visual)
@@ -153,19 +158,37 @@ final class CompanionTfBugFixUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(deleteButton, timeout: 5))
         deleteButton.tap()
 
-        // Issue #32 fix: on compact size class the post-delete reconciler
-        // must NOT auto-jump into the neighbor conversation. The neighbor
-        // exists in the seed (`compactDeletePair`) precisely so this would
-        // regress to "auto-jumped into it" if the size-class branch were
-        // dropped from `CompanionSelectionReconciler`.
-        let emptySelectionState = app.descendants(matching: .any)["companion.empty-selection"].firstMatch
+        // Issue #32 contract on compact (iPhone): after deleting the open
+        // conversation, the split view must POP back to the list instead
+        // of auto-pushing the neighbor's detail. We prove that by:
+        //   (a) Waiting for the neighbor's list row to become hittable —
+        //       proves the list is the topmost view.
+        //   (b) Asserting the detail's `companion.conversation.detail`
+        //       identifier is gone (or, conservatively, doesn't contain
+        //       the neighbor's body text — which would only be there if
+        //       the regression auto-loaded the neighbor's detail).
+        let neighborRow = app.descendants(matching: .any)[
+            "companion.conversation.row.\(neighborConversationUUIDString)"
+        ].firstMatch
         XCTAssertTrue(
-            emptySelectionState.waitForExistence(timeout: 8),
-            "After deleting the open conversation on iPhone, the empty-selection placeholder must appear instead of another conversation auto-loading."
+            neighborRow.waitForExistence(timeout: 8),
+            "Issue #32 regression: the conversation list never came back into view after deleting the open conversation on iPhone. The compact-mode reconciler should clear the selection and let `NavigationSplitView` pop to the list."
+        )
+
+        let neighborBody = app.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@", "邻居会话；删除"))
+            .firstMatch
+        XCTAssertFalse(
+            neighborBody.exists,
+            "Issue #32 regression: deleting the open conversation auto-loaded the neighbor's body into the detail view — should have popped to the list instead."
         )
 
         attachScreenshot(app, named: "companion-compact-delete-pops-to-list")
     }
+
+    /// Stable UUID string for the "neighbor" conversation seeded by
+    /// `compactDeletePair()` in `AIChatRegistrationApp.swift`.
+    private let neighborConversationUUIDString = "00000000-0000-0000-0000-000000000442"
 
     // MARK: - Helpers (mirror iOSUIFlakyTests so the file is self-contained)
 

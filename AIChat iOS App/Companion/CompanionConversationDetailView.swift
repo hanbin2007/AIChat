@@ -694,6 +694,13 @@ struct CompanionConversationDetailView: View {
         aiConfiguration: ConversationAIConfiguration,
         disabled: Bool
     ) -> some View {
+        // NOTE: Do NOT use `.accessibilityElement(children: .ignore)` for
+        // these icon-only `.plain` buttons. iOS's accessibility bridge
+        // collapses the resulting element so aggressively that XCUITest's
+        // `descendants(matching: .any)[<identifier>]` can no longer locate
+        // it (verified on iPhone 16 / 16 Pro / 16 Pro Max in build #44).
+        // Letting the Button keep its inferred accessibility (then
+        // overriding label / identifier explicitly) restores the trait.
         Button(action: presentToolSettings) {
             Image(systemName: "plus.circle.fill")
                 .font(.system(size: 26, weight: .regular))
@@ -704,7 +711,7 @@ struct CompanionConversationDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
         .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
         .accessibilityIdentifier("conversation.tool-entry")
@@ -741,6 +748,7 @@ struct CompanionConversationDetailView: View {
                     handleVoiceButtonLongPress()
                 }
         )
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.voice-button")
     }
@@ -777,6 +785,7 @@ struct CompanionConversationDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(isEnabled == false)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.send-button")
     }

@@ -157,15 +157,22 @@ private struct CompanionUITestBootstrap {
             )
         case "companion_compact_delete_pops":
             // Regression scenario for issue #32. Two conversations; the UI
-            // test deletes the open one and asserts the empty-selection
-            // placeholder takes over instead of auto-jumping into the other.
+            // test deletes the open one and asserts that the post-delete
+            // reconciler (in `CompanionRootView`) does NOT auto-jump into
+            // the neighbor on iPhone.
+            //
+            // Critical: launchDestination is `.root`, not `.conversationDetail`.
+            // The conversationDetail path mounts the detail view directly
+            // (NavigationStack root) and bypasses `CompanionRootView`'s
+            // `reconcileSelection`, so the issue #32 fix would never get
+            // exercised on that path.
             let pair = compactDeletePair()
             return CompanionUITestBootstrap(
                 store: MainActor.assumeIsolated {
                     ChatStore.previewStore(conversations: pair)
                 },
                 initialConversationID: pair[0].id,
-                launchDestination: .conversationDetail(pair[0].id)
+                launchDestination: .root
             )
         default:
             return nil

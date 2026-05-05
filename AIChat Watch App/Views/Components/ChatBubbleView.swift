@@ -827,12 +827,16 @@ private struct StreamingFadeInTextView: View {
     private static let trailingFadeWindow = 6
 
     var body: some View {
+        // NOTE: Don't apply `.accessibilityElement(children: .ignore)` here —
+        // it strips the underlying `staticText` trait that XCUITest needs to
+        // find the streaming bubble via `app.staticTexts[...]`. The composed
+        // `Text` already defaults to a single staticText element; we just
+        // override its label so the cursor glyph isn't read aloud.
         (composedText() + cursorText())
             .font(.body)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel(text)
             .accessibilityIdentifier(accessibilityIdentifier)
             .accessibilityValue("streaming")
