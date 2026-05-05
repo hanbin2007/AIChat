@@ -36,10 +36,17 @@ export async function authenticate(request: Request): Promise<AuthContext | null
     return { kind: "admin", token, tokenLabel: match.label };
   }
 
-  // Per-device client key.
+  // Per-device client key. Both the key and its parent account must be
+  // active — otherwise an admin-paused or expired account would still
+  // pass auth as long as the key record itself wasn't flipped, and end
+  // up at reserveCredits where the account-level gates would reject it
+  // with a confusing 402 instead of a clean 401.
   if (token.startsWith("rk_")) {
     const key = await billingStore().findKeyByValue(token);
-    if (key && key.state === "active") return { kind: "client", token, clientKey: key };
+    if (!key || key.state !== "active") return null;
+    const account = await billingStore().findAccount(key.accountID);
+    if (!account || account.state !== "active") return null;
+    return { kind: "client", token, clientKey: key };
   }
   return null;
 }
