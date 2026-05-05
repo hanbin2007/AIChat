@@ -90,6 +90,10 @@ struct CompanionRootView: View {
                 bottomSurfaceHeight = 0
             }
         }
+        // The whole DS.Text / DS.Bubble system is built for dark backgrounds
+        // (watch is always dark; iPhone Companion pins it here so light mode
+        // doesn't render the assistant bubble as white-on-white).
+        .preferredColorScheme(.dark)
     }
 
     private var shouldExtendBottomSurface: Bool {
@@ -109,15 +113,11 @@ struct CompanionRootView: View {
     }
 
     private func reconcileSelection(with ids: [UUID]) {
-        guard ids.isEmpty == false else {
-            selectedConversationID = nil
-            return
-        }
-
-        guard let selectedConversationID, ids.contains(selectedConversationID) else {
-            self.selectedConversationID = ids.first
-            return
-        }
+        selectedConversationID = CompanionSelectionReconciler.reconcile(
+            currentSelection: selectedConversationID,
+            availableIDs: ids,
+            isCompactSizeClass: horizontalSizeClass == .compact
+        )
     }
 
     private func handleDeepLink(_ deepLink: AIChatDeepLink) {

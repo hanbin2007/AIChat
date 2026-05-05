@@ -9,9 +9,11 @@
 //  Why this exists:
 //  - Network delivers tokens in irregular bursts + pauses.
 //  - Previous flush-throttle (120ms) coalesced bursts into visible "jumps".
-//  - This pacer buffers all arrivals and reveals at ~30Hz with an adaptive
+//  - This pacer buffers all arrivals and reveals at ~15Hz with an adaptive
 //    chars/tick rate: slow stream → slow typing, fast stream → faster
-//    typing, stream end → rapid drain.
+//    typing, stream end → rapid drain. 15Hz keeps headroom on watchOS for
+//    SwiftUI relayout and the per-tick fade-in animation in
+//    `StreamingFadeInTextView` without saturating the GPU/CPU budget.
 //
 //  Why it's scoped to its own ObservableObject (not on ChatStore):
 //  - Only the streaming bubble observes it. `@Published conversations` is
@@ -27,7 +29,7 @@ import SwiftUI
 final class StreamingTextPacer: ObservableObject {
 
     struct Configuration {
-        var tickInterval: TimeInterval = 1.0 / 30.0
+        var tickInterval: TimeInterval = 1.0 / 15.0
         /// When pending > this, use finalize-style aggressive drain even while streaming.
         var drainOverflowThreshold: Int = 400
         /// Called when the ticker revealed characters (used to coordinate UI signals like auto-scroll).
