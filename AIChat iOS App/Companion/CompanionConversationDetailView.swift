@@ -174,6 +174,7 @@ struct CompanionConversationDetailView: View {
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
                                 forceExpandedContent: latestMessageID == message.id,
+                                streamingPacer: chatStore.streamingPacer,
                                 onPinMessage: { messageID, convoID, scope in
                                     await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
                                 }
