@@ -130,20 +130,31 @@ private struct CompanionUITestBootstrap {
                 launchDestination: .conversationDetail(conversation.id)
             )
         case "companion_streaming_fade_in":
-            // Visual demo for issue #22: opens a conversation seeded with a
-            // failed assistant reply. The detail view's `.task` then triggers
-            // `retryLatestReply` once it actually mounts — see
-            // `CompanionConversationDetailView.triggerUITestStreamingScenarioIfNeeded`.
-            // Driving the retry from view lifecycle (rather than a Task fired
-            // in `App.init`) is what makes the streaming pacer visible to the
-            // test, because by the time the retry fires the bubble has
-            // subscribed to the pacer.
+            // Visual demo for issue #22. The retry that drives the slow
+            // streaming service runs from TWO places:
+            //   1. A delayed `Task` here in App.init (1.5s) — covers the
+            //      case where SwiftUI delays calling `.task` (rare on iOS,
+            //      observed once on iPhone 14 Pro Cloud sims).
+            //   2. `CompanionConversationDetailView.task(id:)` — covers the
+            //      case where this `Task` fires before the bubble has
+            //      subscribed to the pacer.
+            // Both call sites guard on `messages.last?.status == .failed`
+            // so whichever fires first wins; the other becomes a no-op.
             let conversation = streamingFadeInConversation()
             let store = MainActor.assumeIsolated {
                 ChatStore.previewStore(
                     conversations: [conversation],
                     aiService: CompanionStreamingFadeInService()
                 )
+            }
+
+            Task { @MainActor [weak store] in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let store else { return }
+                guard store.conversation(id: conversation.id)?.messages.last?.status == .failed else {
+                    return
+                }
+                await store.retryLatestReply(in: conversation.id)
             }
 
             return CompanionUITestBootstrap(

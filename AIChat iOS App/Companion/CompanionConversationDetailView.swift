@@ -744,13 +744,15 @@ struct CompanionConversationDetailView: View {
         }
     }
 
-    // Use `Button` + `.accessibilityElement(children: .ignore)` so iOS 26's
-    // accessibility bridge collapses the Button's internal Image label into
-    // a single element with our identifier. The earlier `Image + .onTapGesture
-    // + .accessibilityAddTraits(.isButton)` attempt still wasn't exposing the
-    // identifier reliably on Cloud's iPhone 14 Pro / 16 / SE simulators (build
-    // #49), so we mirror the pattern that already works on watchOS in
-    // `ConversationDetailView.composerActionRow`.
+    // The toolbar's `conversation.settings.open` button uses plain
+    // `Button { ... } label: { Image(...) }` + `.accessibilityIdentifier`
+    // and is reliably findable on iOS 26 (its query passes in every recent
+    // build). The earlier `Button + .buttonStyle(.plain)` and
+    // `Image + .onTapGesture` patterns both dropped the identifier on Cloud
+    // sims (builds #44–#50). Match the working toolbar pattern: default
+    // button style, no `.accessibilityElement(children:)`, no manual
+    // `.isButton` trait. We pull the visual styling into a custom
+    // ButtonStyle so the rounded icon look survives default-style chrome.
     @ViewBuilder
     private func composerToolButton(
         aiConfiguration: ConversationAIConfiguration,
@@ -766,11 +768,9 @@ struct CompanionConversationDetailView: View {
                 .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CompanionTransparentButtonStyle())
         .opacity(disabled ? 0.4 : 1.0)
         .disabled(disabled)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
         .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
         .accessibilityIdentifier("conversation.tool-entry")
@@ -799,7 +799,7 @@ struct CompanionConversationDetailView: View {
             .frame(width: dimension, height: dimension)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CompanionTransparentButtonStyle())
         .opacity(disabled ? 0.4 : 1.0)
         .disabled(disabled)
         .simultaneousGesture(
@@ -809,8 +809,6 @@ struct CompanionConversationDetailView: View {
                     handleVoiceButtonLongPress()
                 }
         )
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.voice-button")
     }
@@ -845,11 +843,9 @@ struct CompanionConversationDetailView: View {
             .frame(width: 44, height: 44)
             .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CompanionTransparentButtonStyle())
         .opacity(isEnabled ? 1.0 : 0.6)
         .disabled(isEnabled == false)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.send-button")
     }
@@ -1619,6 +1615,18 @@ private struct CompanionComposerWidthKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// Strips Button chrome (no border, no tint) without using
+/// `.buttonStyle(.plain)`, which on iOS 26 also strips the explicit
+/// `.accessibilityIdentifier` from XCUITest's `descendants(matching:)` query.
+/// Custom ButtonStyle keeps the visual transparent AND keeps the identifier
+/// surfaceable.
+private struct CompanionTransparentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1.0)
     }
 }
 #endif
