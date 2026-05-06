@@ -37,8 +37,14 @@ private struct CompanionToolSettingsDraft: Equatable {
 
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let conversationID: UUID
+    /// Optional "new conversation" callback. Provided by `CompanionRootView`
+    /// so the detail toolbar can offer a quick-new-chat button on iPad —
+    /// where the user can collapse the sidebar via the system chevron and
+    /// the list-toolbar `+` would otherwise become unreachable.
+    var onCreateConversation: (() -> Void)? = nil
 
     @StateObject private var voiceRecorder = VoiceRecorder()
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
@@ -91,6 +97,22 @@ struct CompanionConversationDetailView: View {
         .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "对话")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // iPad regular: also expose a "new conversation" entry in the
+            // detail toolbar, since the user can collapse the sidebar via
+            // the system chevron and the list-toolbar `+` would otherwise
+            // disappear with it.
+            if shouldShowDetailNewConversationButton {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onCreateConversation?()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("新建会话")
+                    .accessibilityIdentifier("conversation.detail.new")
+                }
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     isShowingSettings = true
@@ -136,8 +158,40 @@ struct CompanionConversationDetailView: View {
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
         }
+        #if DEBUG
+        .task(id: conversationID) {
+            await triggerUITestStreamingScenarioIfNeeded()
+        }
+        #endif
         .accessibilityIdentifier("companion.conversation.detail")
     }
+
+    private var shouldShowDetailNewConversationButton: Bool {
+        horizontalSizeClass == .regular
+            && chatStore.isReadOnlyMode == false
+            && onCreateConversation != nil
+    }
+
+    #if DEBUG
+    /// Drives the `companion_streaming_fade_in` UI test scenario from the
+    /// detail view's `.task` lifecycle so the retry kicks off after the view
+    /// has actually mounted (not from a free-floating `Task` spawned in
+    /// `App.init`, which on Cloud iOS sims sometimes fired before the
+    /// `StreamingAssistantBodyView` had subscribed to the pacer — leaving the
+    /// initial chunks stranded).
+    private func triggerUITestStreamingScenarioIfNeeded() async {
+        let env = ProcessInfo.processInfo.environment
+        guard env["AIChat_UI_TEST_SCENARIO"] == "companion_streaming_fade_in",
+              let conversation = chatStore.conversation(id: conversationID),
+              conversation.messages.last?.status == .failed,
+              chatStore.isSending(conversationID: conversationID) == false
+        else {
+            return
+        }
+
+        await chatStore.retryLatestReply(in: conversationID)
+    }
+    #endif
 
     private func conversationContent(_ conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
@@ -690,35 +744,36 @@ struct CompanionConversationDetailView: View {
         }
     }
 
-    // NOTE on accessibility patterns below: builds #44 and #47 both showed
-    // that `Button(action:) { Image(...) }.buttonStyle(.plain)` with an
-    // icon-only label drops the `accessibilityIdentifier` on iOS 26's
-    // a11y bridge — XCUITest's `descendants(matching: .any)[<id>]` query
-    // returns no match. Even adding `.accessibilityAddTraits(.isButton)`
-    // didn't surface them. Replacing the Button with an `Image` plus a
-    // tap-gesture and explicit `.isButton` trait keeps the visual exactly
-    // the same, sidesteps the Button bridge entirely, and makes the
-    // identifier reliably findable.
+    // Use `Button` + `.accessibilityElement(children: .ignore)` so iOS 26's
+    // accessibility bridge collapses the Button's internal Image label into
+    // a single element with our identifier. The earlier `Image + .onTapGesture
+    // + .accessibilityAddTraits(.isButton)` attempt still wasn't exposing the
+    // identifier reliably on Cloud's iPhone 14 Pro / 16 / SE simulators (build
+    // #49), so we mirror the pattern that already works on watchOS in
+    // `ConversationDetailView.composerActionRow`.
     @ViewBuilder
     private func composerToolButton(
         aiConfiguration: ConversationAIConfiguration,
         disabled: Bool
     ) -> some View {
-        Image(systemName: "plus.circle.fill")
-            .font(.system(size: 26, weight: .regular))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(toolButtonTint(for: aiConfiguration))
-            .frame(width: 36, height: 36)
-            .contentShape(Rectangle())
-            .opacity(disabled ? 0.4 : 1.0)
-            .onTapGesture {
-                guard disabled == false else { return }
-                presentToolSettings()
-            }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
-            .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
-            .accessibilityIdentifier("conversation.tool-entry")
+        Button {
+            presentToolSettings()
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 26, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(toolButtonTint(for: aiConfiguration))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(disabled ? 0.4 : 1.0)
+        .disabled(disabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+        .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
+        .accessibilityIdentifier("conversation.tool-entry")
     }
 
     @ViewBuilder
@@ -731,20 +786,22 @@ struct CompanionConversationDetailView: View {
             "开始录音"
         let dimension: CGFloat = compact ? 36 : 44
 
-        ZStack {
-            Circle()
-                .fill(isRecording ? Color.red.opacity(0.85) : Color.white.opacity(0.08))
-            Image(systemName: iconName)
-                .font(.system(size: compact ? 16 : 18, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: dimension, height: dimension)
-        .contentShape(Circle())
-        .opacity(disabled ? 0.4 : 1.0)
-        .onTapGesture {
-            guard disabled == false else { return }
+        Button {
             handleVoiceButtonTap()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(isRecording ? Color.red.opacity(0.85) : Color.white.opacity(0.08))
+                Image(systemName: iconName)
+                    .font(.system(size: compact ? 16 : 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: dimension, height: dimension)
+            .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .opacity(disabled ? 0.4 : 1.0)
+        .disabled(disabled)
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.45)
                 .onEnded { _ in
@@ -752,6 +809,7 @@ struct CompanionConversationDetailView: View {
                     handleVoiceButtonLongPress()
                 }
         )
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.voice-button")
@@ -770,24 +828,27 @@ struct CompanionConversationDetailView: View {
             "发送"
         let isEnabled = sendEnabled || canRestorePreviousMessage
 
-        ZStack {
-            Circle()
-                .fill(isEnabled ? Color.cyan : Color.white.opacity(0.10))
-            Image(systemName: iconName)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: 44, height: 44)
-        .contentShape(Circle())
-        .opacity(isEnabled ? 1.0 : 0.6)
-        .onTapGesture {
-            guard isEnabled else { return }
+        Button {
             if canRestorePreviousMessage {
                 restorePreviousUserMessage()
             } else {
                 sendCurrentDraft()
             }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(isEnabled ? Color.cyan : Color.white.opacity(0.10))
+                Image(systemName: iconName)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1.0 : 0.6)
+        .disabled(isEnabled == false)
+        .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(label)
         .accessibilityIdentifier("conversation.send-button")

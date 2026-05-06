@@ -43,16 +43,13 @@ struct ContentView: View {
             .navigationTitle(rootNavigationTitle)
             .toolbar {
                 if navigationPath.isEmpty && selectedPage == .conversations {
+                    // The watchOS system status indicator (microphone /
+                    // charging / AOD glyph) overlays the top-right corner,
+                    // covering anything in `.topBarTrailing`. Put the
+                    // primary "+" action on the leading side where the
+                    // status indicator can't reach it; settings is the
+                    // less-frequently-used action so it stays trailing.
                     ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            isShowingGlobalSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Global settings")
-                    }
-
-                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task {
                                 if let newConversationID = await chatStore.createConversation() {
@@ -64,6 +61,15 @@ struct ContentView: View {
                         }
                         .accessibilityLabel("New conversation")
                         .disabled(chatStore.isReadOnlyMode)
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isShowingGlobalSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Global settings")
                     }
                 }
 

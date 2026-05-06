@@ -38,7 +38,10 @@ struct CompanionRootView: View {
             )
         } detail: {
             if let selectedConversationID {
-                CompanionConversationDetailView(conversationID: selectedConversationID)
+                CompanionConversationDetailView(
+                    conversationID: selectedConversationID,
+                    onCreateConversation: createConversation
+                )
             } else {
                 CompanionEmptySelectionView(
                     isReadOnlyMode: chatStore.isReadOnlyMode,

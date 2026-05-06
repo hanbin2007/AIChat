@@ -213,33 +213,28 @@ final class CompanionTfBugFixUITests: XCTestCase {
     private func revealElementIfNeeded(
         _ element: XCUIElement,
         in container: XCUIElement,
-        timeout: TimeInterval = 15
+        timeout: TimeInterval = 20
     ) -> Bool {
         if waitForHittable(element, timeout: 1) {
             return true
         }
 
-        // 10 swipeUps + 2 swipeDowns matches the iOSUIFlakyTests helper —
-        // PR #54 had to bump to this budget so iPhone SE (small screen, long
-        // settings Form) doesn't fail to expose the delete row.
-        let gestures: [(XCUIElement) -> Void] = [
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeUp() },
-            { $0.swipeDown() },
-            { $0.swipeDown() }
-        ]
+        // iPhone SE (3rd gen) has the smallest screen and the settings Form
+        // is the longest. Swiping the container element alone wasn't moving
+        // the form on build #49, so we rotate between the form-as-element
+        // gesture and a root-level `app.swipeUp()` (the latter always lands
+        // on the visible scroll area regardless of how the form's a11y
+        // element is mapped). 14 + 4 budget keeps us comfortably under the
+        // 20s timeout.
+        let app = XCUIApplication()
+        let gestures: [() -> Void] = Array(repeating: { container.swipeUp() }, count: 7)
+            + Array(repeating: { app.swipeUp() }, count: 7)
+            + Array(repeating: { container.swipeDown() }, count: 2)
+            + Array(repeating: { app.swipeDown() }, count: 2)
 
         let deadline = Date().addingTimeInterval(timeout)
         for gesture in gestures where Date() < deadline {
-            gesture(container)
+            gesture()
             if waitForHittable(element, timeout: 1) {
                 return true
             }

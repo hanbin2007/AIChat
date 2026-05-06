@@ -130,24 +130,20 @@ private struct CompanionUITestBootstrap {
                 launchDestination: .conversationDetail(conversation.id)
             )
         case "companion_streaming_fade_in":
-            // Visual demo for issue #22: opens a conversation and triggers a
-            // slow assistant stream so the per-character trailing fade in
-            // `StreamingFadeInTextView` is visible to a screenshot.
+            // Visual demo for issue #22: opens a conversation seeded with a
+            // failed assistant reply. The detail view's `.task` then triggers
+            // `retryLatestReply` once it actually mounts — see
+            // `CompanionConversationDetailView.triggerUITestStreamingScenarioIfNeeded`.
+            // Driving the retry from view lifecycle (rather than a Task fired
+            // in `App.init`) is what makes the streaming pacer visible to the
+            // test, because by the time the retry fires the bubble has
+            // subscribed to the pacer.
             let conversation = streamingFadeInConversation()
             let store = MainActor.assumeIsolated {
                 ChatStore.previewStore(
                     conversations: [conversation],
                     aiService: CompanionStreamingFadeInService()
                 )
-            }
-
-            Task { @MainActor in
-                // Small grace so the detail view has actually mounted before
-                // the pacer starts emitting deltas. Otherwise the very first
-                // tokens are dropped on the floor and the bubble starts
-                // mid-message instead of from the empty "Thinking" state.
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                await store.retryLatestReply(in: conversation.id)
             }
 
             return CompanionUITestBootstrap(
