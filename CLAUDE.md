@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working principles
+
+**Tests serve the user, not the other way around.** Passing tests is never the goal — improving real user experience is. When tests fail, fix the underlying user-facing problem (or fix the test if it's wrong about the contract). Never weaken behavior, hide UI, strip animations, or contort production code purely to make a red test go green. If the only way you can make a test pass is by degrading what a real user sees or feels, stop and reconsider — the test is probably miscalibrated, or the production code has a real issue that the test is half-detecting. Fix the right thing.
+
 ## Build & Test Commands
 
 ```bash
