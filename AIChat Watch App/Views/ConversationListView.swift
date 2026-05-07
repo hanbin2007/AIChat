@@ -62,6 +62,12 @@ struct ConversationListView: View {
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                     .listRowBackground(Color.clear)
 
+                    if chatStore.configuration.backendMode == .relay {
+                        RelayStatusRow()
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
+
                     if let startupError = chatStore.startupError {
                         ConfigurationBannerView(
                             iconName: "exclamationmark.triangle.fill",

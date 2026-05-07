@@ -43,13 +43,21 @@ struct ContentView: View {
             .navigationTitle(rootNavigationTitle)
             .toolbar {
                 if navigationPath.isEmpty && selectedPage == .conversations {
-                    // The watchOS system status indicator (microphone /
-                    // charging / AOD glyph) overlays the top-right corner,
-                    // covering anything in `.topBarTrailing`. Put the
-                    // primary "+" action on the leading side where the
-                    // status indicator can't reach it; settings is the
-                    // less-frequently-used action so it stays trailing.
+                    // Both icons stay in the navigation-bar corners; the
+                    // relay status indicator (formerly fighting for space
+                    // in `.topBarTrailing`) moved into the conversation
+                    // list as its own row, freeing the trailing slot up
+                    // for `+` and keeping settings reachable.
                     ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            isShowingGlobalSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Global settings")
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task {
                                 if let newConversationID = await chatStore.createConversation() {
@@ -62,15 +70,6 @@ struct ContentView: View {
                         .accessibilityLabel("New conversation")
                         .disabled(chatStore.isReadOnlyMode)
                     }
-
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            isShowingGlobalSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Global settings")
-                    }
                 }
 
                 if navigationPath.isEmpty && selectedPage == .promptLibrary {
@@ -81,15 +80,6 @@ struct ContentView: View {
                             Image(systemName: "plus")
                         }
                         .accessibilityLabel(L10n.tr("prompt_preset.create"))
-                    }
-                }
-
-                // Relay-only connectivity dot. Direct mode never renders
-                // this indicator; the compile-time gate is the runtime
-                // `backendMode == .relay` check on the parent store.
-                if navigationPath.isEmpty && chatStore.configuration.backendMode == .relay {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        RelayStatusDot()
                     }
                 }
             }
