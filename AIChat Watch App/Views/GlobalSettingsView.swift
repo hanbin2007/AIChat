@@ -75,6 +75,20 @@ struct GlobalSettingsView: View {
                     }
                 }
 
+                Section("授权与密钥") {
+                    NavigationLink {
+                        KeyStatusDetailView()
+                            .environmentObject(chatStore)
+                    } label: {
+                        SettingsRow(
+                            icon: "key.fill",
+                            tint: .green,
+                            title: "密钥与授权",
+                            detail: keyStatusSummary
+                        )
+                    }
+                }
+
                 Section(L10n.tr("settings.section.about")) {
                     LabeledContent(
                         L10n.tr("settings.about.version"),
@@ -84,6 +98,130 @@ struct GlobalSettingsView: View {
             }
             .navigationTitle(L10n.tr("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var keyStatusSummary: String {
+        // Match the row's `detail` line to whatever the user is most
+        // likely to act on first. Order: missing key → unactivated →
+        // active license. Mirrors the row used above the activation
+        // card on the conversation list.
+        if chatStore.configuration.isAIConfigured == false {
+            return "未配置"
+        }
+        if chatStore.activationState == nil {
+            return "待激活"
+        }
+        return chatStore.activationStatusTitle
+    }
+}
+
+// MARK: - Key & Activation Detail
+
+private struct KeyStatusDetailView: View {
+    @EnvironmentObject private var chatStore: ChatStore
+    @State private var isShowingActivationCenter = false
+    @State private var isShowingRelayDetail = false
+
+    var body: some View {
+        List {
+            Section("后端") {
+                LabeledContent("模式", value: backendModeText)
+                LabeledContent("AI 配置", value: chatStore.configuration.isAIConfigured ? "已配置" : "未配置")
+                if chatStore.configuration.isAIConfigured == false {
+                    Text(chatStore.configuration.configurationMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if chatStore.configuration.backendMode == .relay {
+                Section("Relay") {
+                    LabeledContent("Server", value: relayHostText)
+                    LabeledContent("连接", value: relayStatusText)
+                    Button {
+                        isShowingRelayDetail = true
+                    } label: {
+                        Label("查看连接详情", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+            }
+
+            Section("激活") {
+                LabeledContent("状态", value: chatStore.activationStatusTitle)
+                if let state = chatStore.activationState {
+                    LabeledContent(
+                        "生效",
+                        value: state.license.validFrom.formatted(date: .abbreviated, time: .shortened)
+                    )
+                    LabeledContent(
+                        "到期",
+                        value: state.license.validUntil?
+                            .formatted(date: .abbreviated, time: .shortened) ?? "长期"
+                    )
+                    LabeledContent("已用消息", value: "\(state.usedMessageCount)")
+                    if let limit = state.license.messageLimit {
+                        LabeledContent("总额度", value: "\(limit)")
+                    }
+                }
+
+                Text(chatStore.activationStatusMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    isShowingActivationCenter = true
+                } label: {
+                    Label(
+                        chatStore.activationState == nil ? "立即激活" : "管理授权",
+                        systemImage: chatStore.activationState == nil ? "key.fill" : "checkmark.seal.fill"
+                    )
+                }
+            }
+
+            Section("设备") {
+                LabeledContent("设备码", value: chatStore.deviceIdentity.displayToken)
+            }
+        }
+        .navigationTitle("密钥与授权")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingActivationCenter) {
+            ActivationCenterView()
+                .environmentObject(chatStore)
+        }
+    }
+
+    private var backendModeText: String {
+        switch chatStore.configuration.backendMode {
+        case .direct:
+            return "Direct"
+        case .relay:
+            return "Relay"
+        }
+    }
+
+    private var relayHostText: String {
+        guard let url = chatStore.configuration.relayBaseURL else {
+            return "—"
+        }
+        if let scheme = url.scheme, let host = url.host() {
+            return url.port.map { "\(scheme)://\(host):\($0)" } ?? "\(scheme)://\(host)"
+        }
+        return url.absoluteString
+    }
+
+    private var relayStatusText: String {
+        switch chatStore.relayConnectionStatus {
+        case .unknown:
+            return "未知"
+        case .connecting:
+            return "连接中"
+        case .online:
+            return "在线"
+        case .offline:
+            return "离线"
         }
     }
 }
