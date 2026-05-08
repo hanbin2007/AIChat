@@ -32,7 +32,7 @@ actor RelayActivationService {
         networking: ActivationNetworking,
         deviceIdentity: WatchDeviceIdentity,
         platform: RelayDevicePlatform = RelayBillingService.currentPlatform,
-        deviceAlias: String = Self.defaultDeviceAlias()
+        deviceAlias: String = RelayActivationService.defaultDeviceAlias()
     ) {
         self.networking = networking
         self.deviceIdentity = deviceIdentity

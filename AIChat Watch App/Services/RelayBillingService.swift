@@ -57,7 +57,7 @@ actor RelayBillingService {
     init(
         networking: BillingNetworking,
         deviceIdentity: WatchDeviceIdentity,
-        platform: RelayDevicePlatform = Self.currentPlatform
+        platform: RelayDevicePlatform = RelayBillingService.currentPlatform
     ) {
         self.networking = networking
         self.deviceIdentity = deviceIdentity
