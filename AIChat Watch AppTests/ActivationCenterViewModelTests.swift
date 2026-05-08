@@ -13,6 +13,19 @@ import XCTest
 @MainActor
 final class ActivationCenterViewModelTests: XCTestCase {
 
+    private var suiteName: String!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        suiteName = "AIChat.tests.\(UUID().uuidString)"
+    }
+
+    override func tearDown() async throws {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        suiteName = nil
+        try await super.tearDown()
+    }
+
     func test_bootstrap_setsStatusAndSuccessState() async throws {
         let networking = MockBillingNetworking()
         let response = RelayBillingFixtures.accountStatus(creditBalance: 800, keyValue: "rk_new")
@@ -22,7 +35,7 @@ final class ActivationCenterViewModelTests: XCTestCase {
             networking: networking,
             deviceIdentity: RelayBillingFixtures.deviceIdentity()
         )
-        let vm = ActivationCenterViewModel(service: service)
+        let vm = ActivationCenterViewModel(service: service, appGroupIdentifier: suiteName)
 
         await vm.bootstrap()
 
@@ -39,7 +52,7 @@ final class ActivationCenterViewModelTests: XCTestCase {
             networking: networking,
             deviceIdentity: RelayBillingFixtures.deviceIdentity()
         )
-        let vm = ActivationCenterViewModel(service: service)
+        let vm = ActivationCenterViewModel(service: service, appGroupIdentifier: suiteName)
 
         await vm.bootstrap()
 
@@ -62,7 +75,7 @@ final class ActivationCenterViewModelTests: XCTestCase {
             networking: networking,
             deviceIdentity: RelayBillingFixtures.deviceIdentity(id: "watch-42")
         )
-        let vm = ActivationCenterViewModel(service: service)
+        let vm = ActivationCenterViewModel(service: service, appGroupIdentifier: suiteName)
 
         await vm.redeemOffline(
             code: "ACME-1234",
@@ -91,7 +104,7 @@ final class ActivationCenterViewModelTests: XCTestCase {
             networking: networking,
             deviceIdentity: RelayBillingFixtures.deviceIdentity()
         )
-        let vm = ActivationCenterViewModel(service: service)
+        let vm = ActivationCenterViewModel(service: service, appGroupIdentifier: suiteName)
         await vm.bootstrap()
         XCTAssertEqual(vm.creditBalance, 800)
 

@@ -35,6 +35,12 @@ struct AIChat_Watch_AppApp: App {
         WindowGroup {
             PlaceholderShell()
                 .environment(\.appEnvironment, environment)
+                .task {
+                    // Lazily ask once for notification permission so the
+                    // turn-completion notify path has a chance to fire
+                    // when the watch is backgrounded mid-stream.
+                    await environment.completionFeedback.ensureNotificationAuthorization()
+                }
         }
     }
 }

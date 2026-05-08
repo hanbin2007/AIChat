@@ -27,15 +27,14 @@ final class AppEnvironment {
     let billingPersistence: BillingPersistence?
     let billingService: RelayBillingService?
     let activationService: RelayActivationService?
-    let chatService: ChatService?
+    let chatService: (any ChatServiceProtocol)?
     let transcriptionService: TranscriptionService?
     let memoryService: MemoryService?
     let connectionMonitor: RelayConnectionMonitor
     let settingsService: SettingsService
-
-    /// Result of the V1→V2 migration probe; nil on fresh installs that
-    /// had no V1 store. Surfaced for diagnostics chrome only.
-    let migrationOutcome: AIChatMigrationPlanV1ToV2.Outcome?
+    let streamingTextPacer: StreamingTextPacer
+    let backgroundSession: BackgroundSessionCoordinator
+    let completionFeedback: CompletionFeedbackProvider
 
     init(
         configuration: AppConfiguration,
@@ -44,19 +43,23 @@ final class AppEnvironment {
         self.configuration = configuration
         self.deviceIdentity = deviceIdentity
         self.connectionMonitor = RelayConnectionMonitor()
-        self.settingsService = SettingsService(
+        let settingsService = SettingsService(
             defaults: .standard,
             fallbackModel: configuration.geminiModel,
             fallbackTranscriptionModel: configuration.geminiTranscriptionModel
         )
+        self.settingsService = settingsService
+        self.streamingTextPacer = StreamingTextPacer()
+        self.backgroundSession = BackgroundSessionCoordinator()
+        self.completionFeedback = CompletionFeedbackProvider.makeDefault()
 
-        // 1. Build the V2 SwiftData container + run migration if V1 exists.
-        let containerResult = Self.buildContainer(configuration: configuration)
-        self.modelContainer = containerResult.container
-        self.migrationOutcome = containerResult.outcome
+        // 1. Build the V2 SwiftData container. V2 is treated as the
+        // initial install schema — no V1 migration path exists.
+        let container = Self.buildContainer(configuration: configuration)
+        self.modelContainer = container
 
         // 2. Persistence actors.
-        if let container = containerResult.container {
+        if let container {
             self.conversations = ConversationPersistence(container: container)
             self.billingPersistence = BillingPersistence(container: container)
         } else {
@@ -81,10 +84,25 @@ final class AppEnvironment {
             )
             self.transcriptionService = TranscriptionService(api: client)
             if let conversations = self.conversations {
-                self.chatService = ChatService(
+                let core = ChatService(
                     api: client,
                     persistence: conversations,
                     defaultModel: configuration.geminiModel
+                )
+                // Wrap the core service so connect-time failures retry
+                // transparently; the policy reads the latest user
+                // setting on every send.
+                self.chatService = RetryingChatService(
+                    inner: core,
+                    policyProvider: { @Sendable [settingsService] in
+                        await MainActor.run {
+                            RetryingChatService.RetryPolicy(
+                                maxAttempts: settingsService.sendFailureRetryLimit,
+                                initialDelayNanos: 2_000_000_000,
+                                factor: 2.0
+                            )
+                        }
+                    }
                 )
             } else {
                 self.chatService = nil
@@ -127,44 +145,10 @@ final class AppEnvironment {
         )
     }
 
-    private struct ContainerBuildResult {
-        let container: ModelContainer?
-        let outcome: AIChatMigrationPlanV1ToV2.Outcome?
-    }
-
-    private static func buildContainer(configuration: AppConfiguration) -> ContainerBuildResult {
-        do {
-            let container = try AIChatModelContainer.makeOnDisk(
-                appGroupIdentifier: configuration.appGroupIdentifier
-            )
-            // Resolve the same root URL the container chose so the
-            // migration plan can locate the V1 sqlite alongside it.
-            let rootURL = resolvedStorageRoot(configuration: configuration)
-            let outcome = AIChatMigrationPlanV1ToV2.migrateIfNeeded(
-                v2Container: container,
-                rootURL: rootURL
-            )
-            return ContainerBuildResult(container: container, outcome: outcome)
-        } catch {
-            return ContainerBuildResult(container: nil, outcome: nil)
-        }
-    }
-
-    private static func resolvedStorageRoot(configuration: AppConfiguration) -> URL {
-        let fileManager = FileManager.default
-        if let appGroupIdentifier = configuration.appGroupIdentifier,
-           let url = fileManager.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
-            return url.appendingPathComponent("AIChatStore", isDirectory: true)
-        }
-        if let baseURL = try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ) {
-            return baseURL.appendingPathComponent("AIChatStore", isDirectory: true)
-        }
-        return fileManager.temporaryDirectory.appendingPathComponent("AIChatStore", isDirectory: true)
+    private static func buildContainer(configuration: AppConfiguration) -> ModelContainer? {
+        try? AIChatModelContainer.makeOnDisk(
+            appGroupIdentifier: configuration.appGroupIdentifier
+        )
     }
 }
 

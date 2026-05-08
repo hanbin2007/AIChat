@@ -37,10 +37,14 @@ final class ConversationDetailViewModel {
     private(set) var transcribeState: TranscribeState = .idle
     private(set) var lowBalanceVisible: Bool = false
 
-    private let chatService: ChatService
+    private let chatService: any ChatServiceProtocol
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
+    private let pacer: StreamingTextPacer
+    let autoScroll: ConversationAutoScrollController
+    private let backgroundSession: BackgroundSessionCoordinator
+    private let feedback: CompletionFeedbackProvider
     /// Sendable box holding the in-flight stream `Task`. `let` so it
     /// has no isolation pinning; mutation happens through the box's
     /// reference semantics, including from the nonisolated `deinit`.
@@ -48,16 +52,24 @@ final class ConversationDetailViewModel {
 
     init(
         conversation: ConversationThread,
-        chatService: ChatService,
+        chatService: any ChatServiceProtocol,
         transcriptionService: TranscriptionService,
         persistence: ConversationPersistence,
-        connection: RelayConnectionMonitor
+        connection: RelayConnectionMonitor,
+        pacer: StreamingTextPacer,
+        autoScroll: ConversationAutoScrollController,
+        backgroundSession: BackgroundSessionCoordinator,
+        feedback: CompletionFeedbackProvider
     ) {
         self.conversation = conversation
         self.chatService = chatService
         self.transcriptionService = transcriptionService
         self.persistence = persistence
         self.connection = connection
+        self.pacer = pacer
+        self.autoScroll = autoScroll
+        self.backgroundSession = backgroundSession
+        self.feedback = feedback
     }
 
     deinit {
@@ -76,21 +88,35 @@ final class ConversationDetailViewModel {
         let snapshot = conversation
         streamHandle.task = Task { [weak self] in
             guard let self else { return }
+            self.backgroundSession.begin()
+            defer { self.backgroundSession.end() }
             do {
-                let stream = self.chatService.send(
+                let upstream = self.chatService.send(
                     userText: trimmed,
                     attachments: attachments,
                     to: snapshot
                 )
+                let paced = self.pacer.pace(upstream)
                 self.sendState = .streaming
-                for try await update in stream {
+                for try await update in paced {
                     if Task.isCancelled { break }
                     self.conversation = update
+                    if let last = update.messages.last {
+                        self.autoScroll.messageContentDidUpdate(latestMessageID: last.id)
+                    }
                 }
+                self.autoScroll.streamDidFinish()
+                self.feedback.playSuccess()
+                await self.feedback.notifyTurnComplete(
+                    conversationTitle: self.conversation.title,
+                    preview: self.conversation.messages.last?.cleanedText ?? ""
+                )
                 self.sendState = .idle
             } catch let error as RelayClientError {
+                self.autoScroll.streamDidFinish()
                 self.handle(relayError: error)
             } catch {
+                self.autoScroll.streamDidFinish()
                 self.sendState = .failed(error.localizedDescription)
             }
         }

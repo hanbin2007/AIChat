@@ -27,9 +27,11 @@ final class ActivationCenterViewModel {
     private(set) var offlineRedeemState: ActionState = .idle
 
     private let service: RelayActivationService
+    private let appGroupIdentifier: String?
 
-    init(service: RelayActivationService) {
+    init(service: RelayActivationService, appGroupIdentifier: String?) {
         self.service = service
+        self.appGroupIdentifier = appGroupIdentifier
     }
 
     var currentBearerKey: String? { status?.key?.keyValue }
@@ -38,7 +40,9 @@ final class ActivationCenterViewModel {
     func bootstrap() async {
         bootstrapState = .running
         do {
-            status = try await service.bootstrap()
+            let response = try await service.bootstrap()
+            status = response
+            persistBearerKey(from: response)
             bootstrapState = .success
         } catch {
             bootstrapState = .failed(error.localizedDescription)
@@ -67,7 +71,7 @@ final class ActivationCenterViewModel {
     ) async {
         offlineRedeemState = .running
         do {
-            status = try await service.exchangeOffline(
+            let response = try await service.exchangeOffline(
                 code: code,
                 creditsTotal: creditsTotal,
                 creditsRemaining: creditsRemaining,
@@ -75,9 +79,19 @@ final class ActivationCenterViewModel {
                 allowedModelIDs: allowedModelIDs,
                 fingerprint: fingerprint
             )
+            status = response
+            persistBearerKey(from: response)
             offlineRedeemState = .success
         } catch {
             offlineRedeemState = .failed(error.localizedDescription)
         }
+    }
+
+    // The relay's bootstrap / offline-exchange responses carry the
+    // device-scoped `rk_*` key the watch must persist; without this
+    // write a fresh install loses its key on the next launch and
+    // every subsequent relay call is unauthenticated.
+    private func persistBearerKey(from response: RelayAccountStatusResponse) {
+        RelayKeyStore.set(response.key?.keyValue, appGroupIdentifier: appGroupIdentifier)
     }
 }
