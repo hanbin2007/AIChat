@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct AssembledContext: Equatable {
+nonisolated struct AssembledContext: Equatable {
     var systemInstructionParts: [GeminiPartPayload]?
     var mode: ContextMode
     var recentMessages: [ChatMessage]
