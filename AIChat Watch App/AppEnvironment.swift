@@ -32,6 +32,9 @@ final class AppEnvironment {
     let memoryService: MemoryService?
     let connectionMonitor: RelayConnectionMonitor
     let settingsService: SettingsService
+    let streamingTextPacer: StreamingTextPacer
+    let backgroundSession: BackgroundSessionCoordinator
+    let completionFeedback: CompletionFeedbackProvider
 
     init(
         configuration: AppConfiguration,
@@ -40,11 +43,15 @@ final class AppEnvironment {
         self.configuration = configuration
         self.deviceIdentity = deviceIdentity
         self.connectionMonitor = RelayConnectionMonitor()
-        self.settingsService = SettingsService(
+        let settingsService = SettingsService(
             defaults: .standard,
             fallbackModel: configuration.geminiModel,
             fallbackTranscriptionModel: configuration.geminiTranscriptionModel
         )
+        self.settingsService = settingsService
+        self.streamingTextPacer = StreamingTextPacer()
+        self.backgroundSession = BackgroundSessionCoordinator()
+        self.completionFeedback = CompletionFeedbackProvider.makeDefault()
 
         // 1. Build the V2 SwiftData container. V2 is treated as the
         // initial install schema — no V1 migration path exists.
@@ -77,10 +84,25 @@ final class AppEnvironment {
             )
             self.transcriptionService = TranscriptionService(api: client)
             if let conversations = self.conversations {
-                self.chatService = ChatService(
+                let core = ChatService(
                     api: client,
                     persistence: conversations,
                     defaultModel: configuration.geminiModel
+                )
+                // Wrap the core service so connect-time failures retry
+                // transparently; the policy reads the latest user
+                // setting on every send.
+                self.chatService = RetryingChatService(
+                    inner: core,
+                    policyProvider: { @Sendable [settingsService] in
+                        await MainActor.run {
+                            RetryingChatService.RetryPolicy(
+                                maxAttempts: settingsService.sendFailureRetryLimit,
+                                initialDelayNanos: 2_000_000_000,
+                                factor: 2.0
+                            )
+                        }
+                    }
                 )
             } else {
                 self.chatService = nil

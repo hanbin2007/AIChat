@@ -41,6 +41,10 @@ final class ConversationDetailViewModel {
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
+    private let pacer: StreamingTextPacer
+    let autoScroll: ConversationAutoScrollController
+    private let backgroundSession: BackgroundSessionCoordinator
+    private let feedback: CompletionFeedbackProvider
     /// Marked nonisolated(unsafe) so `deinit` (which is itself
     /// nonisolated in Swift 6) can cancel the in-flight stream.
     nonisolated(unsafe) private var streamTask: Task<Void, Never>?
@@ -50,13 +54,21 @@ final class ConversationDetailViewModel {
         chatService: any ChatServiceProtocol,
         transcriptionService: TranscriptionService,
         persistence: ConversationPersistence,
-        connection: RelayConnectionMonitor
+        connection: RelayConnectionMonitor,
+        pacer: StreamingTextPacer,
+        autoScroll: ConversationAutoScrollController,
+        backgroundSession: BackgroundSessionCoordinator,
+        feedback: CompletionFeedbackProvider
     ) {
         self.conversation = conversation
         self.chatService = chatService
         self.transcriptionService = transcriptionService
         self.persistence = persistence
         self.connection = connection
+        self.pacer = pacer
+        self.autoScroll = autoScroll
+        self.backgroundSession = backgroundSession
+        self.feedback = feedback
     }
 
     deinit {
@@ -75,21 +87,35 @@ final class ConversationDetailViewModel {
         let snapshot = conversation
         streamTask = Task { [weak self] in
             guard let self else { return }
+            self.backgroundSession.begin()
+            defer { self.backgroundSession.end() }
             do {
-                let stream = await self.chatService.send(
+                let upstream = self.chatService.send(
                     userText: trimmed,
                     attachments: attachments,
                     to: snapshot
                 )
+                let paced = self.pacer.pace(upstream)
                 self.sendState = .streaming
-                for try await update in stream {
+                for try await update in paced {
                     if Task.isCancelled { break }
                     self.conversation = update
+                    if let last = update.messages.last {
+                        self.autoScroll.messageContentDidUpdate(latestMessageID: last.id)
+                    }
                 }
+                self.autoScroll.streamDidFinish()
+                self.feedback.playSuccess()
+                await self.feedback.notifyTurnComplete(
+                    conversationTitle: self.conversation.title,
+                    preview: self.conversation.messages.last?.cleanedText ?? ""
+                )
                 self.sendState = .idle
             } catch let error as RelayClientError {
+                self.autoScroll.streamDidFinish()
                 self.handle(relayError: error)
             } catch {
+                self.autoScroll.streamDidFinish()
                 self.sendState = .failed(error.localizedDescription)
             }
         }
