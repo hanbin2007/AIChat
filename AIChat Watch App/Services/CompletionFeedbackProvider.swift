@@ -118,7 +118,7 @@ private struct SystemUserNotificationCenter: UserNotificationCenterProtocol {
 private struct SystemAppForegroundProbe: AppForegroundProbe {
     @MainActor var isForeground: Bool {
         #if os(watchOS)
-        return WKExtension.shared().applicationState == .active
+        return WKApplication.shared().applicationState == .active
         #else
         return true
         #endif
