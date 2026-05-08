@@ -7,8 +7,12 @@
 //  `ChatModels.swift` returns `.plain` for short / non-formatted text
 //  so we don't pay the markdown parser cost on every assistant chunk.
 //
-//  Math expressions ($$...$$ or \(...\)) are handled inside MarkdownView
-//  via its bundled `SwiftUIMath` integration; we don't re-route here.
+//  Math expressions ($$...$$, $...$, \(...\), \[...\]) are routed
+//  through MarkdownView's `markdownMathRenderingEnabled(true)` path,
+//  which delegates display math to `WatchAdaptiveDisplayMathView`
+//  (auto-scales to wrist width + tap-to-expand zoom container). The
+//  decider already detects math via `containsAssistantRenderableMath`,
+//  so a math-only short message still gets the markdown route.
 //
 
 import SwiftUI
@@ -26,6 +30,7 @@ struct AssistantMessageMarkdownView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .markdown:
             MarkdownView(text)
+                .markdownMathRenderingEnabled(true)
                 .font(DS.Typography.bubbleBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
