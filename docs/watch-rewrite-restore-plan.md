@@ -2,11 +2,13 @@
 
 ## Context
 
-`docs/watch-rewrite-missing-features.md` 列出 15 节、约 100 项缺失功能。前一次 PR (`claude/rewrite-apple-watch-client-CfNfP`) 把后端 / 持久化 / VM 骨架重写为 relay-only + 严格 per-VM MVVM,但功能等价度只到 ~40%:streaming pacer / auto-scroll / 后台续传 / completion 反馈 / send 重试 / 附件迁移 / 同步 / StoreKit 编排 / 几乎全部 UI 都缺。其中 **§11.1 / §12.1 / §5.1 三条**是上线阻塞,不修则装机即坏。
+`docs/watch-rewrite-missing-features.md` 列出 15 节、约 100 项缺失功能。前一次 PR (`claude/rewrite-apple-watch-client-CfNfP`) 把后端 / 持久化 / VM 骨架重写为 relay-only + 严格 per-VM MVVM,但功能等价度只到 ~40%:streaming pacer / auto-scroll / 后台续传 / completion 反馈 / send 重试 / 同步 / StoreKit 编排 / 几乎全部 UI 都缺。其中 **§11.1** 是上线阻塞,不修则装机即坏。
 
 本计划目标:把 §1–§15 全部补回,**保留当前 per-VM 架构**(不复活 `ChatStore` 中央 store),按依赖顺序分 5 阶段交付,每个新增 VM/Service 配单元测试,关键 UI 状态有 `attachScreenshot` 截图,并重建 `MockChatService` + `UITestBootstrap` + `AIChat_UI_TEST_SCENARIO` 让 UI 测试可以跑。
 
-**重要约束**:**不从 git 历史恢复任何旧实现**。所有被删除的文件(`StreamingTextPacer`、`ConversationAutoScrollController`、`TranscriptionCompletionFeedbackProvider`、`CompanionSyncBridge` 等)都按当前 per-VM + actor 架构**重新设计编写**,与新的 `ChatService` AsyncThrowingStream 输出 / `ConversationPersistence` actor / `@Observable` VM 范式对齐。旧文件名仅作功能定位参考,不复用代码。
+**重要约束**:
+- **不从 git 历史恢复任何旧实现**。所有被删除的文件(`StreamingTextPacer`、`ConversationAutoScrollController`、`TranscriptionCompletionFeedbackProvider`、`CompanionSyncBridge` 等)都按当前 per-VM + actor 架构**重新设计编写**,与新的 `ChatService` AsyncThrowingStream 输出 / `ConversationPersistence` actor / `@Observable` VM 范式对齐。旧文件名仅作功能定位参考,不复用代码。
+- **不迁移 V1 旧用户数据**。原 §5.1(附件 sidecar 迁移)与 §12.1(V1→V2 迁移测试)从计划中**移除**;`Persistence/AIChatMigrationPlanV1ToV2.swift` 视作**死代码,在 Phase 1 删除**,V2 schema 直接当作首次安装的初始 schema。升级路径通过版本提醒用户清空旧数据 / 重装,不做兼容。
 
 ---
 
@@ -29,18 +31,20 @@
 
 ---
 
-## Phase 1 — 上线阻塞修复
+## Phase 1 — 上线阻塞修复 + 死代码清理
 
-**目标**:不修则装机即坏的三条 + 架构文档对齐。
+**目标**:RelayKeyStore 写回 + 架构文档对齐 + 移除已弃用的迁移层。
 
 修改:
 - `AIChat Watch App/Stores/ActivationCenterViewModel.swift` —— `bootstrap()` 成功后调一次 `RelayKeyStore.set(_:appGroupIdentifier:)`(§11.1,~5 行)。
-- `AIChat Watch App/Persistence/AIChatMigrationPlanV1ToV2.swift` —— 迁移时若 V1 attachment `data` 为空,从 sidecar `attachments/<id>.bin` 读回,再写入 V2 `AttachmentEntity.data`(§5.1)。
-- `CLAUDE.md` —— 改写架构段。
+- `CLAUDE.md` —— 改写架构段(删除 ChatStore 描述,改为 per-VM MVVM)。
+
+删除:
+- `AIChat Watch App/Persistence/AIChatMigrationPlanV1ToV2.swift` —— 不迁移 V1 数据,该文件作为死代码移除。
+- `AIChat Watch App/Persistence/AIChatSchemaV1.swift` 及其它仅供迁移使用的 V1 类型(若存在)—— 一并移除。
+- `AppEnvironment` / 容器初始化中调用 `migrateIfNeeded(...)` 的位置 —— 改为直接以 V2 schema 启动。
 
 新增:
-- `AIChat Watch AppTests/Fixtures/V1Snapshot/` —— V1 sqlite + sidecar attachments 真 fixture(§12.1 前置)。
-- `AIChat Watch AppTests/V1ToV2MigrationFixtureTests.swift` —— 跑迁移、断言所有数据 + 附件 blob 完整、重跑幂等(§12.1)。
 - `AIChat Watch AppTests/ActivationCenterViewModelRelayKeyStoreTests.swift` —— 断言 `bootstrap()` 写入 RelayKeyStore(§11.1)。
 
 依赖:无。
@@ -151,7 +155,7 @@
 代码:
 - `AIChat Watch App/Stores/ActivationCenterViewModel.swift`、`ConversationDetailViewModel.swift`、`ConversationSettingsViewModel.swift`、`RelayPurchaseSheetViewModel.swift`、`RelayPairingTokenViewModel.swift`
 - `AIChat Watch App/Services/ChatService.swift`、`MemoryService.swift`、`VoiceRecorder.swift`、`TranscriptionService.swift`、`WatchDisplayStateMonitor.swift`、`RelayKeyStore.swift`、`AppConfiguration.swift`
-- `AIChat Watch App/Persistence/AIChatMigrationPlanV1ToV2.swift`、`ConversationPersistence.swift`、`AIChatSchemaV2.swift`
+- `AIChat Watch App/Persistence/ConversationPersistence.swift`、`AIChatSchemaV2.swift`(`AIChatMigrationPlanV1ToV2.swift` Phase 1 删除)
 - `AIChat Watch App/Models/ChatModels.swift`(`ConversationHistoryRenderBudget` / `AssistantMessageContentNormalizer` / `RenderSignature` 三类要在 Phase 4 接到视图)
 - `AIChat Watch App/Views/PlaceholderShell.swift`(Phase 4 改名 + 替换)
 - `AIChat Watch App/AIChatApp.swift`、`AppEnvironment.swift`
@@ -173,7 +177,7 @@ xcodebuild -scheme "AIChat Watch App" \
   -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" \
   test
 ```
-重点断言:Phase 1 `V1ToV2MigrationFixtureTests` 跑过 + 幂等;Phase 2 pacer / autoscroll / retry / background coordinator;Phase 3 同步 actor + StoreKit coordinator;Phase 4 各 VM 行为。
+重点断言:Phase 1 `ActivationCenterViewModelRelayKeyStoreTests` 跑过 + 现有测试套不因删除迁移层退化;Phase 2 pacer / autoscroll / retry / background coordinator;Phase 3 同步 actor + StoreKit coordinator;Phase 4 各 VM 行为。
 
 **UI 测试 + 截图**:
 ```
@@ -184,7 +188,7 @@ xcodebuild -scheme "AIChat Watch UITests" \
 Xcode Cloud 触发后,`ci_post_xcodebuild.sh` 拾取 `XCTAttachment` PNG,`ui-screenshots-bridge.yml` 派发 `ui-screenshots.yml` 把截图回贴到 PR。**每个 UI 影响改动必须在对应 UI 测试里调 `attachScreenshot`**(CLAUDE.md 已强制此约定)。
 
 **手动实机验证**(Phase 1 / 2 / 3 各一次):
-- Phase 1:全新装机 → 完成激活 → kill app → 再次启动应直接联通 relay(§11.1);带 V1 数据库的旧设备升级到 V2,所有附件可见(§5.1 / §12.1)。
+- Phase 1:全新装机 → 完成激活 → kill app → 再次启动应直接联通 relay(§11.1);确认删除迁移层后,首次启动可正常生成 V2 store。
 - Phase 2:发长回复 → 字符级 reveal 平滑、auto-scroll 跟进、用户上滑应冻结自动滚;息屏 5s 应继续接收 stream,完成时震动 + 通知(§1 / §2)。
 - Phase 3:两台同 Apple ID 设备会话 / pinned memory 互相同步;watchOS 受限时 iPhone 完成购买后 watch 余额刷新(§3 / §4)。
 - Phase 4:语音录入、tools 开关、focus / memory / archive 编辑、AOD 隐私折叠均按预期工作。
