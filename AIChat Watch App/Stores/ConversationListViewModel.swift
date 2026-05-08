@@ -8,6 +8,10 @@
 //  delegate to the persistence actor; the stream callback is what
 //  actually updates the published list.
 //
+//  Also exposes a `filter` + `searchQuery` projection (`visibleItems`)
+//  so the new list view can display a filter chip row + searchable
+//  input without re-implementing filtering at the view layer.
+//
 
 import Foundation
 import Observation
@@ -21,8 +25,26 @@ final class ConversationListViewModel {
         case failed(String)
     }
 
+    enum ListFilter: String, CaseIterable, Identifiable {
+        case all
+        case recent
+        case favorites
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .all: return "All"
+            case .recent: return "Recent"
+            case .favorites: return "Favorites"
+            }
+        }
+    }
+
     private(set) var loadState: LoadState = .idle
     private(set) var items: [ConversationThread] = []
+    var filter: ListFilter = .all
+    var searchQuery: String = ""
 
     private let persistence: ConversationPersistence
     /// Marked nonisolated(unsafe) so `deinit` (which is itself
@@ -85,6 +107,28 @@ final class ConversationListViewModel {
             try await persistence.setFavorite(id: id, isFavorite: !current.isFavorite)
         } catch {
             loadState = .failed(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Derived projections
+
+    /// Filtered + searched list the view actually renders.
+    var visibleItems: [ConversationThread] {
+        var result = items
+        switch filter {
+        case .all:
+            break
+        case .recent:
+            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            result = result.filter { $0.updatedAt >= cutoff }
+        case .favorites:
+            result = result.filter { $0.isFavorite }
+        }
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return result }
+        return result.filter { thread in
+            if thread.title.localizedCaseInsensitiveContains(query) { return true }
+            return thread.previewText.localizedCaseInsensitiveContains(query)
         }
     }
 }
