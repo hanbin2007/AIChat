@@ -168,11 +168,23 @@ enum StubChatServiceOutcome: Sendable {
 
 final class StubChatService: ChatServiceProtocol, @unchecked Sendable {
     private let lock = NSLock()
-    private var script: [StubChatServiceOutcome]
+    private var _script: [StubChatServiceOutcome]
     private var attempts: Int = 0
 
     init(script: [StubChatServiceOutcome]) {
-        self.script = script
+        self._script = script
+    }
+
+    var script: [StubChatServiceOutcome] {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return _script
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            _script = newValue
+            attempts = 0
+        }
     }
 
     var attemptCount: Int {
@@ -189,7 +201,7 @@ final class StubChatService: ChatServiceProtocol, @unchecked Sendable {
             lock.lock(); defer { lock.unlock() }
             let idx = attempts
             attempts += 1
-            return idx < script.count ? script[idx] : .immediateFail(StubError.scriptExhausted)
+            return idx < _script.count ? _script[idx] : .immediateFail(StubError.scriptExhausted)
         }()
         return AsyncThrowingStream { continuation in
             switch outcome {
