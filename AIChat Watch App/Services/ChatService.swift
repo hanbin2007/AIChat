@@ -23,7 +23,20 @@
 
 import Foundation
 
-actor ChatService {
+/// Streams one assistant-reply turn for a conversation. Implementations
+/// take ownership of writing the user message + placeholder assistant
+/// message before streaming, so each yielded `ConversationThread` is
+/// already persisted. The protocol exists to allow retry / pacing
+/// wrappers and a `MockChatService` for UI tests.
+protocol ChatServiceProtocol: Sendable {
+    nonisolated func send(
+        userText: String,
+        attachments: [ChatAttachment],
+        to conversation: ConversationThread
+    ) -> AsyncThrowingStream<ConversationThread, Error>
+}
+
+actor ChatService: ChatServiceProtocol {
     private let api: RelayAPIClient
     private let persistence: ConversationPersistence
     private let defaultModel: String

@@ -37,7 +37,7 @@ final class ConversationDetailViewModel {
     private(set) var transcribeState: TranscribeState = .idle
     private(set) var lowBalanceVisible: Bool = false
 
-    private let chatService: ChatService
+    private let chatService: any ChatServiceProtocol
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
@@ -47,7 +47,7 @@ final class ConversationDetailViewModel {
 
     init(
         conversation: ConversationThread,
-        chatService: ChatService,
+        chatService: any ChatServiceProtocol,
         transcriptionService: TranscriptionService,
         persistence: ConversationPersistence,
         connection: RelayConnectionMonitor

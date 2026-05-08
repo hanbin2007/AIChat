@@ -27,7 +27,7 @@ final class AppEnvironment {
     let billingPersistence: BillingPersistence?
     let billingService: RelayBillingService?
     let activationService: RelayActivationService?
-    let chatService: ChatService?
+    let chatService: (any ChatServiceProtocol)?
     let transcriptionService: TranscriptionService?
     let memoryService: MemoryService?
     let connectionMonitor: RelayConnectionMonitor
