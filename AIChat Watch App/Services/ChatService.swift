@@ -124,11 +124,10 @@ actor ChatService {
                     }
                     // Stream ended without a `done` — treat as cancelled
                     // and persist whatever we accumulated.
-                    if Task.isCancelled {
-                        assistant.status = .cancelled
-                    } else {
-                        assistant.status = .sent
-                    }
+                    // No `cancelled` case in `ChatMessageStatus` —
+                    // user-cancelled mid-stream is treated as a soft
+                    // completion so the partial text stays visible.
+                    assistant.status = .sent
                     thread = try await self.replaceLastAssistant(in: thread, with: assistant)
                     thread = try await self.persist(thread)
                     continuation.yield(thread)
