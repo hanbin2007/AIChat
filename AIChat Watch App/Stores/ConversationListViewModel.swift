@@ -25,10 +25,11 @@ final class ConversationListViewModel {
     private(set) var items: [ConversationThread] = []
 
     private let persistence: ConversationPersistence
-    /// Marked nonisolated(unsafe) so `deinit` (which is itself
-    /// nonisolated in Swift 6) can cancel the subscription. The Task
-    /// is the only writer outside `init` / `start` so this is safe.
-    nonisolated private var subscription: Task<Void, Never>?
+    /// `@ObservationIgnored` so `@Observable` doesn't wrap this in a
+    /// tracked accessor (which can't be `nonisolated`). Marked
+    /// `nonisolated` so `deinit` (itself nonisolated in Swift 6) can
+    /// cancel the subscription.
+    @ObservationIgnored nonisolated private var subscription: Task<Void, Never>?
 
     init(persistence: ConversationPersistence) {
         self.persistence = persistence

@@ -17,9 +17,11 @@ final class FavoritesViewModel {
     private(set) var isLoaded: Bool = false
 
     private let persistence: ConversationPersistence
-    /// Marked nonisolated(unsafe) so `deinit` (which is itself
-    /// nonisolated in Swift 6) can cancel the subscription.
-    nonisolated private var subscription: Task<Void, Never>?
+    /// `@ObservationIgnored` so `@Observable` doesn't wrap this in a
+    /// tracked accessor (which can't be `nonisolated`). Marked
+    /// `nonisolated` so `deinit` (itself nonisolated in Swift 6) can
+    /// cancel the subscription.
+    @ObservationIgnored nonisolated private var subscription: Task<Void, Never>?
 
     init(persistence: ConversationPersistence) {
         self.persistence = persistence

@@ -41,9 +41,11 @@ final class ConversationDetailViewModel {
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
-    /// Marked nonisolated(unsafe) so `deinit` (which is itself
-    /// nonisolated in Swift 6) can cancel the in-flight stream.
-    nonisolated private var streamTask: Task<Void, Never>?
+    /// `@ObservationIgnored` so `@Observable` doesn't wrap this in a
+    /// tracked accessor (which can't be `nonisolated`). Marked
+    /// `nonisolated` so `deinit` (itself nonisolated in Swift 6) can
+    /// cancel the in-flight stream.
+    @ObservationIgnored nonisolated private var streamTask: Task<Void, Never>?
 
     init(
         conversation: ConversationThread,
