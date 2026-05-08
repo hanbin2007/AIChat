@@ -30,7 +30,7 @@ final class BackgroundSessionCoordinator {
     private let factory: @MainActor () -> BackgroundSessionHandle
     private var current: BackgroundSessionHandle?
 
-    init(factory: @escaping @MainActor () -> BackgroundSessionHandle = Self.defaultFactory) {
+    init(factory: @escaping @MainActor () -> BackgroundSessionHandle = BackgroundSessionCoordinator.defaultFactory) {
         self.factory = factory
     }
 
@@ -54,7 +54,7 @@ final class BackgroundSessionCoordinator {
     /// Test-visible probe.
     var isActive: Bool { current != nil }
 
-    private static var defaultFactory: @MainActor () -> BackgroundSessionHandle {
+    nonisolated private static var defaultFactory: @MainActor () -> BackgroundSessionHandle {
         {
             #if os(watchOS)
             return WKExtendedRuntimeSessionAdapter()
@@ -88,6 +88,8 @@ private final class WKExtendedRuntimeSessionAdapter: NSObject, BackgroundSession
     }
 
     nonisolated func extendedRuntimeSessionDidStart(_ session: WKExtendedRuntimeSession) {}
+
+    nonisolated func extendedRuntimeSessionWillExpire(_ session: WKExtendedRuntimeSession) {}
 
     nonisolated func extendedRuntimeSession(
         _ session: WKExtendedRuntimeSession,
