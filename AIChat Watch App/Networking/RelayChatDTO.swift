@@ -20,7 +20,7 @@
 
 import Foundation
 
-struct RelayStreamRequest: Codable, Equatable, Sendable {
+nonisolated struct RelayStreamRequest: Codable, Equatable, Sendable {
     var model: String
     var systemPrompt: String?
     var systemInstructionParts: [GeminiPartPayload]?
@@ -32,14 +32,14 @@ struct RelayStreamRequest: Codable, Equatable, Sendable {
     var messages: [RelayStreamMessage]
 }
 
-struct RelayStreamMessage: Codable, Equatable, Sendable {
+nonisolated struct RelayStreamMessage: Codable, Equatable, Sendable {
     var role: String
     var text: String?
     var modelResponseParts: [GeminiPartPayload]?
     var attachments: [RelayStreamAttachment]
 }
 
-struct RelayStreamAttachment: Codable, Equatable, Sendable {
+nonisolated struct RelayStreamAttachment: Codable, Equatable, Sendable {
     var mimeType: String
     var base64Data: String
     var filename: String
@@ -48,7 +48,7 @@ struct RelayStreamAttachment: Codable, Equatable, Sendable {
 /// Decoded payload of an SSE `data:` JSON object on `/v1/chat/stream`.
 /// The relay always sets `type` explicitly; we still honour the SSE
 /// `event:` line as a fallback.
-struct RelayStreamFrame: Decodable, Sendable {
+nonisolated struct RelayStreamFrame: Decodable, Sendable {
     var type: String?
     var text: String?
     var parts: [GeminiPartPayload]?
@@ -60,7 +60,7 @@ struct RelayStreamFrame: Decodable, Sendable {
 /// Domain event emitted by `ChatStreamSession`. The legacy `delta` SSE
 /// synonym is intentionally not represented here; only the canonical
 /// Next.js relay event names are surfaced to consumers.
-enum RelayChatEvent: Equatable, Sendable {
+nonisolated enum RelayChatEvent: Equatable, Sendable {
     case answerDelta(String)
     case thoughtDelta(String)
     case modelContent([GeminiPartPayload])
@@ -69,14 +69,14 @@ enum RelayChatEvent: Equatable, Sendable {
     case errorEvent(String)
 }
 
-struct RelayTranscribeRequest: Codable, Equatable, Sendable {
+nonisolated struct RelayTranscribeRequest: Codable, Equatable, Sendable {
     var model: String
     var systemPrompt: String
     var prompt: String
     var audio: RelayStreamAttachment
 }
 
-struct RelayTranscribeResponse: Decodable, Equatable, Sendable {
+nonisolated struct RelayTranscribeResponse: Decodable, Equatable, Sendable {
     var text: String
     var model: String?
 
@@ -110,7 +110,7 @@ struct RelayTranscribeResponse: Decodable, Equatable, Sendable {
     }
 }
 
-struct RelayMemoryExtractRequest: Codable, Equatable, Sendable {
+nonisolated struct RelayMemoryExtractRequest: Codable, Equatable, Sendable {
     var model: String
     var mode: String
     var conversationTitle: String?
@@ -120,19 +120,19 @@ struct RelayMemoryExtractRequest: Codable, Equatable, Sendable {
     var archiveCandidateMessages: [RelayMemoryMessage]
 }
 
-struct RelayMemoryFocusState: Codable, Equatable, Sendable {
+nonisolated struct RelayMemoryFocusState: Codable, Equatable, Sendable {
     var kind: String
     var title: String?
     var focusNote: String?
     var openLoops: [String]
 }
 
-struct RelayMemoryMessage: Codable, Equatable, Sendable {
+nonisolated struct RelayMemoryMessage: Codable, Equatable, Sendable {
     var role: String
     var text: String
 }
 
-struct RelayMemoryExtractResponse: Decodable, Equatable, Sendable {
+nonisolated struct RelayMemoryExtractResponse: Decodable, Equatable, Sendable {
     var kind: String?
     var title: String?
     var focusNote: String?
@@ -143,7 +143,7 @@ struct RelayMemoryExtractResponse: Decodable, Equatable, Sendable {
     var archiveOpenLoops: [String]?
 }
 
-struct RelayHealthResponse: Decodable, Equatable, Sendable {
+nonisolated struct RelayHealthResponse: Decodable, Equatable, Sendable {
     var status: String?
     var version: String?
 }

@@ -848,7 +848,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         status == .streaming
     }
 
-    var renderSignature: ChatMessageRenderSignature {
+    nonisolated var renderSignature: ChatMessageRenderSignature {
         ChatMessageRenderSignature(
             id: id,
             role: role,
@@ -1108,7 +1108,7 @@ nonisolated struct ChatMessageRenderSignature: Equatable {
 }
 
 extension ChatAttachment {
-    var renderSignature: ChatAttachmentRenderSignature {
+    nonisolated var renderSignature: ChatAttachmentRenderSignature {
         ChatAttachmentRenderSignature(
             id: id,
             kind: kind,
@@ -1129,7 +1129,7 @@ extension String {
         static let maximumMarkdownLines = 48
     }
 
-    var preferredAssistantMessageTextRenderingMode: AssistantMessageTextRenderingMode {
+    nonisolated var preferredAssistantMessageTextRenderingMode: AssistantMessageTextRenderingMode {
         guard isEmpty == false else {
             return .plain
         }
@@ -1167,7 +1167,7 @@ extension String {
         return containsLikelyInlineMathDelimitedByDollar
     }
 
-    fileprivate var containsMarkdownFormattingHintForAssistantRendering: Bool {
+    fileprivate nonisolated var containsMarkdownFormattingHintForAssistantRendering: Bool {
         if contains("```") ||
             contains("`") ||
             contains("![") ||

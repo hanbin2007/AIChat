@@ -16,7 +16,7 @@
 
 import Foundation
 
-enum RelayClientError: LocalizedError, Equatable, Sendable {
+nonisolated enum RelayClientError: LocalizedError, Equatable, Sendable {
     case missingConfiguration
     case invalidResponse
     case badRequest(message: String)
@@ -116,6 +116,6 @@ enum RelayClientError: LocalizedError, Equatable, Sendable {
     }
 }
 
-struct RelayClientErrorEnvelope: Codable, Sendable {
+nonisolated struct RelayClientErrorEnvelope: Codable, Sendable {
     var message: String
 }

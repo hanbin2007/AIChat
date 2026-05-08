@@ -9,7 +9,7 @@
 
 import Foundation
 
-enum RelayEndpoint: Sendable {
+nonisolated enum RelayEndpoint: Sendable {
     case chatStream
     case audioTranscribe
     case memoryExtract

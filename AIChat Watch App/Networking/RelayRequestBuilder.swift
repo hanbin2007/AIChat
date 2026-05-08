@@ -9,7 +9,7 @@
 
 import Foundation
 
-struct RelayRequestContext: Sendable {
+nonisolated struct RelayRequestContext: Sendable {
     var baseURL: URL
     var deviceID: String
     var bearerToken: String?
@@ -20,11 +20,11 @@ struct RelayRequestContext: Sendable {
     }
 }
 
-enum RelayRequestBuilderError: Error, Equatable {
+nonisolated enum RelayRequestBuilderError: Error, Equatable {
     case invalidURL
 }
 
-struct RelayRequestBuilder {
+nonisolated struct RelayRequestBuilder {
     let context: RelayRequestContext
 
     func build(

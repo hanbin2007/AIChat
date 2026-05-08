@@ -28,7 +28,7 @@ final class ConversationListViewModel {
     /// Marked nonisolated(unsafe) so `deinit` (which is itself
     /// nonisolated in Swift 6) can cancel the subscription. The Task
     /// is the only writer outside `init` / `start` so this is safe.
-    nonisolated(unsafe) private var subscription: Task<Void, Never>?
+    nonisolated private var subscription: Task<Void, Never>?
 
     init(persistence: ConversationPersistence) {
         self.persistence = persistence

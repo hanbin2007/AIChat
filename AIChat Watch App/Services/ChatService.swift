@@ -80,7 +80,7 @@ actor ChatService {
                     var thoughtText = ""
                     var modelParts: [GeminiPartPayload] = []
 
-                    let stream = await self.api.streamChat(payload, conversationID: thread.id)
+                    let stream = self.api.streamChat(payload, conversationID: thread.id)
                     for try await event in stream {
                         if Task.isCancelled { break }
                         switch event {

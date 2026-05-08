@@ -314,7 +314,7 @@ nonisolated struct ModelBackedMemoryMaintenanceService: AIMemoryMaintenanceServi
     }
 }
 
-private func contextEligibleMessages(in conversation: ConversationThread) -> [ChatMessage] {
+nonisolated private func contextEligibleMessages(in conversation: ConversationThread) -> [ChatMessage] {
     conversation.messages.filter { message in
         message.status != .failed &&
         message.role != .system &&
@@ -326,7 +326,7 @@ private func contextEligibleMessages(in conversation: ConversationThread) -> [Ch
     }
 }
 
-private func deriveFocusState(
+nonisolated private func deriveFocusState(
     from messages: [ChatMessage],
     existingFocusState: ConversationFocusState?,
     mode: ContextMode,
@@ -371,7 +371,7 @@ private func deriveFocusState(
     )
 }
 
-private func deriveMemoryItems(from messages: [ChatMessage]) -> [ConversationMemoryItem] {
+nonisolated private func deriveMemoryItems(from messages: [ChatMessage]) -> [ConversationMemoryItem] {
     let candidates = messages
         .filter { $0.role == .user }
         .dropLast(2)
@@ -402,7 +402,7 @@ private func deriveMemoryItems(from messages: [ChatMessage]) -> [ConversationMem
     }
 }
 
-private func deriveArchiveSegments(
+nonisolated private func deriveArchiveSegments(
     from messages: [ChatMessage],
     existingSegments: [ConversationArchiveSegment],
     protectedRecentMessages: Int
@@ -448,7 +448,7 @@ private func deriveArchiveSegments(
     return Array(updatedSegments.suffix(24))
 }
 
-private func archiveCandidateMessages(
+nonisolated private func archiveCandidateMessages(
     from messages: [ChatMessage],
     existingSegments: [ConversationArchiveSegment],
     protectedRecentMessages: Int
@@ -514,7 +514,7 @@ private func summarizedArchiveText(for messages: [ChatMessage]) -> String {
     ).trimmed
 }
 
-private func derivedKeywords(from text: String) -> [String] {
+nonisolated private func derivedKeywords(from text: String) -> [String] {
     let normalized = text.collapseWhitespace().lowercased()
     let wordMatches = normalized.matches(for: #"[a-z0-9_]{2,}"#)
     let cjkTokens = normalized.cjkBigrams()

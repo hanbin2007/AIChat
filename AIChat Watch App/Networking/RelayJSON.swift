@@ -13,7 +13,7 @@ enum RelayJSON {
     /// Encoder used for every relay request body. Keys are camelCase
     /// (the relay also accepts snake_case but we send canonical
     /// camelCase). Dates are ISO-8601 with fractional seconds.
-    static func makeEncoder() -> JSONEncoder {
+    nonisolated static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
@@ -25,7 +25,7 @@ enum RelayJSON {
     /// Decoder used for every relay response body. Tolerates trailing
     /// `Z` and millisecond precision; falls back to `Date(timeIntervalSince1970:)`
     /// for numeric epochs in case the server emits them.
-    static func makeDecoder() -> JSONDecoder {
+    nonisolated static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()

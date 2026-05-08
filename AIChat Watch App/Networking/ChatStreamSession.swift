@@ -124,13 +124,13 @@ actor ChatStreamSession {
     }
 }
 
-private enum StreamDispatchOutcome { case continued, terminated }
+nonisolated private enum StreamDispatchOutcome { case continued, terminated }
 
 /// Decodes parsed SSE events into `RelayChatEvent` values and yields
 /// them on the continuation. Tracks done/error so `finalizeIfNeeded()`
 /// can emit `incompleteResponse` when the upstream closed without a
 /// terminal event.
-private final class StreamDispatcher: @unchecked Sendable {
+nonisolated private final class StreamDispatcher: @unchecked Sendable {
     private let continuation: AsyncThrowingStream<RelayChatEvent, Error>.Continuation
     private var didReceiveDone = false
     private var didFail = false
@@ -209,7 +209,7 @@ private final class StreamDispatcher: @unchecked Sendable {
 }
 
 /// Delegate-driven streaming used only when self-signed TLS is enabled.
-private final class StreamDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+nonisolated private final class StreamDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let allowedHost: String
     private let continuation: AsyncThrowingStream<RelayChatEvent, Error>.Continuation
     private let parser = SSEParser()

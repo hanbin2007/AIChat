@@ -15,10 +15,12 @@
 import Foundation
 
 actor RelayAPIClient {
-    private let context: RelayRequestContext
-    private let unarySession: URLSession
-    private let builder: RelayRequestBuilder
-    private let decoder: JSONDecoder
+    /// `nonisolated` so `streamChat(...)` (also nonisolated) can read
+    /// these immutable fields without hopping through actor isolation.
+    nonisolated let context: RelayRequestContext
+    nonisolated let unarySession: URLSession
+    nonisolated let builder: RelayRequestBuilder
+    nonisolated let decoder: JSONDecoder
 
     init(context: RelayRequestContext, unarySession: URLSession? = nil) {
         self.context = context

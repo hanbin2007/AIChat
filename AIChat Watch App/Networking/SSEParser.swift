@@ -17,14 +17,14 @@
 
 import Foundation
 
-struct SSEEvent: Equatable, Sendable {
+nonisolated struct SSEEvent: Equatable, Sendable {
     /// The `event:` field, defaulted to "message" per the SSE spec.
     let event: String
     /// The concatenated `data:` lines belonging to this event.
     let data: String
 }
 
-final class SSEParser {
+nonisolated final class SSEParser {
     private var buffer = Data()
     private var currentEvent: String? = nil
     private var currentData: [String] = []

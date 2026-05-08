@@ -33,12 +33,12 @@ final class RelayTLSPinningDelegate: NSObject, URLSessionDataDelegate, @unchecke
     }
 }
 
-enum RelayURLSessionFactory {
+nonisolated enum RelayURLSessionFactory {
     /// Returns the shared session unless self-signed TLS is enabled, in
     /// which case a delegate-backed session that pins the configured
     /// host is created. Streaming sessions need their own delegate
     /// instance and should call `makeStreamingSession(delegate:)` directly.
-    static func makeUnarySession(context: RelayRequestContext) -> URLSession {
+    nonisolated static func makeUnarySession(context: RelayRequestContext) -> URLSession {
         guard context.allowsInsecureTLS, let host = context.allowedHost, host.isEmpty == false else {
             return .shared
         }
@@ -51,7 +51,7 @@ enum RelayURLSessionFactory {
 
     /// Build a fresh session for one streaming task. Caller must invalidate
     /// it once the stream completes.
-    static func makeStreamingSession(delegate: URLSessionDataDelegate) -> URLSession {
+    nonisolated static func makeStreamingSession(delegate: URLSessionDataDelegate) -> URLSession {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         config.requestCachePolicy = .reloadIgnoringLocalCacheData

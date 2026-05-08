@@ -19,7 +19,7 @@ final class FavoritesViewModel {
     private let persistence: ConversationPersistence
     /// Marked nonisolated(unsafe) so `deinit` (which is itself
     /// nonisolated in Swift 6) can cancel the subscription.
-    nonisolated(unsafe) private var subscription: Task<Void, Never>?
+    nonisolated private var subscription: Task<Void, Never>?
 
     init(persistence: ConversationPersistence) {
         self.persistence = persistence

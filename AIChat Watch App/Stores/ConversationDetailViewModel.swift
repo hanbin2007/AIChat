@@ -43,7 +43,7 @@ final class ConversationDetailViewModel {
     private let connection: RelayConnectionMonitor
     /// Marked nonisolated(unsafe) so `deinit` (which is itself
     /// nonisolated in Swift 6) can cancel the in-flight stream.
-    nonisolated(unsafe) private var streamTask: Task<Void, Never>?
+    nonisolated private var streamTask: Task<Void, Never>?
 
     init(
         conversation: ConversationThread,
@@ -76,7 +76,7 @@ final class ConversationDetailViewModel {
         streamTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let stream = await self.chatService.send(
+                let stream = self.chatService.send(
                     userText: trimmed,
                     attachments: attachments,
                     to: snapshot
