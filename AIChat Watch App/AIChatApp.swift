@@ -3,10 +3,8 @@
 //  AIChat Watch App
 //
 //  `@main` entry — constructs the `AppEnvironment` composition root and
-//  hands it to a `PlaceholderShell` view. UI/UX is intentionally
-//  minimal: the rewrite focuses on the backend + ViewModel layers; the
-//  full design overhaul ships in a follow-up phase that consumes the
-//  same ViewModels.
+//  hands it to `RootView`, which owns the NavigationStack and renders
+//  the full UI tree on top of the existing ViewModel layer.
 //
 
 import Foundation
@@ -33,7 +31,7 @@ struct AIChat_Watch_AppApp: App {
 
     var body: some Scene {
         WindowGroup {
-            PlaceholderShell()
+            RootView()
                 .environment(\.appEnvironment, environment)
                 .task {
                     // Lazily ask once for notification permission so the

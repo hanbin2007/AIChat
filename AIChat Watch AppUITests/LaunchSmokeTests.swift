@@ -2,10 +2,10 @@
 //  LaunchSmokeTests.swift
 //  AIChat Watch AppUITests
 //
-//  Minimal placeholder UI test — confirms the rewritten app launches
-//  without crashing and the placeholder shell appears. The full UI
-//  test matrix gets re-authored in the UI redesign phase, when the
-//  shell is replaced by the real interface.
+//  Minimal launch smoke — confirms the redesigned root renders. The
+//  full UI test matrix (per-screen attachments, scenarios) is being
+//  re-authored alongside the new UI; this file only keeps the launch
+//  signal alive so CI doesn't flag an empty bundle.
 //
 
 import XCTest
@@ -13,19 +13,19 @@ import XCTest
 final class LaunchSmokeTests: XCTestCase {
 
     @MainActor
-    func test_launchesAndRendersPlaceholderShell() async throws {
+    func test_launchesAndRendersRoot() async throws {
         let app = XCUIApplication()
         app.launch()
-        // Tabs we expose in `PlaceholderShell`.
-        let exists = app.staticTexts["Chats"].waitForExistence(timeout: 10) ||
-                     app.staticTexts["Activation"].waitForExistence(timeout: 10) ||
-                     app.staticTexts["Billing"].waitForExistence(timeout: 10)
-        XCTAssertTrue(exists, "expected placeholder shell to render at least one tab title")
+        // Anchor on the Home navigation title; if the relay isn't
+        // configured in the test scheme, "Composition root unavailable"
+        // is the documented fallback so we accept either.
+        let homeAppeared = app.navigationBars["AIChat"].waitForExistence(timeout: 10)
+        let fallbackAppeared = app.staticTexts["AIChat"].waitForExistence(timeout: 10)
+        XCTAssertTrue(homeAppeared || fallbackAppeared, "expected root view to render")
 
-        // Capture a screenshot for the ASC bridge.
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "placeholder-shell"
+        attachment.name = "root-launch"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
