@@ -31,42 +31,480 @@
 
 ---
 
-## Phase 1 — 上线阻塞修复 + 死代码清理
+## Phase 1 — 上线阻塞修复 + 死代码清理(详细)
 
-**目标**:RelayKeyStore 写回 + 架构文档对齐 + 移除已弃用的迁移层。
+**目标**:RelayKeyStore 写回(§11.1)+ 删除已弃用的 V1 迁移层 + `CLAUDE.md` 架构对齐。
 
-修改:
-- `AIChat Watch App/Stores/ActivationCenterViewModel.swift` —— `bootstrap()` 成功后调一次 `RelayKeyStore.set(_:appGroupIdentifier:)`(§11.1,~5 行)。
-- `CLAUDE.md` —— 改写架构段(删除 ChatStore 描述,改为 per-VM MVVM)。
+### 1.1 RelayKeyStore 写回(§11.1)
 
-删除:
-- `AIChat Watch App/Persistence/AIChatMigrationPlanV1ToV2.swift` —— 不迁移 V1 数据,该文件作为死代码移除。
-- `AIChat Watch App/Persistence/AIChatSchemaV1.swift` 及其它仅供迁移使用的 V1 类型(若存在)—— 一并移除。
-- `AppEnvironment` / 容器初始化中调用 `migrateIfNeeded(...)` 的位置 —— 改为直接以 V2 schema 启动。
+文件:`AIChat Watch App/Stores/ActivationCenterViewModel.swift` (lines 38–46 为 `bootstrap()`,lines 60–82 为 `redeemOffline(...)`)。
 
-新增:
-- `AIChat Watch AppTests/ActivationCenterViewModelRelayKeyStoreTests.swift` —— 断言 `bootstrap()` 写入 RelayKeyStore(§11.1)。
+变更:
+- VM init 新增参数:`init(service: RelayActivationService, appGroupIdentifier: String?)`,VM 持 `private let appGroupIdentifier: String?`。
+- 新增私有方法:
+  ```swift
+  private func persistBearerKey(from response: RelayAccountStatusResponse) {
+      RelayKeyStore.set(response.key?.keyValue, appGroupIdentifier: appGroupIdentifier)
+  }
+  ```
+  (`RelayKeyStore` 定义在 `AIChat Watch App/Services/AppConfiguration.swift:155–179`,签名:`static func set(_ key: String?, appGroupIdentifier: String?)`。)
+- `bootstrap()` 中 `status = try await service.bootstrap()` **之后**立即 `persistBearerKey(from: status!)`。
+- `redeemOffline(...)` 中 `status = try await service.exchangeOffline(...)` 之后同样调用(offline 兑换换发 key)。
+- `refreshStatus()` **不写**(纯账户余额刷新,不应改 key)。
+- 调用方更新:目前 VM 唯一构造点在 `ActivationCenterViewModelTests.swift`(无生产 view 构造方,Phase 4 才接);测试更新见 1.2。
+
+### 1.2 RelayKeyStore 单元测试(§11.1)
+
+新增:`AIChat Watch AppTests/ActivationCenterViewModelRelayKeyStoreTests.swift`
+
+模式参考 `ActivationCenterViewModelTests.swift`(用 `MockBillingNetworking` + `RelayBillingFixtures.accountStatus(creditBalance:keyValue:)`)。每个 case 用唯一 suite 名 `"AIChat.tests.\(UUID())"` 隔离 UserDefaults。
+
+测试用例:
+- `test_bootstrap_writesBearerKeyToRelayKeyStore` — bootstrap 成功后 `RelayKeyStore.load(appGroupIdentifier:) == "rk_new"`
+- `test_bootstrap_failureLeavesStoreUntouched`
+- `test_redeemOffline_writesRotatedBearerKey`
+- `test_refreshStatus_doesNotMutateStore`
+- `tearDown` 清理:`UserDefaults().removePersistentDomain(forName: suite)`
+
+### 1.3 删除迁移层
+
+删除整文件:
+- `AIChat Watch App/Persistence/AIChatMigrationPlanV1ToV2.swift`(312 行)
+- `AIChat Watch App/Services/ConversationStoreModels.swift`(V1 SwiftData 实体,仅供迁移消费:`ConversationRecord` / `ConversationMessageRecord` / `ConversationAttachmentRecord` / `ConversationMemoryRecord` / `ConversationPinnedMemoryRecord` / `ConversationArchiveSegmentRecord` / `GlobalPinnedMemoryRecord` / `PromptPresetRecord` / `DeletedConversationTombstoneRecord` / `ConversationStoreMetadataRecord`)
+
+修改 `AIChat Watch App/AppEnvironment.swift`:
+- 删 line 38 字段 `let migrationOutcome: AIChatMigrationPlanV1ToV2.Outcome?`
+- 删 `private struct ContainerBuildResult { let container: ModelContainer?; let outcome: AIChatMigrationPlanV1ToV2.Outcome? }`(line 130–134)→ `buildContainer` 直接返回 `ModelContainer?`
+- 删 line 143 `let outcome = AIChatMigrationPlanV1ToV2.migrateIfNeeded(v2Container: container, rootURL: rootURL)`
+- 删 `private static func resolvedStorageRoot(configuration:)`(仅 migration 用)
+- `init` 内所有 `migrationOutcome` 引用清掉
+- `buildContainer` 简化为:
+  ```swift
+  private static func buildContainer(configuration: AppConfiguration) -> ModelContainer? {
+      try? AIChatModelContainer.makeOnDisk(appGroupIdentifier: configuration.appGroupIdentifier)
+  }
+  ```
+
+确认无残留:
+```
+grep -RnE 'AIChatMigrationPlanV1ToV2|migrationOutcome|migrateIfNeeded|ConversationStoreModels|\bConversationRecord\b|\bConversationMessageRecord\b|\bConversationAttachmentRecord\b|\bConversationMemoryRecord\b|\bConversationPinnedMemoryRecord\b|\bConversationArchiveSegmentRecord\b|\bGlobalPinnedMemoryRecord\b|\bPromptPresetRecord\b|\bDeletedConversationTombstoneRecord\b|\bConversationStoreMetadataRecord\b' "AIChat Watch App" "AIChat Watch AppTests"
+```
+应 0 hit。
+
+### 1.4 修改 `CLAUDE.md`
+
+文件:`/home/user/AIChat/CLAUDE.md`
+
+替换 `## Architecture` 段:
+- 删 `**MVVM with a single central ObservableObject store.**`
+- 删 `- ChatStore (\`AIChat Watch App/ViewModels/ChatStore.swift\`) is the sole \`@StateObject\` source of truth, injected via \`.environmentObject()\` from the \`@main\` app entry point`
+- 删 `- Views read from and send actions to ChatStore; they never talk to services directly`
+- 改写为:
+  ```
+  **Per-VM MVVM.**
+  
+  - Each screen has its own `@MainActor final class` + `@Observable` ViewModel under `AIChat Watch App/Stores/` (e.g. `ConversationDetailViewModel`, `ConversationListViewModel`, `ActivationCenterViewModel`, `RelayPurchaseSheetViewModel`).
+  - `AppEnvironment` (`AIChat Watch App/AppEnvironment.swift`) is the composition root — it owns the `RelayAPIClient` actor and domain services (`ChatService`, `MemoryService`, `TranscriptionService`, `ConversationPersistence`, `SettingsService`, `RelayKeyStore`) and is injected into the SwiftUI view tree via `.environment(\.appEnvironment, ...)`. It does NOT hold ViewModels or shared UI state.
+  - Views construct their own VMs from injected services on navigation; no central `ChatStore`.
+  - The `ConversationPersistence` actor (under `Persistence/`) is the single source of truth for conversation data; subscribers receive change notifications via `stream() -> AsyncStream<[ConversationThread]>`.
+  ```
+- 替换 `**ViewModels/** — \`ChatStore\` only` → `**Stores/** — per-screen ViewModels listed above`
+
+### 1.5 验证
+
+```
+xcodebuild -scheme "AIChat Watch App" \
+  -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" \
+  test
+```
+- 现有测试套全绿(确认删除迁移层不影响 `ConversationPersistenceTests` / `ActivationCenterViewModelTests` 等)
+- 新增 `ActivationCenterViewModelRelayKeyStoreTests` 全绿
+- 全新装机模拟器启动 → V2 store 直接生成,无 V1 残留依赖
 
 依赖:无。
 
 ---
 
-## Phase 2 — 流式 UX & 可靠性回归
+## Phase 2 — 流式 UX & 可靠性回归(详细)
 
-**目标**:把用户立刻能感知的退化(stream 一次甩满屏 / 不自动滚 / 熄屏断流 / 失败不重试 / 无 haptic)全部补回。
+**目标**:字符级 reveal(§1.1)+ 自动滚锚定(§1.2)+ 后台续传(§2.1)+ Send 重试(§2.2)+ Completion 触觉/通知(§2.3)。所有新增 actor/类按当前 `@Observable` per-VM + actor 范式编写,不复用 git 历史代码。
 
-新增(全部重新设计,**不引用 git 历史代码**):
-- `AIChat Watch App/Services/StreamingTextPacer.swift` —— 新写一个 actor,输入是 `ChatService` 的 `AsyncThrowingStream<ConversationThread, Error>`,输出再转一层 `AsyncStream<ConversationThread>` 供 VM 消费,内部按 30Hz tick 自适应 reveal 字符;Phase 4 视图层订阅(§1.1)。
-- `AIChat Watch App/Services/ConversationAutoScrollController.swift` —— 新写一个 `@MainActor` 状态机,SwiftUI `ScrollViewReader` 驱动;接收 stream 变化事件 + 用户滚动手势事件,产出"是否应自动滚到底"决策;识别同气泡内 vs 跨气泡(§1.2)。
-- `AIChat Watch App/Services/BackgroundSessionCoordinator.swift` —— 新写,包 `WKExtendedRuntimeSession`,流式期间 begin / 完成 invalidate(§2.1)。
-- `AIChat Watch App/Services/CompletionFeedbackProvider.swift` —— 新写,`WKInterfaceDevice.play(.success)` + UNUserNotification(§2.1 / §2.3)。
+> 现有 `ChatService.send(...)` 已是 `nonisolated func ... -> AsyncThrowingStream<ConversationThread, Error>`(`AIChat Watch App/Services/ChatService.swift:45`),每次 SSE 事件 `yield` 一次完整 `ConversationThread` 快照。`ConversationDetailViewModel.send(text:attachments:)`(`AIChat Watch App/Stores/ConversationDetailViewModel.swift:76–94`)直接 `for try await update in stream { self.conversation = update }`。下方所有改动以此为基线。
+
+### 2.1 抽出 `ChatServiceProtocol`(共享前置)
+
+修改:`AIChat Watch App/Services/ChatService.swift`
+
+新增协议(同文件顶部):
+```swift
+protocol ChatServiceProtocol: Sendable {
+    nonisolated func send(
+        userText: String,
+        attachments: [ChatAttachment],
+        to conversation: ConversationThread
+    ) -> AsyncThrowingStream<ConversationThread, Error>
+}
+extension ChatService: ChatServiceProtocol {}
+```
 
 修改:
-- `AIChat Watch App/Services/ChatService.swift` —— 抽出 `ChatServiceProtocol`;`send(...)` 内部包一层根据 `SettingsService.sendFailureRetryLimit` 退避重试(§2.2)。
-- `AIChat Watch App/Stores/ConversationDetailViewModel.swift` —— 串接 pacer / autoscroll / background / haptic;send 失败状态与重试按钮。
+- `AIChat Watch App/Stores/ConversationDetailViewModel.swift` 字段 `let chatService: ChatService` → `let chatService: any ChatServiceProtocol`
+- `AIChat Watch App/AppEnvironment.swift` 字段 `let chatService: ChatService?` → `let chatService: (any ChatServiceProtocol)?`
 
-新增测试:
-- `StreamingTextPacerTests`、`ConversationAutoScrollControllerTests`、`BackgroundSessionCoordinatorTests`、`CompletionFeedbackProviderTests`、`ConversationDetailViewModelStreamingTests`(覆盖重试 / 取消 / pacer 注入)。
+(用途:Phase 5 mock 注入 + 2.2 retry 包装。)
+
+### 2.2 `RetryingChatService` —— Send 重试(§2.2)
+
+新增:`AIChat Watch App/Services/RetryingChatService.swift`
+
+```swift
+actor RetryingChatService: ChatServiceProtocol {
+    struct RetryPolicy: Sendable {
+        let maxAttempts: Int          // 1...10, 来自 SettingsService.sendFailureRetryLimit (默认 3)
+        let initialDelayNanos: UInt64 // 默认 2_000_000_000 (2s)
+        let factor: Double            // 默认 2.0 → 序列 2s,4s,8s,...
+    }
+
+    private let inner: any ChatServiceProtocol
+    private let policyProvider: @Sendable () async -> RetryPolicy
+    private let sleeper: @Sendable (UInt64) async -> Void  // 默认包 Task.sleep,测试可替换
+
+    nonisolated func send(...) -> AsyncThrowingStream<ConversationThread, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                let policy = await policyProvider()
+                var attempt = 0
+                while true {
+                    attempt += 1
+                    var yieldedAny = false
+                    do {
+                        let upstream = inner.send(userText:..., attachments:..., to:...)
+                        for try await snapshot in upstream {
+                            yieldedAny = true
+                            continuation.yield(snapshot)
+                        }
+                        continuation.finish()
+                        return
+                    } catch {
+                        if yieldedAny || attempt >= policy.maxAttempts {
+                            continuation.finish(throwing: error)
+                            return
+                        }
+                        let delay = UInt64(Double(policy.initialDelayNanos) * pow(policy.factor, Double(attempt - 1)))
+                        await sleeper(delay)
+                    }
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+```
+
+关键约束:
+- **重试只覆盖"未收到任何 yield 前"的失败**(网络拒绝 / TLS / DNS / 401)。一旦上游 yield 过任意快照(用户消息 + assistant placeholder 已落库,UI 已显示),错误直接透传 → VM 走 `.failed`,用户手动重试。这避免了"已落库 placeholder 被重试覆盖"的乱序。
+- 退避:2s → 4s → 8s。
+- `policyProvider` 闭包让上限实时反映 `SettingsService.sendFailureRetryLimit`(默认 3,clamp [1,10])。
+
+`AppEnvironment.init` 改:
+```swift
+let core = ChatService(api: client, persistence: conversations, defaultModel: configuration.geminiModel)
+self.chatService = RetryingChatService(
+    inner: core,
+    policyProvider: { @Sendable [settingsService] in
+        await MainActor.run {
+            .init(maxAttempts: settingsService.sendFailureRetryLimit,
+                  initialDelayNanos: 2_000_000_000, factor: 2.0)
+        }
+    },
+    sleeper: { try? await Task.sleep(nanoseconds: $0) }
+)
+```
+
+测试:`AIChat Watch AppTests/RetryingChatServiceTests.swift`
+- `test_passesThroughOnFirstAttemptSuccess`
+- `test_retriesOnPreYieldFailure_thenSucceeds`
+- `test_doesNotRetryAfterFirstYield`(yield 一次后抛错 → 只调用一次 inner)
+- `test_throwsAfterExhaustingAttempts`
+- `test_respectsExponentialBackoff`(注入 fake sleeper 记录 nanos → 断言 `[2e9, 4e9]`)
+- `test_taskCancellationStopsRetry`
+
+### 2.3 `StreamingTextPacer` —— 字符级 reveal(§1.1)
+
+新增:`AIChat Watch App/Services/StreamingTextPacer.swift`
+
+```swift
+actor StreamingTextPacer {
+    struct Configuration: Sendable {
+        let tickInterval: Duration       // 默认 .milliseconds(33) ≈ 30Hz
+        let baseCharsPerTick: Int        // 默认 4
+        let maxCharsPerTick: Int         // 默认 24
+        let backlogScale: Double         // 默认 0.25 → reveal = clamp(base, max, base + backlog * scale)
+    }
+
+    private let configuration: Configuration
+    private let clock: any Clock<Duration>
+
+    init(configuration: Configuration = .default, clock: any Clock<Duration> = ContinuousClock())
+
+    nonisolated func pace(
+        _ upstream: AsyncThrowingStream<ConversationThread, Error>
+    ) -> AsyncThrowingStream<ConversationThread, Error>
+}
+```
+
+行为:
+- 内部维护 `latestUpstream: ConversationThread?`、`revealedTextLength: Int`、`revealedThoughtLength: Int`、`lastAssistantID: UUID?`。
+- 上游每次 yield 把快照存到 `latestUpstream`,**不立刻**下游 yield。
+- Tick 任务(每 `tickInterval`):
+  1. 读 `latestUpstream`,定位最后一个 assistant message。
+  2. 若 `lastAssistantID` 变化 → 重置 reveal 长度计数。
+  3. 计算 backlog = `assistant.text.count - revealedTextLength`。
+  4. 本 tick reveal = `min(maxCharsPerTick, max(baseCharsPerTick, baseCharsPerTick + Int(Double(backlog) * backlogScale)))`。
+  5. 推进 `revealedTextLength`,thought 同样处理。
+  6. 构造下游快照:`assistant.text` 截到 `revealedTextLength`(以 `Character` 索引,grapheme-safe);`thoughtSummary` 同样截。`modelResponseParts` / `attachments` / `status` 不动。
+  7. yield 该快照。
+- 上游 status 翻 `.sent`(`done` 事件):继续 tick 排空剩余字符;排空后 yield 一次完整上游快照(`status: .sent` + `modelResponseParts` 全量到位)→ `continuation.finish()`。
+- 上游 throw → `continuation.finish(throwing:)`(不再 reveal 残留,避免把字符贴到 `.failed` 消息)。
+- `modelResponseParts` 不做字符级 pacing(结构化代码块 / 工具结果整块出现)。
+- 下游 `onTermination` → 取消 tick task + 取消上游订阅。
+
+测试:`AIChat Watch AppTests/StreamingTextPacerTests.swift`(自写最小 `TestClock`)
+- `test_holdsBackTextUntilTick`
+- `test_revealsAtConfiguredRate`
+- `test_drainsRemainingCharsAfterStreamCompletes`
+- `test_emitsFinalSnapshotWithModelPartsAndStatusSent`
+- `test_resetsRevealCountWhenAssistantMessageIDChanges`
+- `test_propagatesUpstreamErrorWithoutRevealingPartial`
+- `test_handlesMultiByteCharactersWithoutSlicingMidGrapheme`
+- `test_cancellationStopsTickTask`
+
+### 2.4 `ConversationAutoScrollController` —— 自动滚锚定(§1.2)
+
+新增:`AIChat Watch App/Stores/ConversationAutoScrollController.swift`
+
+```swift
+@MainActor
+@Observable
+final class ConversationAutoScrollController {
+    private(set) var anchorMessageID: UUID?
+    private(set) var shouldFollow: Bool = true
+    private var lastKnownLastMessageID: UUID?
+
+    func messageContentDidUpdate(latestMessageID: UUID)
+    func userDidInteractWithScroll()
+    func streamDidFinish()
+    func resetForNewConversation()
+}
+```
+
+行为:
+- `messageContentDidUpdate(latestMessageID:)`:
+  - 若 `latestMessageID != lastKnownLastMessageID`(新气泡):无条件 `anchorMessageID = latestMessageID`,`shouldFollow = true`。这覆盖"用户冻结过自动滚 → 新一轮回复仍强制锚定"。
+  - 否则若 `shouldFollow == true`:`anchorMessageID = latestMessageID`(同气泡内增量,SwiftUI 即使 anchor id 相同也会重计算到底位置)。
+  - 否则:no-op。
+- `userDidInteractWithScroll()`:`shouldFollow = false`(冻结)。
+- `streamDidFinish()`:`shouldFollow = true`(回到就绪)。
+- `resetForNewConversation()`:全部清零。
+
+视图层(Phase 4 实装):`ScrollViewReader { proxy in ... .onChange(of: autoScroll.anchorMessageID) { _, id in if let id { proxy.scrollTo(id, anchor: .bottom) } } }`。手动滚动:`.simultaneousGesture(DragGesture(minimumDistance: 1).onChanged { _ in autoScroll.userDidInteractWithScroll() })`。
+
+测试:`AIChat Watch AppTests/ConversationAutoScrollControllerTests.swift`
+- `test_initialState`
+- `test_messageUpdateMovesAnchor_whenFollowing`
+- `test_messageUpdateIgnored_whenUserScrolled`
+- `test_newMessageForcesAnchorEvenWhenFrozen`
+- `test_streamFinishReArmsFollow`
+- `test_resetForNewConversationClearsAllState`
+
+### 2.5 `BackgroundSessionCoordinator` —— 后台续传(§2.1)
+
+新增:`AIChat Watch App/Services/BackgroundSessionCoordinator.swift`
+
+```swift
+protocol BackgroundSessionHandle: AnyObject {
+    func start()
+    func invalidate()
+    var delegate: WKExtendedRuntimeSessionDelegate? { get set }
+}
+
+@MainActor
+final class BackgroundSessionCoordinator: NSObject {
+    private let factory: @MainActor () -> BackgroundSessionHandle
+    private var current: BackgroundSessionHandle?
+
+    init(factory: @escaping @MainActor () -> BackgroundSessionHandle = { WKExtendedRuntimeSessionAdapter() })
+
+    func begin()  // 幂等;若 current != nil 直接 return
+    func end()    // current?.invalidate(); current = nil
+}
+
+#if os(watchOS)
+private final class WKExtendedRuntimeSessionAdapter: NSObject, BackgroundSessionHandle, WKExtendedRuntimeSessionDelegate {
+    private let session = WKExtendedRuntimeSession()
+    var delegate: WKExtendedRuntimeSessionDelegate?
+    func start() { session.delegate = self; session.start() }
+    func invalidate() { session.invalidate() }
+}
+#endif
+```
+
+注:
+- `WKExtendedRuntimeSession()` 默认即可拉一个通用后台会话(几分钟时长),不需要 Info.plist 额外 `WKBackgroundModes`。
+- `didInvalidateWith` 时清 `current`,避免下次 begin 错以为还活着。
+
+集成:
+- `AppEnvironment` 增加 `let backgroundSession: BackgroundSessionCoordinator = BackgroundSessionCoordinator()`(单例)。
+- VM `send(...)` 进入 task 时 `backgroundSession.begin()`,`defer { backgroundSession.end() }`。
+
+测试:`AIChat Watch AppTests/BackgroundSessionCoordinatorTests.swift`(注 mock handle)
+- `test_beginCreatesAndStartsSession`
+- `test_beginIsIdempotentWhileActive`
+- `test_endInvalidatesSession`
+- `test_endIsNoOpWhenInactive`
+- `test_didInvalidateClearsCurrent_allowsRebegin`
+
+### 2.6 `CompletionFeedbackProvider` —— 完成触觉/通知(§2.3 / §2.1 通知部分)
+
+新增:`AIChat Watch App/Services/CompletionFeedbackProvider.swift`
+
+```swift
+protocol HapticDevice: Sendable {
+    func playSuccess()
+}
+protocol UserNotificationCenter: Sendable {
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool
+    func add(_ request: UNNotificationRequest) async throws
+}
+protocol AppForegroundProbe: Sendable {
+    @MainActor var isForeground: Bool { get }
+}
+
+@MainActor
+final class CompletionFeedbackProvider {
+    private let device: HapticDevice
+    private let notifications: UserNotificationCenter
+    private let foregroundProbe: AppForegroundProbe
+    private var didRequestAuthorization = false
+
+    func playSuccess()
+    func ensureNotificationAuthorization() async
+    func notifyTurnComplete(conversationTitle: String, preview: String) async
+}
+```
+
+行为:
+- `playSuccess()`:无条件 → `WKInterfaceDevice.current().play(.success)`(VM 在 success 路径直接调)。
+- `notifyTurnComplete(...)`:仅当 `foregroundProbe.isForeground == false` 才 add notification。Content:title=`L10n.tr("AIChat")`,subtitle=`conversationTitle`,body=`preview` 截前 80 字符。trigger=`UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)`。
+- `ensureNotificationAuthorization()`:首次调用 lazily request,`didRequestAuthorization` 之后短路。
+
+集成:
+- `AppEnvironment` 增加 `let completionFeedback: CompletionFeedbackProvider`。
+- `AIChatApp` view appear 一次 `Task { await env.completionFeedback.ensureNotificationAuthorization() }`。
+- VM `send` 成功路径:`feedback.playSuccess()` + `await feedback.notifyTurnComplete(...)`。
+
+测试:`AIChat Watch AppTests/CompletionFeedbackProviderTests.swift`
+- `test_playSuccessForwardsToHapticDevice`
+- `test_notifyTurnComplete_skippedWhenForeground`
+- `test_notifyTurnComplete_addsRequestWhenBackgrounded`
+- `test_notifyTurnComplete_truncatesPreviewTo80Chars`
+- `test_ensureAuthorization_onlyAsksOnce`
+- `test_ensureAuthorization_swallowsErrorAndDeniedResult`
+
+### 2.7 `ConversationDetailViewModel` 串接
+
+修改:`AIChat Watch App/Stores/ConversationDetailViewModel.swift`
+
+`init` 增加:`pacer: StreamingTextPacer`、`autoScroll: ConversationAutoScrollController`、`backgroundSession: BackgroundSessionCoordinator`、`feedback: CompletionFeedbackProvider`。
+
+`send(text:attachments:)` 重写(替换 lines 67–94):
+```swift
+func send(text: String, attachments: [ChatAttachment]) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty || !attachments.isEmpty else { return }
+    cancelStream()
+    sendState = .sending
+    lowBalanceVisible = false
+
+    let snapshot = conversation
+    streamTask = Task { [weak self] in
+        guard let self else { return }
+        self.backgroundSession.begin()
+        defer { self.backgroundSession.end() }
+        do {
+            let upstream = self.chatService.send(userText: trimmed, attachments: attachments, to: snapshot)
+            let paced = self.pacer.pace(upstream)
+            self.sendState = .streaming
+            for try await update in paced {
+                if Task.isCancelled { break }
+                self.conversation = update
+                if let last = update.messages.last {
+                    self.autoScroll.messageContentDidUpdate(latestMessageID: last.id)
+                }
+            }
+            self.autoScroll.streamDidFinish()
+            self.feedback.playSuccess()
+            await self.feedback.notifyTurnComplete(
+                conversationTitle: self.conversation.title,
+                preview: self.conversation.messages.last?.cleanedText ?? ""
+            )
+            self.sendState = .idle
+        } catch let error as RelayClientError {
+            self.autoScroll.streamDidFinish()
+            self.handle(relayError: error)
+        } catch {
+            self.autoScroll.streamDidFinish()
+            self.sendState = .failed(error.localizedDescription)
+        }
+    }
+}
+```
+
+`retryLast()` 行为不变。
+
+### 2.8 `AppEnvironment` 注册
+
+修改:`AIChat Watch App/AppEnvironment.swift`
+
+新增字段:`streamingTextPacer`、`backgroundSession`、`completionFeedback`。
+
+`init` 中:
+- `self.streamingTextPacer = StreamingTextPacer()`
+- `self.backgroundSession = BackgroundSessionCoordinator()`
+- `self.completionFeedback = CompletionFeedbackProvider(...)`(默认实现)
+- `chatService` 由直接构造改为 `RetryingChatService(inner: ChatService(...), policyProvider: ..., sleeper: ...)`(见 2.2)。
+
+注:`ConversationAutoScrollController` 不进 AppEnvironment(per-screen 状态,view 自建)。
+
+### 2.9 `ConversationDetailViewModelStreamingTests`(集成测试)
+
+新增:`AIChat Watch AppTests/ConversationDetailViewModelStreamingTests.swift`
+
+依赖:本阶段先在测试目标内放一个 minimal `MockChatService: ChatServiceProtocol`(完整 Mock streaming infra Phase 5 再做)。
+
+测试用例:
+- `test_send_beginsAndEndsBackgroundSession`
+- `test_send_drivesAutoScrollOnEachUpdate`
+- `test_send_playsHapticOnSuccess`
+- `test_send_doesNotPlayHapticOnFailure`
+- `test_send_skipsNotificationWhenForeground`
+- `test_cancelStream_stopsBackgroundAndAutoScroll`
+
+### 2.10 验证
+
+```
+xcodebuild -scheme "AIChat Watch App" \
+  -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" \
+  test
+```
+
+Phase 2 必须新增测试全绿:`RetryingChatServiceTests`、`StreamingTextPacerTests`、`ConversationAutoScrollControllerTests`、`BackgroundSessionCoordinatorTests`、`CompletionFeedbackProviderTests`、`ConversationDetailViewModelStreamingTests`。
+
+手动验证(Phase 4 detail view 实装后做完整冒烟):
+- 长回复字符级渐显,不再一次性甩到屏幕
+- 流中向上滚 → 自动滚停止;新一轮 → 强制锚到底
+- 息屏 5s 仍在续接 stream,完成时震动 + 通知(背景态)
+- 模拟网络瞬断 → 自动重试 3 次后透明成功
 
 依赖:Phase 1 已完成。
 
