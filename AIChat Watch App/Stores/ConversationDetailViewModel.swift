@@ -41,11 +41,10 @@ final class ConversationDetailViewModel {
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
-    /// `@ObservationIgnored` so `@Observable` doesn't wrap this in a
-    /// tracked accessor (which can't be `nonisolated`). Marked
-    /// `nonisolated` so `deinit` (itself nonisolated in Swift 6) can
-    /// cancel the in-flight stream.
-    @ObservationIgnored nonisolated private var streamTask: Task<Void, Never>?
+    /// Sendable box holding the in-flight stream `Task`. `let` so it
+    /// has no isolation pinning; mutation happens through the box's
+    /// reference semantics, including from the nonisolated `deinit`.
+    private let streamHandle = TaskHandle()
 
     init(
         conversation: ConversationThread,
@@ -62,7 +61,7 @@ final class ConversationDetailViewModel {
     }
 
     deinit {
-        streamTask?.cancel()
+        streamHandle.cancel()
     }
 
     // MARK: - Send
@@ -75,7 +74,7 @@ final class ConversationDetailViewModel {
         lowBalanceVisible = false
 
         let snapshot = conversation
-        streamTask = Task { [weak self] in
+        streamHandle.task = Task { [weak self] in
             guard let self else { return }
             do {
                 let stream = self.chatService.send(
@@ -98,8 +97,8 @@ final class ConversationDetailViewModel {
     }
 
     func cancelStream() {
-        streamTask?.cancel()
-        streamTask = nil
+        streamHandle.task?.cancel()
+        streamHandle.task = nil
         if sendState == .streaming || sendState == .sending {
             sendState = .idle
         }
