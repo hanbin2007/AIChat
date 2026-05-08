@@ -188,18 +188,6 @@ private struct SettingsTab: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Storage") {
-                    if let outcome = environment.migrationOutcome {
-                        if outcome.skipped {
-                            Text("V1 → V2: skipped")
-                        } else if outcome.failureReason == nil {
-                            Text("Migrated \(outcome.migratedConversations) conversation(s)")
-                        } else {
-                            Text("Migration failed: \(outcome.failureReason ?? "")")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
                 Section("Relay") {
                     Text(environment.connectionMonitor.description)
                 }
