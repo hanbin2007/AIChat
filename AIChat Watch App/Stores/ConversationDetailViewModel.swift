@@ -41,7 +41,9 @@ final class ConversationDetailViewModel {
     private let transcriptionService: TranscriptionService
     private let persistence: ConversationPersistence
     private let connection: RelayConnectionMonitor
-    private var streamTask: Task<Void, Never>?
+    /// Marked nonisolated(unsafe) so `deinit` (which is itself
+    /// nonisolated in Swift 6) can cancel the in-flight stream.
+    nonisolated(unsafe) private var streamTask: Task<Void, Never>?
 
     init(
         conversation: ConversationThread,

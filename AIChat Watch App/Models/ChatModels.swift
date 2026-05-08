@@ -883,6 +883,24 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     }
 }
 
+/// Helper extracted from the deleted `GeminiAPIClient.swift`. Merges
+/// the visible-text or the thought-text out of a `[GeminiPartPayload]`
+/// list so `ChatMessage.recoveredVisibleText` /
+/// `recoveredThoughtSummary` can recover the canonical text after a
+/// streaming reply finishes.
+nonisolated func mergedGeminiText(
+    from parts: [GeminiPartPayload],
+    includeThoughts: Bool
+) -> String? {
+    let merged = parts.reduce(into: "") { partialResult, part in
+        guard (part.thought == true) == includeThoughts, let text = part.text else {
+            return
+        }
+        partialResult.append(text)
+    }
+    return merged.isEmpty ? nil : merged
+}
+
 nonisolated enum AssistantMessageTextRenderingMode: Equatable {
     case plain
     case markdown
