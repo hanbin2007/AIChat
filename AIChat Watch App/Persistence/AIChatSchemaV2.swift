@@ -38,9 +38,12 @@ final class ConversationEntity {
     var createdAt: Date
     var updatedAt: Date
     var isFavorite: Bool
-    /// Encoded `AIConfiguration` blob — kept as opaque `Data` so the
-    /// schema doesn't churn each time a model preference is added.
+    /// Encoded `ConversationAIConfiguration` blob — kept as opaque
+    /// `Data` so the schema doesn't churn each time a model
+    /// preference is added.
     var aiConfigurationData: Data?
+    /// Encoded `ConversationFocusState` blob.
+    var focusStateData: Data?
     @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
     var messages: [MessageEntity]
     @Relationship(deleteRule: .cascade, inverse: \MemoryItemEntity.conversation)
@@ -57,6 +60,7 @@ final class ConversationEntity {
         updatedAt: Date,
         isFavorite: Bool,
         aiConfigurationData: Data? = nil,
+        focusStateData: Data? = nil,
         messages: [MessageEntity] = [],
         memoryItems: [MemoryItemEntity] = [],
         pinnedMemories: [PinnedMemoryEntity] = [],
@@ -68,6 +72,7 @@ final class ConversationEntity {
         self.updatedAt = updatedAt
         self.isFavorite = isFavorite
         self.aiConfigurationData = aiConfigurationData
+        self.focusStateData = focusStateData
         self.messages = messages
         self.memoryItems = memoryItems
         self.pinnedMemories = pinnedMemories
