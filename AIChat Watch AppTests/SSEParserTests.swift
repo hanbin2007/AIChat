@@ -8,6 +8,12 @@
 //  synonym still parses as a generic event — the higher-level dispatch
 //  in `ChatStreamSession` is the layer that rejects it, not the parser.
 //
+//  The fixtures use explicit `\n`-terminated string literals rather than
+//  Swift's `"""` heredoc form. SSE delimits events with a blank line
+//  (i.e. a trailing `\n\n` byte sequence), and Swift heredocs strip the
+//  newline immediately preceding the closing `"""`, which silently
+//  removes the terminator and prevents events from being emitted.
+//
 
 import XCTest
 @testable import AIChat_Watch_App
@@ -16,11 +22,9 @@ final class SSEParserTests: XCTestCase {
 
     func test_parsesSingleAnswerDeltaEvent() async throws {
         let parser = SSEParser()
-        let raw = """
-        event: answer_delta
-        data: {"type":"answer_delta","text":"hello"}
-
-        """
+        let raw = "event: answer_delta\n"
+            + "data: {\"type\":\"answer_delta\",\"text\":\"hello\"}\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.event, "answer_delta")
@@ -40,12 +44,10 @@ final class SSEParserTests: XCTestCase {
 
     func test_handlesMultilineDataField() async throws {
         let parser = SSEParser()
-        let raw = """
-        event: model_content
-        data: line1
-        data: line2
-
-        """
+        let raw = "event: model_content\n"
+            + "data: line1\n"
+            + "data: line2\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.data, "line1\nline2")
@@ -53,12 +55,10 @@ final class SSEParserTests: XCTestCase {
 
     func test_ignoresCommentLines() async throws {
         let parser = SSEParser()
-        let raw = """
-        : keepalive
-        event: done
-        data: {"type":"done"}
-
-        """
+        let raw = ": keepalive\n"
+            + "event: done\n"
+            + "data: {\"type\":\"done\"}\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.event, "done")
@@ -66,10 +66,8 @@ final class SSEParserTests: XCTestCase {
 
     func test_defaultsEventNameToMessage() async throws {
         let parser = SSEParser()
-        let raw = """
-        data: {"type":"answer_delta","text":"x"}
-
-        """
+        let raw = "data: {\"type\":\"answer_delta\",\"text\":\"x\"}\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.first?.event, "message")
     }
@@ -81,11 +79,9 @@ final class SSEParserTests: XCTestCase {
         // synonym keeps the parser honest while still being rejected
         // higher up.
         let parser = SSEParser()
-        let raw = """
-        event: delta
-        data: {"text":"x"}
-
-        """
+        let raw = "event: delta\n"
+            + "data: {\"text\":\"x\"}\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.first?.event, "delta")
     }
@@ -114,17 +110,15 @@ final class SSEParserTests: XCTestCase {
 
     func test_emitsMultipleEventsInOneChunk() async throws {
         let parser = SSEParser()
-        let raw = """
-        event: answer_delta
-        data: {"text":"a"}
-
-        event: answer_delta
-        data: {"text":"b"}
-
-        event: done
-        data: {"type":"done"}
-
-        """
+        let raw = "event: answer_delta\n"
+            + "data: {\"text\":\"a\"}\n"
+            + "\n"
+            + "event: answer_delta\n"
+            + "data: {\"text\":\"b\"}\n"
+            + "\n"
+            + "event: done\n"
+            + "data: {\"type\":\"done\"}\n"
+            + "\n"
         let events = parser.feed(Data(raw.utf8))
         XCTAssertEqual(events.count, 3)
         XCTAssertEqual(events.map(\.event), ["answer_delta", "answer_delta", "done"])
