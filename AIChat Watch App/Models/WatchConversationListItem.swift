@@ -20,13 +20,13 @@ struct WatchConversationListItem: Identifiable, Equatable {
     let thinkingShortLabel: String
 }
 
-struct ConversationThreadListSummary: Equatable {
+nonisolated struct ConversationThreadListSummary: Equatable {
     let previewText: String
     let messageCount: Int
     let containsAudioAttachments: Bool
     let containsImageAttachments: Bool
 
-    init(conversation: ConversationThread) {
+    nonisolated init(conversation: ConversationThread) {
         var latestVisibleMessage: ChatMessage?
         var visibleMessageCount = 0
         var hasAudioAttachments = false

@@ -2,68 +2,94 @@
 //  ActivationStatusCard.swift
 //  AIChat Watch App
 //
-//  Created by Codex on 2026/3/8.
+//  Card surface for the AccountCenterView header. Renders bearer-key
+//  prefix, credit balance, and (when low) a low-balance warning row.
+//  Compact enough to fit at the top of a watch screen above the
+//  scrollable plan list.
 //
 
 import SwiftUI
 
 struct ActivationStatusCard: View {
-    let title: String
-    let message: String
-    let iconName: String
-    let accentColor: Color
-    let actionTitle: String?
-    let action: (() -> Void)?
-
-    init(
-        title: String,
-        message: String,
-        iconName: String = "key.fill",
-        accentColor: Color = .orange,
-        actionTitle: String? = nil,
-        action: (() -> Void)? = nil
-    ) {
-        self.title = title
-        self.message = message
-        self.iconName = iconName
-        self.accentColor = accentColor
-        self.actionTitle = actionTitle
-        self.action = action
-    }
+    let status: RelayAccountStatusResponse?
+    let lowBalanceThreshold: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: iconName)
-                    .font(.headline)
-                    .foregroundStyle(accentColor)
-
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-
-                Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: DS.Spacing.s) {
+            HStack {
+                Text("Account")
+                    .font(DS.Typography.sectionHeader)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let state = status?.account?.state {
+                    Text(state.rawValue.capitalized)
+                        .font(DS.Typography.chip)
+                        .padding(.horizontal, DS.Spacing.s)
+                        .padding(.vertical, 2)
+                        .background(stateBackground(for: state), in: Capsule())
+                        .foregroundStyle(stateForeground(for: state))
+                }
             }
-
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.78))
-
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .tint(accentColor)
+            balanceRow
+            if let key = status?.key?.keyValue {
+                HStack {
+                    Image(systemName: "key.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(prefix(key))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if showsLowBalance {
+                Label("Low balance — top up soon", systemImage: "exclamationmark.circle")
+                    .font(DS.Typography.bubbleMeta)
+                    .foregroundStyle(DS.Status.warn)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.4))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .dsCard()
+    }
+
+    private var balanceRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(balanceText)
+                .font(.title3.monospacedDigit())
+            Text("credits")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private var balanceText: String {
+        guard let balance = status?.account?.creditBalance else { return "—" }
+        return "\(balance)"
+    }
+
+    private var showsLowBalance: Bool {
+        guard let balance = status?.account?.creditBalance,
+              let threshold = lowBalanceThreshold else { return false }
+        return balance <= threshold
+    }
+
+    private func prefix(_ key: String) -> String {
+        guard key.count > 12 else { return key }
+        return String(key.prefix(12)) + "…"
+    }
+
+    private func stateBackground(for state: RelayAccountState) -> Color {
+        switch state {
+        case .active: return DS.Status.ok.opacity(0.2)
+        case .paused: return DS.Status.warn.opacity(0.2)
+        case .expired, .inactive: return DS.Status.danger.opacity(0.2)
+        }
+    }
+
+    private func stateForeground(for state: RelayAccountState) -> Color {
+        switch state {
+        case .active: return DS.Status.ok
+        case .paused: return DS.Status.warn
+        case .expired, .inactive: return DS.Status.danger
+        }
     }
 }

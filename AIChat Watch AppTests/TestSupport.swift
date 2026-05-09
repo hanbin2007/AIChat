@@ -37,20 +37,20 @@ func makeTemporaryRootURL(prefix: String = "AIChatTests") -> URL {
         .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
 }
 
-/// Default `AppConfiguration` used in tests that exercise the direct (non-relay) Gemini path.
-func makeDirectModeAppConfiguration(
-    geminiAPIKey: String = "test",
-    geminiModel: String = "gemini-2.5-flash",
-    geminiTranscriptionModel: String = "gemini-3-flash-preview"
+/// Default `AppConfiguration` used in unit tests. Direct-Gemini mode
+/// is gone post-rewrite; the relay-only configuration is the only
+/// shape now.
+func makeTestAppConfiguration(
+    geminiModel: String = "gemini-3-flash-preview",
+    geminiTranscriptionModel: String = "gemini-3-flash-preview",
+    relayBaseURL: URL? = URL(string: "https://relay.example.com"),
+    relayBearerToken: String? = "test-bearer"
 ) -> AppConfiguration {
     AppConfiguration(
-        backendMode: .direct,
-        geminiAPIKey: geminiAPIKey,
         geminiModel: geminiModel,
         geminiTranscriptionModel: geminiTranscriptionModel,
-        relayBaseURL: nil,
-        relayBearerToken: nil,
-        relayStreamPath: "v1/chat/stream",
+        relayBaseURL: relayBaseURL,
+        relayBearerToken: relayBearerToken,
         appGroupIdentifier: nil
     )
 }

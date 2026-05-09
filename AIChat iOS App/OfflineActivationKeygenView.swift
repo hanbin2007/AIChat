@@ -35,15 +35,15 @@ struct OfflineActivationKeygenView: View {
                 .padding(16)
             }
             .navigationTitle("离线注册机")
-            .onChange(of: requestCode) { _ in clearGeneratedState() }
-            .onChange(of: validFrom) { _ in clearGeneratedState() }
-            .onChange(of: validUntil) { _ in clearGeneratedState() }
-            .onChange(of: hasExpiry) { _ in clearGeneratedState() }
-            .onChange(of: hasCreditLimit) { _ in clearGeneratedState() }
-            .onChange(of: creditLimit) { _ in clearGeneratedState() }
-            .onChange(of: note) { _ in clearGeneratedState() }
-            .onChange(of: selectedModelIDs) { _ in clearGeneratedState() }
-            .onChange(of: useAllModels) { _ in clearGeneratedState() }
+            .onChange(of: requestCode) { clearGeneratedState() }
+            .onChange(of: validFrom) { clearGeneratedState() }
+            .onChange(of: validUntil) { clearGeneratedState() }
+            .onChange(of: hasExpiry) { clearGeneratedState() }
+            .onChange(of: hasCreditLimit) { clearGeneratedState() }
+            .onChange(of: creditLimit) { clearGeneratedState() }
+            .onChange(of: note) { clearGeneratedState() }
+            .onChange(of: selectedModelIDs) { clearGeneratedState() }
+            .onChange(of: useAllModels) { clearGeneratedState() }
         }
     }
 
@@ -98,7 +98,7 @@ struct OfflineActivationKeygenView: View {
     private var modelsSection: some View {
         cardSection("模型范围") {
             Toggle("全部模型", isOn: $useAllModels)
-                .onChange(of: useAllModels) { useAll in
+                .onChange(of: useAllModels) { _, useAll in
                     if useAll {
                         selectedModelIDs = Set(LicensedModelCatalog.supportedModels.map(\.id))
                     }
