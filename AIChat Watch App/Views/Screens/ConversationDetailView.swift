@@ -79,7 +79,7 @@ struct ConversationDetailView: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: DS.Spacing.s) {
                     ForEach(visibleMessages) { message in
                         ChatBubbleView(

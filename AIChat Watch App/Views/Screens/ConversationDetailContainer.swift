@@ -17,6 +17,7 @@ struct ConversationDetailContainer: View {
     @State private var viewModel: ConversationDetailViewModel?
     @State private var settings: SettingsService?
     @State private var billingSnapshot: BillingSnapshot?
+    @State private var autoScroll: ConversationAutoScrollController = ConversationAutoScrollController()
 
     var body: some View {
         Group {
@@ -44,7 +45,11 @@ struct ConversationDetailContainer: View {
                         chatService: chatService,
                         transcriptionService: transcriptionService,
                         persistence: persistence,
-                        connection: env.connectionMonitor
+                        connection: env.connectionMonitor,
+                        pacer: env.streamingTextPacer,
+                        autoScroll: autoScroll,
+                        backgroundSession: env.backgroundSession,
+                        feedback: env.completionFeedback
                     )
                     settings = env.settingsService
                 }

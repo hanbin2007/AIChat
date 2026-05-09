@@ -44,7 +44,10 @@ struct OfflineActivationView: View {
         .task {
             guard let env = environment, let service = env.activationService else { return }
             if viewModel == nil {
-                viewModel = ActivationCenterViewModel(service: service)
+                viewModel = ActivationCenterViewModel(
+                    service: service,
+                    appGroupIdentifier: env.configuration.appGroupIdentifier
+                )
             }
             // Build a request code locally so the user can hand it to
             // the iPhone keygen tool.

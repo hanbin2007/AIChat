@@ -155,17 +155,6 @@ struct GlobalSettingsView: View {
                 Text(Bundle.main.appVersionDescription)
                     .foregroundStyle(.secondary)
             }
-            if let outcome = environment?.migrationOutcome, !outcome.skipped {
-                if let failure = outcome.failureReason {
-                    Label(failure, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(DS.Status.danger)
-                        .font(DS.Typography.bubbleMeta)
-                } else {
-                    Label("Migrated \(outcome.migratedConversations) chats", systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary)
-                        .font(DS.Typography.bubbleMeta)
-                }
-            }
             if let env = environment {
                 HStack {
                     Text("Relay")

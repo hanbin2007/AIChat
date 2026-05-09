@@ -35,7 +35,10 @@ struct AccountCenterView: View {
         .task {
             guard let env = environment else { return }
             if activation == nil, let service = env.activationService {
-                activation = ActivationCenterViewModel(service: service)
+                activation = ActivationCenterViewModel(
+                    service: service,
+                    appGroupIdentifier: env.configuration.appGroupIdentifier
+                )
                 await activation?.refreshStatus()
             }
             if billing == nil, let service = env.billingService {
