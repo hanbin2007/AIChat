@@ -3,8 +3,12 @@
 //  AIChat Watch AppTests
 //
 //  Pure-function tests for the model catalog (output token budgets,
-//  available thinking intensities) and the two completion-error helpers
-//  used to detect truncated / incomplete streaming responses.
+//  available thinking intensities). The completion-error helpers
+//  (`geminiCompletionError(for:)`, `relayCompletionError(...)`) lived
+//  in the deleted `GeminiAPIClient.swift` and `RelayAIClient.swift`;
+//  the new `ChatService` throws `RelayClientError` directly on
+//  premature stream end so there's nothing to unit-test in isolation
+//  here anymore.
 //
 
 import XCTest
@@ -30,27 +34,6 @@ final class AIModelCatalogAndCompletionErrorTests: XCTestCase {
         XCTAssertEqual(
             AIModelCatalog.normalizedThinkingIntensity(.extreme, for: "gemini-3-flash-preview"),
             .deep
-        )
-    }
-
-    func testGeminiCompletionErrorRequiresTerminalFinishReason() {
-        XCTAssertEqual(geminiCompletionError(for: nil), .incompleteResponse)
-        XCTAssertEqual(geminiCompletionError(for: "STOP"), nil)
-        XCTAssertEqual(geminiCompletionError(for: "MAX_TOKENS"), .truncated)
-    }
-
-    func testRelayCompletionErrorRequiresDoneEventAndStopFinishReason() {
-        XCTAssertEqual(
-            relayCompletionError(didReceiveDoneEvent: false, finishReason: "STOP"),
-            .incompleteResponse
-        )
-        XCTAssertEqual(
-            relayCompletionError(didReceiveDoneEvent: true, finishReason: "STOP"),
-            nil
-        )
-        XCTAssertEqual(
-            relayCompletionError(didReceiveDoneEvent: true, finishReason: "MAX_TOKENS"),
-            .truncated
         )
     }
 }

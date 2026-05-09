@@ -2,91 +2,51 @@
 //  DesignSystem.swift
 //  AIChat Watch App
 //
-//  Centralized visual tokens for the conversation surface. Previously
-//  every opacity/radius/gradient was an inline magic number scattered
-//  across ChatBubbleView, ConversationDetailView, and friends — which
-//  made coherent refinements impossible.
-//
-//  Scope is deliberate: tokens used by the chat surface, not a full
-//  cross-app system. watchOS HIG bounds visual reach (small screen,
-//  Always-On, no custom backdrops that fight the platform), so this
-//  file concentrates on material/rhythm cues that work inside those
-//  limits rather than inventing new chrome.
+//  Centralised tokens for spacing, radii, status colors, and typography.
+//  Keeps the visual layer aligned with watchOS 26 system materials —
+//  no custom palette beyond accent + status semantics.
 //
 
 import SwiftUI
 
 enum DS {
-
-    // MARK: - Corner radius
+    enum Spacing {
+        static let xs: CGFloat = 4
+        static let s: CGFloat = 8
+        static let m: CGFloat = 12
+        static let l: CGFloat = 16
+        static let xl: CGFloat = 20
+    }
 
     enum Radius {
-        static let bubble: CGFloat = 20
-        static let card: CGFloat = 14
+        static let bubble: CGFloat = 14
+        static let card: CGFloat = 12
+        static let chip: CGFloat = 8
     }
-
-    // MARK: - Spacing
-
-    enum Spacing {
-        static let bubbleInset: CGFloat = 12
-        static let bubbleContentGap: CGFloat = 8
-        static let bubbleFooterGap: CGFloat = 6
-    }
-
-    // MARK: - Motion
-
-    enum Motion {
-        /// Shared motion curve — reused across auto-scroll, bubble expansion,
-        /// and material transitions so the app has one cadence, not five.
-        static let primaryCurve = Animation.timingCurve(0.18, 0.92, 0.22, 1.0, duration: 0.45)
-        static let quickEase = Animation.easeOut(duration: 0.18)
-    }
-
-    // MARK: - Bubble materials
-
-    enum Bubble {
-        /// User bubble — brand cyan gradient, warm-to-cool diagonal.
-        static let userFill = LinearGradient(
-            colors: [
-                Color(red: 0.10, green: 0.70, blue: 0.88),
-                Color(red: 0.00, green: 0.52, blue: 0.76)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-
-        /// Assistant bubble — subtle vertical glassy neutral. Avoids flat
-        /// black: a faint light-to-dark gradient reads as depth on OLED
-        /// without competing with text.
-        static let assistantFill = LinearGradient(
-            colors: [
-                Color.white.opacity(0.08),
-                Color.black.opacity(0.46)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-
-        static let userStroke = Color.white.opacity(0.20)
-        static let assistantStroke = Color.white.opacity(0.09)
-    }
-
-    // MARK: - Text foreground
-
-    enum Text {
-        static let primary = Color.white
-        static let secondary = Color.white.opacity(0.68)
-        static let tertiary = Color.white.opacity(0.52)
-        static let muted = Color.white.opacity(0.8)
-    }
-
-    // MARK: - Status accents
 
     enum Status {
-        static let live = Color.cyan.opacity(0.92)
-        static let liveHighlight = Color.white.opacity(0.95)
-        static let paused = Color.gray.opacity(0.88)
-        static let pausedHighlight = Color.white.opacity(0.82)
-        static let failure = Color.yellow
+        static let ok = Color.green
+        static let warn = Color.yellow
+        static let danger = Color.red
+        static let info = Color.accentColor
+    }
+
+    enum Typography {
+        static let bubbleBody = Font.body
+        static let bubbleMeta = Font.caption2
+        static let listTitle = Font.headline
+        static let listPreview = Font.footnote
+        static let chip = Font.caption2.weight(.medium)
+        static let sectionHeader = Font.caption.weight(.semibold)
+    }
+}
+
+extension View {
+    /// Card-style container — thin material bg + rounded corners.
+    /// Used for Home sections, ActivationStatusCard, etc.
+    func dsCard(padding: CGFloat = DS.Spacing.m) -> some View {
+        self
+            .padding(padding)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
     }
 }

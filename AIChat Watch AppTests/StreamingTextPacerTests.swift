@@ -2,267 +2,343 @@
 //  StreamingTextPacerTests.swift
 //  AIChat Watch AppTests
 //
-//  Regression tests for the frame-synced streaming reveal pacer. These
-//  pin the contract that:
-//    1. Buffered deltas are revealed in order.
-//    2. `finalize()` guarantees pixels match the full buffer before it
-//       returns (so the caller can safely flip message status).
-//    3. `cancel()` commits buffered text immediately — used on error.
-//    4. `setPaused(true)` halts reveals; on resume the ticker catches up.
-//    5. Appending after `cancel()`/before `begin()` is a no-op.
+//  Pins the §1.1 character-level reveal contract.
 //
-//  Scroll jank on watchOS used to come from `@Published conversations`
-//  mutating every 120ms during streaming. The pacer replaces that path
-//  for visible text; if any of the above invariants break we lose either
-//  correctness or the perf win — hence these tests.
+//  Strategy: drive the pacer's tick cadence with an injected
+//  controllable sleeper. Each `advanceTick()` call lets exactly one
+//  tick run to completion. We push upstream snapshots, advance ticks,
+//  and assert against the downstream history.
 //
 
 import XCTest
 @testable import AIChat_Watch_App
 
+@MainActor
 final class StreamingTextPacerTests: XCTestCase {
 
-    // NOTE: All tests here are `async throws` even when the logic doesn't
-    // require it. The watchOS 26 test runner has a launch-race bug where
-    // the first sync @MainActor test per process segfaults the app host
-    // while async ones survive. Keeping every test async works around it
-    // and also makes the file consistent.
+    func test_holdsBackTextUntilFirstTick() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
 
-    @MainActor
-    func testBeginResetsRevealedState() async throws {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        let messageID = UUID()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.begin(messageID: messageID)
+        // Push a snapshot with 100 characters of assistant text.
+        upstream.yieldAssistant(text: String(repeating: "x", count: 100))
 
-        XCTAssertEqual(pacer.targetMessageID, messageID)
-        XCTAssertTrue(pacer.isActive)
-        XCTAssertEqual(pacer.revealedText, "")
-        XCTAssertEqual(pacer.revealedThoughtSummary, "")
+        // Without ticks, no downstream yield should happen.
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let beforeAnyTick = await harness.snapshotsSoFar()
+        XCTAssertEqual(beforeAnyTick.count, 0)
+
+        await harness.advanceTick()
+        let afterOne = await harness.snapshotsSoFar()
+        XCTAssertEqual(afterOne.count, 1)
+        // First tick: base + scaled by backlog (100 * 0.25 = 25 → cap at maxCharsPerTick = 24)
+        let firstAssistantText = afterOne[0].messages.last(where: { $0.role == .assistant })?.text ?? ""
+        XCTAssertGreaterThan(firstAssistantText.count, 0)
+        XCTAssertLessThan(firstAssistantText.count, 100)
+
+        upstream.finish()
+        await harness.runUntilFinish()
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testAppendWithoutBeginIsNoOp() async throws {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.appendAnswer("should be ignored")
-        pacer.appendThoughtSummary("also ignored")
+    func test_drainsRemainingCharsAfterStreamCompletes() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        XCTAssertEqual(pacer.revealedText, "")
-        XCTAssertEqual(pacer.revealedThoughtSummary, "")
-        XCTAssertFalse(pacer.isActive)
+        upstream.yieldAssistant(text: "Hello, world!")
+        upstream.finishAssistant(text: "Hello, world!", status: .sent)
+        upstream.finish()
+
+        await harness.runUntilFinish()
+
+        let snapshots = await harness.snapshotsSoFar()
+        XCTAssertFalse(snapshots.isEmpty)
+        let final = snapshots.last
+        XCTAssertEqual(final?.messages.last?.text, "Hello, world!")
+        XCTAssertEqual(final?.messages.last?.status, .sent)
+
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testFinalizeRevealsAllBufferedAnswer() async {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_emitsFinalSnapshotWithModelPartsOnDone() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.appendAnswer("Hello, ")
-        pacer.appendAnswer("streaming ")
-        pacer.appendAnswer("world")
+        let parts = [GeminiPartPayload(text: "Hi")]
+        upstream.finishAssistant(text: "Hi", status: .sent, modelResponseParts: parts)
+        upstream.finish()
 
-        await pacer.finalize()
+        await harness.runUntilFinish()
 
-        XCTAssertEqual(pacer.revealedText, "Hello, streaming world")
-        XCTAssertFalse(pacer.isActive)
+        let final = await harness.snapshotsSoFar().last
+        XCTAssertEqual(final?.messages.last?.modelResponseParts?.count, 1)
+
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testFinalizeRevealsAllBufferedThoughtSummary() async {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_intermediateSnapshotsHideModelResponseParts() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.appendThoughtSummary("thinking...")
-        pacer.appendThoughtSummary(" more thought")
+        let parts = [GeminiPartPayload(text: "secret")]
+        upstream.yieldAssistant(text: String(repeating: "a", count: 200), modelResponseParts: parts)
 
-        await pacer.finalize()
+        await harness.advanceTick()
+        let mid = await harness.snapshotsSoFar().first
+        XCTAssertNil(mid?.messages.last?.modelResponseParts)
 
-        XCTAssertEqual(pacer.revealedThoughtSummary, "thinking... more thought")
+        upstream.finish()
+        await harness.runUntilFinish()
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testCancelCommitsBufferedTextImmediately() async throws {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_resetsRevealCountWhenAssistantMessageIDChanges() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.appendAnswer("partial text")
-        pacer.appendThoughtSummary("partial thought")
+        upstream.yieldAssistant(text: "first turn long text body.")
+        await harness.advanceTick()
 
-        pacer.cancel()
+        // Replace assistant entirely (new id) — tick should restart from 0.
+        upstream.replaceWithFreshAssistant(text: "second turn body.")
+        await harness.advanceTick()
 
-        XCTAssertEqual(pacer.revealedText, "partial text")
-        XCTAssertEqual(pacer.revealedThoughtSummary, "partial thought")
-        XCTAssertFalse(pacer.isActive)
+        let snapshots = await harness.snapshotsSoFar()
+        let lastText = snapshots.last?.messages.last?.text ?? ""
+        // We should see characters from the second turn, not a continuation that overshoots its length.
+        XCTAssertLessThanOrEqual(lastText.count, "second turn body.".count)
+
+        upstream.finishAssistant(text: "second turn body.", status: .sent)
+        upstream.finish()
+        await harness.runUntilFinish()
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testPauseHaltsRevealResumeCatchesUp() async {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_propagatesUpstreamErrorWithoutRevealingPartial() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.setPaused(true)
-        pacer.appendAnswer("pending while paused")
+        upstream.fail(StubError.boom)
+        await harness.runUntilFinish()
 
-        // Wait a few tick intervals to prove paused ticker does nothing.
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(pacer.revealedText, "")
+        let outcome = await harness.outcome()
+        guard case .failed(let error) = outcome else {
+            return XCTFail("expected failure, got \(outcome)")
+        }
+        XCTAssertTrue((error as? StubError) == .boom)
 
-        pacer.setPaused(false)
-        await pacer.finalize()
-
-        XCTAssertEqual(pacer.revealedText, "pending while paused")
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testFinalizeBypassesPausedState() async {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_handlesMultiByteCharactersWithoutSlicingMidGrapheme() async throws {
+        let harness = PacerHarness(configuration: .init(
+            tickInterval: .milliseconds(33),
+            baseCharsPerTick: 1,
+            maxCharsPerTick: 1,
+            backlogScale: 0
+        ))
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        pacer.appendAnswer("buffered content")
-        pacer.setPaused(true)
+        // Each user-perceived character is one Character; emoji like 🇨🇳 is one grapheme cluster.
+        upstream.yieldAssistant(text: "你🇨🇳好")
+        await harness.advanceTick()
+        await harness.advanceTick()
+        await harness.advanceTick()
 
-        // finalize() must resolve even while paused — callers rely on it
-        // to flush the final text before flipping bubble state.
-        await pacer.finalize()
-
-        XCTAssertEqual(pacer.revealedText, "buffered content")
-        XCTAssertFalse(pacer.isActive)
-    }
-
-    @MainActor
-    func testBufferedAccessorsReflectLatestDeltas() async throws {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
-
-        pacer.appendAnswer("full answer buffer")
-        pacer.appendThoughtSummary("full thought buffer")
-
-        // The reveal may still be in-flight, but the buffered snapshot must
-        // be immediately available (used by error-recovery + persistence).
-        XCTAssertEqual(pacer.bufferedAnswerText, "full answer buffer")
-        XCTAssertEqual(pacer.bufferedThoughtText, "full thought buffer")
-    }
-
-    @MainActor
-    func testRevealAfterBeginTargetSwitchDoesNotLeakPriorBuffer() async {
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        let firstID = UUID()
-        let secondID = UUID()
-
-        pacer.begin(messageID: firstID)
-        pacer.appendAnswer("first reply")
-        await pacer.finalize()
-        XCTAssertEqual(pacer.revealedText, "first reply")
-
-        pacer.begin(messageID: secondID)
-        XCTAssertEqual(pacer.revealedText, "")
-        XCTAssertEqual(pacer.targetMessageID, secondID)
-
-        pacer.appendAnswer("second reply")
-        await pacer.finalize()
-        XCTAssertEqual(pacer.revealedText, "second reply")
-    }
-
-    @MainActor
-    func testStressBurstRevealsEntireBuffer() async throws {
-        // Simulates the "relay finishes a huge response in one SSE frame"
-        // case: 10k chars shoved at the pacer in a single append. Finalize
-        // must drain all of it, and the adaptive rate must pick the
-        // overflow-drain path without starving.
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
-
-        let burst = String(repeating: "x", count: 10_000)
-        pacer.appendAnswer(burst)
-
-        await pacer.finalize()
-        XCTAssertEqual(pacer.revealedText.count, 10_000)
-        XCTAssertEqual(pacer.revealedText, burst)
-    }
-
-    @MainActor
-    func testStressHighRateSustainedAppend() async throws {
-        // Simulates a model streaming 1-char tokens at 1kHz for 1 second.
-        // The pacer must not drop characters and must finalize with the
-        // full sequence intact.
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
-
-        let iterations = 1_000
-        for index in 0..<iterations {
-            pacer.appendAnswer(String(index % 10))
+        let snapshots = await harness.snapshotsSoFar()
+        // Each emitted text must be a valid Character-prefix of the
+        // full source — no slicing the middle of a grapheme cluster.
+        for snap in snapshots {
+            let text = snap.messages.last?.text ?? ""
+            XCTAssertTrue("你🇨🇳好".hasPrefix(text), "text '\(text)' is not a valid prefix")
         }
 
-        await pacer.finalize()
-        let expected = (0..<iterations).map { String($0 % 10) }.joined()
-        XCTAssertEqual(pacer.revealedText, expected)
+        upstream.finishAssistant(text: "你🇨🇳好", status: .sent)
+        upstream.finish()
+        await harness.runUntilFinish()
+        pacedTask.cancel()
     }
 
-    @MainActor
-    func testStressRapidPauseResumeDoesNotLoseCharacters() async throws {
-        // A jittery user dragging in short bursts toggles pause/resume
-        // many times while the pacer is actively revealing. Every
-        // character that landed in the buffer must reach the reveal even
-        // if toggling happens mid-tick.
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
+    func test_downstreamCancellationStopsTicking() async throws {
+        let harness = PacerHarness()
+        let upstream = PacerUpstream()
+        let pacedTask = harness.collect(pacing: upstream.stream)
 
-        for index in 0..<200 {
-            pacer.appendAnswer("a")
-            if index.isMultiple(of: 3) {
-                pacer.setPaused(true)
-                pacer.setPaused(false)
-            }
-        }
+        upstream.yieldAssistant(text: "long body of text to reveal")
+        await harness.advanceTick()
+        pacedTask.cancel()
 
-        await pacer.finalize()
-        XCTAssertEqual(pacer.revealedText.count, 200)
-    }
-
-    @MainActor
-    func testStressConcurrentAnswerAndThoughtDrain() async throws {
-        // Both channels active simultaneously — the tick should distribute
-        // reveal bandwidth across them rather than starving one.
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
-
-        let answer = String(repeating: "A", count: 500)
-        let thought = String(repeating: "T", count: 500)
-
-        pacer.appendAnswer(answer)
-        pacer.appendThoughtSummary(thought)
-
-        await pacer.finalize()
-        XCTAssertEqual(pacer.revealedText, answer)
-        XCTAssertEqual(pacer.revealedThoughtSummary, thought)
-    }
-
-    @MainActor
-    func testGraphemeClustersStayIntact() async {
-        // Reveal must never split extended grapheme clusters — a composed
-        // emoji or zero-width joiner sequence must not appear as half a
-        // glyph mid-reveal. Swift's `String.prefix(n)` treats count as
-        // grapheme count, so this also guards against accidental
-        // regression to UTF-16 indexing.
-        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
-        pacer.begin(messageID: UUID())
-
-        let input = "👨‍👩‍👧‍👦 family + 你好"
-        pacer.appendAnswer(input)
-        await pacer.finalize()
-
-        XCTAssertEqual(pacer.revealedText, input)
+        // After cancel, sleeper should stop being called.
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let pending = await harness.pendingSleepers()
+        XCTAssertEqual(pending, 0)
     }
 }
 
-private extension StreamingTextPacer.Configuration {
-    /// Aggressively short tick interval so tests don't sit waiting on the
-    /// adaptive 30Hz pacing. Keeps suite fast without changing semantics.
-    static var fastTestConfiguration: StreamingTextPacer.Configuration {
-        StreamingTextPacer.Configuration(
-            tickInterval: 0.001,
-            drainOverflowThreshold: 10,
-            onReveal: nil
-        )
+// MARK: - Harness
+
+@MainActor
+private final class PacerHarness {
+
+    enum Outcome {
+        case running
+        case finished
+        case failed(Error)
+    }
+
+    private let pacer: StreamingTextPacer
+    private let sleeper: ManualSleeper
+    private var snapshots: [ConversationThread] = []
+    private var outcomeValue: Outcome = .running
+
+    init(configuration: StreamingTextPacer.Configuration = .default) {
+        let sleeper = ManualSleeper()
+        self.sleeper = sleeper
+        self.pacer = StreamingTextPacer(configuration: configuration, sleeper: sleeper.callable)
+    }
+
+    func collect(pacing upstream: AsyncThrowingStream<ConversationThread, Error>) -> Task<Void, Never> {
+        let stream = pacer.pace(upstream)
+        return Task { [weak self] in
+            do {
+                for try await snap in stream {
+                    await self?.appendSnapshot(snap)
+                }
+                await self?.markFinished()
+            } catch {
+                await self?.markFailed(error)
+            }
+        }
+    }
+
+    private func appendSnapshot(_ s: ConversationThread) {
+        snapshots.append(s)
+    }
+
+    private func markFinished() { outcomeValue = .finished }
+    private func markFailed(_ e: Error) { outcomeValue = .failed(e) }
+
+    func snapshotsSoFar() -> [ConversationThread] { snapshots }
+
+    func outcome() -> Outcome { outcomeValue }
+
+    func advanceTick() async {
+        await sleeper.releaseOne()
+        // Give the tick task a chance to compute and yield.
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    func runUntilFinish(timeout: Duration = .seconds(2)) async {
+        let start = Date()
+        while case .running = outcomeValue {
+            await sleeper.releaseAll()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            if Date().timeIntervalSince(start) > 2.0 { break }
+        }
+    }
+
+    func pendingSleepers() async -> Int {
+        await sleeper.pendingCount()
+    }
+}
+
+private actor ManualSleeper {
+    private var continuations: [CheckedContinuation<Void, Error>] = []
+
+    nonisolated var callable: @Sendable (Duration) async throws -> Void {
+        { [weak self] _ in
+            guard let self else { return }
+            try await self.suspend()
+        }
+    }
+
+    private func suspend() async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            continuations.append(cont)
+        }
+    }
+
+    func releaseOne() {
+        guard !continuations.isEmpty else { return }
+        let cont = continuations.removeFirst()
+        cont.resume()
+    }
+
+    func releaseAll() {
+        let pending = continuations
+        continuations.removeAll()
+        for c in pending { c.resume() }
+    }
+
+    func pendingCount() -> Int { continuations.count }
+}
+
+// MARK: - Upstream
+
+@MainActor
+private final class PacerUpstream {
+    let stream: AsyncThrowingStream<ConversationThread, Error>
+    private let continuation: AsyncThrowingStream<ConversationThread, Error>.Continuation
+    private var thread: ConversationThread
+    private var assistantID: UUID
+
+    init() {
+        let pair = AsyncThrowingStream<ConversationThread, Error>.makeStream()
+        self.stream = pair.stream
+        self.continuation = pair.continuation
+        var thread = ConversationThread(title: "T")
+        thread.messages.append(ChatMessage(role: .user, text: "ask"))
+        let placeholder = ChatMessage(role: .assistant, text: "", status: .streaming)
+        thread.messages.append(placeholder)
+        self.thread = thread
+        self.assistantID = placeholder.id
+    }
+
+    func yieldAssistant(
+        text: String,
+        thoughtSummary: String? = nil,
+        modelResponseParts: [GeminiPartPayload]? = nil,
+        status: ChatMessageStatus = .streaming
+    ) {
+        guard let idx = thread.messages.lastIndex(where: { $0.role == .assistant }) else { return }
+        var assistant = thread.messages[idx]
+        assistant.text = text
+        assistant.thoughtSummary = thoughtSummary
+        assistant.modelResponseParts = modelResponseParts
+        assistant.status = status
+        thread.messages[idx] = assistant
+        continuation.yield(thread)
+    }
+
+    func finishAssistant(
+        text: String,
+        status: ChatMessageStatus,
+        modelResponseParts: [GeminiPartPayload]? = nil
+    ) {
+        yieldAssistant(text: text, modelResponseParts: modelResponseParts, status: status)
+    }
+
+    func replaceWithFreshAssistant(text: String) {
+        // Append a new assistant with a fresh UUID, marking this as a new turn.
+        let newAssistant = ChatMessage(role: .assistant, text: text, status: .streaming)
+        thread.messages.append(newAssistant)
+        assistantID = newAssistant.id
+        continuation.yield(thread)
+    }
+
+    func fail(_ error: Error) {
+        continuation.finish(throwing: error)
+    }
+
+    func finish() {
+        continuation.finish()
     }
 }

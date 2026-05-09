@@ -848,7 +848,7 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
         status == .streaming
     }
 
-    var renderSignature: ChatMessageRenderSignature {
+    nonisolated var renderSignature: ChatMessageRenderSignature {
         ChatMessageRenderSignature(
             id: id,
             role: role,
@@ -881,6 +881,24 @@ nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
 
         return thoughtText
     }
+}
+
+/// Helper extracted from the deleted `GeminiAPIClient.swift`. Merges
+/// the visible-text or the thought-text out of a `[GeminiPartPayload]`
+/// list so `ChatMessage.recoveredVisibleText` /
+/// `recoveredThoughtSummary` can recover the canonical text after a
+/// streaming reply finishes.
+nonisolated func mergedGeminiText(
+    from parts: [GeminiPartPayload],
+    includeThoughts: Bool
+) -> String? {
+    let merged = parts.reduce(into: "") { partialResult, part in
+        guard (part.thought == true) == includeThoughts, let text = part.text else {
+            return
+        }
+        partialResult.append(text)
+    }
+    return merged.isEmpty ? nil : merged
 }
 
 nonisolated enum AssistantMessageTextRenderingMode: Equatable {
@@ -1090,7 +1108,7 @@ nonisolated struct ChatMessageRenderSignature: Equatable {
 }
 
 extension ChatAttachment {
-    var renderSignature: ChatAttachmentRenderSignature {
+    nonisolated var renderSignature: ChatAttachmentRenderSignature {
         ChatAttachmentRenderSignature(
             id: id,
             kind: kind,
@@ -1111,7 +1129,7 @@ extension String {
         static let maximumMarkdownLines = 48
     }
 
-    var preferredAssistantMessageTextRenderingMode: AssistantMessageTextRenderingMode {
+    nonisolated var preferredAssistantMessageTextRenderingMode: AssistantMessageTextRenderingMode {
         guard isEmpty == false else {
             return .plain
         }
@@ -1149,7 +1167,7 @@ extension String {
         return containsLikelyInlineMathDelimitedByDollar
     }
 
-    fileprivate var containsMarkdownFormattingHintForAssistantRendering: Bool {
+    fileprivate nonisolated var containsMarkdownFormattingHintForAssistantRendering: Bool {
         if contains("```") ||
             contains("`") ||
             contains("![") ||
