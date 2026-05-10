@@ -194,3 +194,15 @@ sudo systemctl daemon-reload
 | Sandbox env shows secrets blank | secrets added after this session started | start a new Claude Code on the web session; secrets only inject at sandbox boot |
 
 Full topology + manual fallback in `docs/relay-server-setup.md`.
+
+## Next.js relay testing
+
+**All tests for the Next.js relay run in the sandbox. Never run tests on the EC2 box** — the production host is not a test runner. If the sandbox is missing a dependency (Node version, system package, browser binary for Playwright, etc.), install it in the sandbox; do not work around it by SSHing to EC2.
+
+Required test layers for the Next.js relay project (all three must exist and pass):
+
+- **Unit tests** — pure functions, route handlers in isolation, utility modules.
+- **Integration tests** — API routes exercised end-to-end against an in-process server, including SSE streaming contracts (`answer_delta` / `thought_delta`) and billing/auth middleware.
+- **E2E tests** — full browser/HTTP flows against a locally booted relay (e.g. Playwright or equivalent).
+
+**Coverage floor: the whole Next.js project must report >70% line coverage.** CI must fail if coverage drops below the threshold; do not ship changes that bring coverage under 70%.
