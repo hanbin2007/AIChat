@@ -58,6 +58,9 @@ JSON
 sudo chmod 0640 /etc/chisel/users.json
 
 # --- 3) systemd unit ----------------------------------------------------------
+# users.json is 0640 root:root, so DynamicUser can't read it directly.
+# LoadCredential= copies it into a per-invocation dir readable by the
+# dynamic user, exposed via $CREDENTIALS_DIRECTORY.
 log "writing /etc/systemd/system/chisel.service"
 sudo tee /etc/systemd/system/chisel.service >/dev/null <<'EOF'
 [Unit]
@@ -65,33 +68,35 @@ Description=chisel server (loopback; fronted by Caddy /_chisel/)
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/chisel server \
-  --host 127.0.0.1 --port 8080 \
-  --authfile /etc/chisel/users.json \
-  --keepalive 25s
+LoadCredential=users.json:/etc/chisel/users.json
+ExecStart=/usr/local/bin/chisel server --host 127.0.0.1 --port 8080 --authfile ${CREDENTIALS_DIRECTORY}/users.json --keepalive 25s
 Restart=always
 RestartSec=2
 DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadOnlyPaths=/etc/chisel
 NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now chisel
+sudo systemctl enable chisel
 sudo systemctl restart chisel
 sleep 1
-sudo systemctl --no-pager status chisel | head -n 10 || true
+if ! sudo systemctl is-active --quiet chisel; then
+    warn "chisel failed to start; recent journal:"
+    sudo journalctl -u chisel -n 30 --no-pager || true
+    fail "chisel.service is not active — fix the above before continuing"
+fi
+sudo systemctl --no-pager status chisel | head -n 8 || true
 
 # --- 4) Caddyfile patch (only if not already present) -------------------------
 if sudo grep -q "/_chisel/" /etc/caddy/Caddyfile 2>/dev/null; then
     log "Caddyfile already contains /_chisel/ route, skipping rewrite"
 else
     log "patching /etc/caddy/Caddyfile (backup -> /etc/caddy/Caddyfile.bak.pre-chisel)"
-    sudo cp -n /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.pre-chisel
+    [ -f /etc/caddy/Caddyfile.bak.pre-chisel ] || sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.pre-chisel
     sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
 ai.origenclub.cn {
     encode gzip zstd
