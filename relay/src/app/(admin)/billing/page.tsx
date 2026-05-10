@@ -1,12 +1,42 @@
 "use client";
 import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Banner, Button, Card, CardContent, CardHeader, CardTitle, Chip, Slider, Switch, Tabs, TextField, Icon, useSnackbar } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Slider from "@mui/material/Slider";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
+import Chip from "@mui/material/Chip";
+import TextField from "@mui/material/TextField";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import LinearProgress from "@mui/material/LinearProgress";
+import Grid from "@mui/material/Grid2";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableBody from "@mui/material/TableBody";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import Paper from "@mui/material/Paper";
+import AddCircleIcon from "@mui/icons-material/AddCircle";
+import DeleteIcon from "@mui/icons-material/Delete";
+import { AppShell } from "@/components/shell/app-shell";
+import { useSnackbar } from "@/components/snackbar-provider";
 import type { MeteringPolicy, MeteringRate, Plan, Transaction } from "@/lib/billing/types";
 import { creditsForUsage } from "@/lib/billing/metering";
-import { cn } from "@/lib/cn";
 
-type Tab = "plans" | "policy" | "transactions";
+type TabKey = "plans" | "policy" | "transactions";
 
 interface Snapshot {
   policy: MeteringPolicy;
@@ -16,22 +46,27 @@ interface Snapshot {
 
 export default function BillingStudioPage() {
   const snack = useSnackbar();
-  const [tab, setTab] = React.useState<Tab>("policy");
+  const [tab, setTab] = React.useState<TabKey>("policy");
   const [remote, setRemote] = React.useState<Snapshot | null>(null);
   const [policy, setPolicy] = React.useState<MeteringPolicy | null>(null);
   const [plans, setPlans] = React.useState<Plan[]>([]);
-  const dirty = policy && remote
-    ? JSON.stringify({ policy, plans }) !== JSON.stringify({ policy: remote.policy, plans: remote.plans })
-    : false;
+  const dirty =
+    policy && remote
+      ? JSON.stringify({ policy, plans }) !==
+        JSON.stringify({ policy: remote.policy, plans: remote.plans })
+      : false;
 
-  async function refresh() {
+  const refresh = React.useCallback(async () => {
     const res = await fetch("/api/admin/billing");
     const data = await res.json();
     setRemote(data);
     setPolicy(data.policy);
     setPlans(data.plans);
-  }
-  React.useEffect(() => { refresh(); }, []);
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   async function save() {
     if (!policy) return;
@@ -49,67 +84,79 @@ export default function BillingStudioPage() {
   }
 
   return (
-    <AdminShell title="Billing Studio" breadcrumb={["Billing"]}>
-      <div className="space-y-4 p-6">
-        {dirty && (
-          <Banner
-            tone="warn"
-            title="尚未保存的变更"
-            actions={
-              <>
-                <Button variant="text" onClick={refresh}>放弃</Button>
-                <Button onClick={save}>保存</Button>
-              </>
-            }
-          >
-            策略变更在保存前不会生效。
-          </Banner>
-        )}
+    <AppShell title="Billing Studio" breadcrumb={["Billing"]}>
+      <Box sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          {dirty && (
+            <Alert
+              severity="warning"
+              action={
+                <Stack direction="row" spacing={1}>
+                  <Button variant="text" size="small" onClick={refresh}>
+                    放弃
+                  </Button>
+                  <Button size="small" onClick={save}>
+                    保存
+                  </Button>
+                </Stack>
+              }
+            >
+              <AlertTitle>尚未保存的变更</AlertTitle>
+              策略变更在保存前不会生效。
+            </Alert>
+          )}
 
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "plans", label: "Plans" },
-            { value: "policy", label: "Pricing Policy" },
-            { value: "transactions", label: "Transactions" },
-          ]}
-        />
+          <Tabs value={tab} onChange={(_, v) => setTab(v as TabKey)}>
+            <Tab value="plans" label="Plans" />
+            <Tab value="policy" label="Pricing Policy" />
+            <Tab value="transactions" label="Transactions" />
+          </Tabs>
 
-        {tab === "policy" && policy && (
-          <PricingStudio policy={policy} onChange={setPolicy} />
-        )}
-        {tab === "plans" && (
-          <PlansGrid plans={plans} onChange={setPlans} />
-        )}
-        {tab === "transactions" && remote && (
-          <TransactionList transactions={Object.values(remote.transactions ?? {})} />
-        )}
-      </div>
-    </AdminShell>
+          {tab === "policy" && policy && <PricingStudio policy={policy} onChange={setPolicy} />}
+          {tab === "plans" && <PlansGrid plans={plans} onChange={setPlans} />}
+          {tab === "transactions" && remote && (
+            <TransactionList transactions={Object.values(remote.transactions ?? {})} />
+          )}
+        </Stack>
+      </Box>
+    </AppShell>
   );
 }
 
-function PricingStudio({ policy, onChange }: { policy: MeteringPolicy; onChange: (p: MeteringPolicy) => void }) {
+function PricingStudio({
+  policy,
+  onChange,
+}: {
+  policy: MeteringPolicy;
+  onChange: (p: MeteringPolicy) => void;
+}) {
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-      <div className="space-y-4">
-        <CreditCalculator policy={policy} />
-        <div className="grid gap-4 md:grid-cols-2">
-          {policy.rates.map((rate, i) => (
-            <RateCard
-              key={rate.modelID}
-              rate={rate}
-              onChange={(r) => {
-                const next = { ...policy, rates: policy.rates.map((x, j) => (j === i ? r : x)) };
-                onChange(next);
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <TrialPolicyCard policy={policy} onChange={onChange} />
-    </div>
+    <Grid container spacing={2}>
+      <Grid size={{ xs: 12, lg: 8 }}>
+        <Stack spacing={2}>
+          <CreditCalculator policy={policy} />
+          <Grid container spacing={2}>
+            {policy.rates.map((rate, i) => (
+              <Grid key={rate.modelID} size={{ xs: 12, md: 6 }}>
+                <RateCard
+                  rate={rate}
+                  onChange={(r) => {
+                    const next = {
+                      ...policy,
+                      rates: policy.rates.map((x, j) => (j === i ? r : x)),
+                    };
+                    onChange(next);
+                  }}
+                />
+              </Grid>
+            ))}
+          </Grid>
+        </Stack>
+      </Grid>
+      <Grid size={{ xs: 12, lg: 4 }}>
+        <TrialPolicyCard policy={policy} onChange={onChange} />
+      </Grid>
+    </Grid>
   );
 }
 
@@ -141,287 +188,492 @@ function CreditCalculator({ policy }: { policy: MeteringPolicy }) {
   const total = Math.max(inputCost + outputCost + searchCost, 1);
 
   return (
-    <Card variant="elevated" className="p-5">
-      <div className="flex items-center justify-between">
-        <CardTitle>Credit 计算器</CardTitle>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="rounded-m3-xs border border-outline bg-surface px-3 py-2 text-m3-body-m"
-        >
-          {policy.rates.map((r) => <option key={r.modelID} value={r.modelID}>{r.modelID}</option>)}
-        </select>
-      </div>
-      <div className="mt-4 grid gap-6 md:grid-cols-2">
-        <div className="space-y-4">
-          <Slider label="Input tokens" value={input} onChange={setInput} min={0} max={300_000} step={100} valueLabel={input.toLocaleString()} />
-          <Slider label="Output tokens" value={output} onChange={setOutput} min={0} max={100_000} step={100} valueLabel={output.toLocaleString()} />
-          <Slider label="Search 调用数" value={search} onChange={setSearch} min={0} max={20} valueLabel={String(search)} />
-          <Switch label="音频输入" checked={audio} onChange={() => setAudio((v) => !v)} />
-        </div>
-        <div>
-          <div className="flex flex-col items-center justify-center rounded-m3-lg bg-primary-container p-4 text-on-primary-container">
-            <div className="text-m3-label-m opacity-80">总计</div>
-            <div className="text-m3-display-s font-semibold">{credits.toLocaleString()}</div>
-            <div className="text-m3-label-l">credits · ${usd.toFixed(4)}</div>
-          </div>
-          <div className="mt-4 space-y-2">
-            <Bar label="Input" value={inputCost} total={total} color="primary" />
-            <Bar label="Output" value={outputCost} total={total} color="tertiary" />
-            <Bar label="Search" value={searchCost} total={total} color="secondary" />
-          </div>
-        </div>
-      </div>
+    <Card>
+      <CardHeader
+        title="Credit 计算器"
+        titleTypographyProps={{ variant: "subtitle1" }}
+        action={
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel>Model</InputLabel>
+            <Select label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
+              {policy.rates.map((r) => (
+                <MenuItem key={r.modelID} value={r.modelID}>
+                  {r.modelID}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        }
+      />
+      <CardContent>
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Stack spacing={2}>
+              <SliderField
+                label="Input tokens"
+                value={input}
+                onChange={setInput}
+                min={0}
+                max={300_000}
+                step={100}
+                valueLabel={input.toLocaleString()}
+              />
+              <SliderField
+                label="Output tokens"
+                value={output}
+                onChange={setOutput}
+                min={0}
+                max={100_000}
+                step={100}
+                valueLabel={output.toLocaleString()}
+              />
+              <SliderField
+                label="Search 调用数"
+                value={search}
+                onChange={setSearch}
+                min={0}
+                max={20}
+                valueLabel={String(search)}
+              />
+              <FormControlLabel
+                control={<Switch checked={audio} onChange={() => setAudio((v) => !v)} />}
+                label="音频输入"
+              />
+            </Stack>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                borderRadius: 3,
+                p: 2,
+              }}
+            >
+              <Typography variant="caption" sx={{ opacity: 0.85 }}>
+                总计
+              </Typography>
+              <Typography variant="h3" sx={{ fontWeight: 600 }}>
+                {credits.toLocaleString()}
+              </Typography>
+              <Typography variant="body2">
+                credits · ${usd.toFixed(4)}
+              </Typography>
+            </Box>
+            <Stack spacing={1.5} sx={{ mt: 2 }}>
+              <Bar label="Input" value={inputCost} total={total} color="primary" />
+              <Bar label="Output" value={outputCost} total={total} color="secondary" />
+              <Bar label="Search" value={searchCost} total={total} color="info" />
+            </Stack>
+          </Grid>
+        </Grid>
+      </CardContent>
     </Card>
   );
 }
 
-function Bar({ label, value, total, color }: { label: string; value: number; total: number; color: "primary" | "tertiary" | "secondary" }) {
+function Bar({
+  label,
+  value,
+  total,
+  color,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  color: "primary" | "secondary" | "info";
+}) {
   const pct = Math.min(100, Math.round((value / total) * 100));
-  const bg = color === "primary" ? "bg-primary" : color === "tertiary" ? "bg-tertiary" : "bg-secondary";
   return (
-    <div>
-      <div className="flex justify-between text-m3-body-s">
-        <span className="text-on-surface-variant">{label}</span>
-        <span className="font-mono">{Math.ceil(value)} credits</span>
-      </div>
-      <div className="mt-1 h-2 rounded-full bg-surface-container-highest">
-        <div className={cn("h-2 rounded-full", bg)} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="baseline">
+        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+          {label}
+        </Typography>
+        <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+          {Math.ceil(value)} credits
+        </Typography>
+      </Stack>
+      <LinearProgress
+        variant="determinate"
+        value={pct}
+        color={color}
+        sx={{ mt: 0.5, height: 6, borderRadius: 3 }}
+      />
+    </Box>
   );
 }
 
 function RateCard({ rate, onChange }: { rate: MeteringRate; onChange: (r: MeteringRate) => void }) {
   const hasOver200k = rate.inputCreditsPerMillionOver200k !== undefined;
   return (
-    <Card variant="outlined" className="p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-m3-title-s">{rate.modelID}</div>
-          <div className="text-m3-body-s text-on-surface-variant">每 1M tokens 的 credits 消耗</div>
-        </div>
-      </div>
-      <div className="mt-4 space-y-4">
-        <Slider
-          label="Input (standard)"
-          value={rate.inputCreditsPerMillion}
-          min={0}
-          max={10000}
-          step={50}
-          valueLabel={rate.inputCreditsPerMillion.toLocaleString()}
-          onChange={(v) => onChange({ ...rate, inputCreditsPerMillion: v })}
-        />
-        {hasOver200k && (
-          <Slider
-            label="Input (>200k)"
-            value={rate.inputCreditsPerMillionOver200k ?? 0}
+    <Card sx={{ height: "100%" }}>
+      <CardContent>
+        <Typography variant="subtitle2">{rate.modelID}</Typography>
+        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+          每 1M tokens 的 credits 消耗
+        </Typography>
+        <Stack spacing={2} sx={{ mt: 2 }}>
+          <SliderField
+            label="Input (standard)"
+            value={rate.inputCreditsPerMillion}
             min={0}
-            max={20000}
+            max={10000}
             step={50}
-            valueLabel={(rate.inputCreditsPerMillionOver200k ?? 0).toLocaleString()}
-            onChange={(v) => onChange({ ...rate, inputCreditsPerMillionOver200k: v })}
+            valueLabel={rate.inputCreditsPerMillion.toLocaleString()}
+            onChange={(v) => onChange({ ...rate, inputCreditsPerMillion: v })}
           />
-        )}
-        <Slider
-          label="Output"
-          value={rate.outputCreditsPerMillion}
-          min={0}
-          max={30000}
-          step={100}
-          valueLabel={rate.outputCreditsPerMillion.toLocaleString()}
-          onChange={(v) => onChange({ ...rate, outputCreditsPerMillion: v })}
-        />
-        <Slider
-          label="Search surcharge"
-          value={rate.searchSurchargeCredits}
-          min={0}
-          max={100}
-          valueLabel={String(rate.searchSurchargeCredits)}
-          onChange={(v) => onChange({ ...rate, searchSurchargeCredits: v })}
-        />
-        {rate.audioInputCreditsPerMillion !== undefined && (
-          <Slider
-            label="Audio input"
-            value={rate.audioInputCreditsPerMillion}
+          {hasOver200k && (
+            <SliderField
+              label="Input (>200k)"
+              value={rate.inputCreditsPerMillionOver200k ?? 0}
+              min={0}
+              max={20000}
+              step={50}
+              valueLabel={(rate.inputCreditsPerMillionOver200k ?? 0).toLocaleString()}
+              onChange={(v) => onChange({ ...rate, inputCreditsPerMillionOver200k: v })}
+            />
+          )}
+          <SliderField
+            label="Output"
+            value={rate.outputCreditsPerMillion}
             min={0}
-            max={5000}
-            step={50}
-            valueLabel={rate.audioInputCreditsPerMillion.toLocaleString()}
-            onChange={(v) => onChange({ ...rate, audioInputCreditsPerMillion: v })}
+            max={30000}
+            step={100}
+            valueLabel={rate.outputCreditsPerMillion.toLocaleString()}
+            onChange={(v) => onChange({ ...rate, outputCreditsPerMillion: v })}
           />
-        )}
-        <Switch
-          label="支持 >200k tier"
-          checked={hasOver200k}
-          onChange={() => {
-            if (hasOver200k) {
-              const { inputCreditsPerMillionOver200k, outputCreditsPerMillionOver200k, ...rest } = rate;
-              void inputCreditsPerMillionOver200k;
-              void outputCreditsPerMillionOver200k;
-              onChange(rest);
-            } else {
-              onChange({
-                ...rate,
-                inputCreditsPerMillionOver200k: rate.inputCreditsPerMillion * 2,
-                outputCreditsPerMillionOver200k: rate.outputCreditsPerMillion * 1.5,
-              });
+          <SliderField
+            label="Search surcharge"
+            value={rate.searchSurchargeCredits}
+            min={0}
+            max={100}
+            valueLabel={String(rate.searchSurchargeCredits)}
+            onChange={(v) => onChange({ ...rate, searchSurchargeCredits: v })}
+          />
+          {rate.audioInputCreditsPerMillion !== undefined && (
+            <SliderField
+              label="Audio input"
+              value={rate.audioInputCreditsPerMillion}
+              min={0}
+              max={5000}
+              step={50}
+              valueLabel={rate.audioInputCreditsPerMillion.toLocaleString()}
+              onChange={(v) => onChange({ ...rate, audioInputCreditsPerMillion: v })}
+            />
+          )}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={hasOver200k}
+                onChange={() => {
+                  if (hasOver200k) {
+                    const { inputCreditsPerMillionOver200k, outputCreditsPerMillionOver200k, ...rest } =
+                      rate;
+                    void inputCreditsPerMillionOver200k;
+                    void outputCreditsPerMillionOver200k;
+                    onChange(rest);
+                  } else {
+                    onChange({
+                      ...rate,
+                      inputCreditsPerMillionOver200k: rate.inputCreditsPerMillion * 2,
+                      outputCreditsPerMillionOver200k: rate.outputCreditsPerMillion * 1.5,
+                    });
+                  }
+                }}
+              />
             }
-          }}
-        />
-      </div>
+            label="支持 >200k tier"
+          />
+        </Stack>
+      </CardContent>
     </Card>
   );
 }
 
-function TrialPolicyCard({ policy, onChange }: { policy: MeteringPolicy; onChange: (p: MeteringPolicy) => void }) {
+function TrialPolicyCard({
+  policy,
+  onChange,
+}: {
+  policy: MeteringPolicy;
+  onChange: (p: MeteringPolicy) => void;
+}) {
   return (
-    <Card variant="filled" className="p-5 space-y-4 self-start">
-      <div>
-        <CardTitle>经济模型 & 试用</CardTitle>
-        <p className="mt-1 text-m3-body-s text-on-surface-variant">改变后会影响所有后续请求与新试用账户。</p>
-      </div>
-      <Slider
-        label="Credit → USD 汇率 (USD per 1000 credits)"
-        value={policy.creditBudgetUSDPer1000Credits}
-        min={0.5}
-        max={20}
-        step={0.5}
-        valueLabel={`$${policy.creditBudgetUSDPer1000Credits.toFixed(1)}`}
-        onChange={(v) => onChange({ ...policy, creditBudgetUSDPer1000Credits: v })}
+    <Card sx={{ bgcolor: "action.hover", position: "sticky", top: 80 }}>
+      <CardHeader
+        title="经济模型 & 试用"
+        subheader="改变后会影响所有后续请求与新试用账户。"
+        titleTypographyProps={{ variant: "subtitle1" }}
+        subheaderTypographyProps={{ variant: "caption" }}
       />
-      <Slider
-        label="Credit multiplier"
-        value={policy.creditMultiplier * 100}
-        min={10}
-        max={500}
-        step={5}
-        valueLabel={`${(policy.creditMultiplier * 100).toFixed(0)}%`}
-        onChange={(v) => onChange({ ...policy, creditMultiplier: v / 100 })}
-      />
-      <Slider
-        label="Trial credits"
-        value={policy.trialCredits}
-        min={0}
-        max={5000}
-        step={50}
-        valueLabel={policy.trialCredits.toLocaleString()}
-        onChange={(v) => onChange({ ...policy, trialCredits: v })}
-      />
-      <Slider
-        label="Trial 天数"
-        value={policy.trialDurationDays}
-        min={0}
-        max={30}
-        valueLabel={`${policy.trialDurationDays} 天`}
-        onChange={(v) => onChange({ ...policy, trialDurationDays: v })}
-      />
-      <Slider
-        label="低余额阈值"
-        value={policy.lowBalanceThresholdCredits}
-        min={0}
-        max={5000}
-        step={50}
-        valueLabel={policy.lowBalanceThresholdCredits.toLocaleString()}
-        onChange={(v) => onChange({ ...policy, lowBalanceThresholdCredits: v })}
-      />
-      <Slider
-        label="每账户最大绑定设备数"
-        value={policy.maxBoundDevices}
-        min={1}
-        max={20}
-        valueLabel={String(policy.maxBoundDevices)}
-        onChange={(v) => onChange({ ...policy, maxBoundDevices: v })}
-      />
-      <div className="rounded-m3-sm bg-surface-container p-3 text-m3-body-s text-on-surface-variant">
-        新设备首次激活将获得 <strong>{policy.trialCredits.toLocaleString()}</strong> credits，
-        有效期 <strong>{policy.trialDurationDays}</strong> 天；余额低于 <strong>{policy.lowBalanceThresholdCredits.toLocaleString()}</strong> 触发提示；
-        每账户最多绑定 <strong>{policy.maxBoundDevices}</strong> 台设备。
-      </div>
+      <CardContent>
+        <Stack spacing={2}>
+          <SliderField
+            label="Credit → USD 汇率 (USD per 1000 credits)"
+            value={policy.creditBudgetUSDPer1000Credits}
+            min={0.5}
+            max={20}
+            step={0.5}
+            valueLabel={`$${policy.creditBudgetUSDPer1000Credits.toFixed(1)}`}
+            onChange={(v) => onChange({ ...policy, creditBudgetUSDPer1000Credits: v })}
+          />
+          <SliderField
+            label="Credit multiplier"
+            value={policy.creditMultiplier * 100}
+            min={10}
+            max={500}
+            step={5}
+            valueLabel={`${(policy.creditMultiplier * 100).toFixed(0)}%`}
+            onChange={(v) => onChange({ ...policy, creditMultiplier: v / 100 })}
+          />
+          <SliderField
+            label="Trial credits"
+            value={policy.trialCredits}
+            min={0}
+            max={5000}
+            step={50}
+            valueLabel={policy.trialCredits.toLocaleString()}
+            onChange={(v) => onChange({ ...policy, trialCredits: v })}
+          />
+          <SliderField
+            label="Trial 天数"
+            value={policy.trialDurationDays}
+            min={0}
+            max={30}
+            valueLabel={`${policy.trialDurationDays} 天`}
+            onChange={(v) => onChange({ ...policy, trialDurationDays: v })}
+          />
+          <SliderField
+            label="低余额阈值"
+            value={policy.lowBalanceThresholdCredits}
+            min={0}
+            max={5000}
+            step={50}
+            valueLabel={policy.lowBalanceThresholdCredits.toLocaleString()}
+            onChange={(v) => onChange({ ...policy, lowBalanceThresholdCredits: v })}
+          />
+          <SliderField
+            label="每账户最大绑定设备数"
+            value={policy.maxBoundDevices}
+            min={1}
+            max={20}
+            valueLabel={String(policy.maxBoundDevices)}
+            onChange={(v) => onChange({ ...policy, maxBoundDevices: v })}
+          />
+          <Box sx={{ bgcolor: "background.paper", borderRadius: 2, p: 1.5 }}>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              新设备首次激活将获得{" "}
+              <strong>{policy.trialCredits.toLocaleString()}</strong> credits， 有效期{" "}
+              <strong>{policy.trialDurationDays}</strong> 天；余额低于{" "}
+              <strong>{policy.lowBalanceThresholdCredits.toLocaleString()}</strong> 触发提示；
+              每账户最多绑定 <strong>{policy.maxBoundDevices}</strong> 台设备。
+            </Typography>
+          </Box>
+        </Stack>
+      </CardContent>
     </Card>
   );
 }
 
 function PlansGrid({ plans, onChange }: { plans: Plan[]; onChange: (p: Plan[]) => void }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <Grid container spacing={2}>
       {plans.map((p, i) => (
-        <Card key={p.id} variant="outlined" className="p-5">
-          <div className="space-y-3">
-            <TextField label="ID" value={p.id} onChange={(e) => onChange(plans.map((x, j) => j === i ? { ...x, id: e.target.value } : x))} />
-            <TextField label="标题" value={p.title} onChange={(e) => onChange(plans.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} />
-            <TextField label="Product ID" value={p.productID} onChange={(e) => onChange(plans.map((x, j) => j === i ? { ...x, productID: e.target.value } : x))} />
-            <TextField
-              label="价格 (USD)"
-              type="number"
-              value={p.priceUSD}
-              onChange={(e) => onChange(plans.map((x, j) => j === i ? { ...x, priceUSD: Number(e.target.value) || 0 } : x))}
-            />
-            <TextField
-              label="月度 credits"
-              type="number"
-              value={p.monthlyCredits}
-              onChange={(e) => onChange(plans.map((x, j) => j === i ? { ...x, monthlyCredits: Number(e.target.value) || 0 } : x))}
-            />
-            <div className="flex justify-end">
-              <Button variant="text" icon="delete" onClick={() => onChange(plans.filter((_, j) => j !== i))}>删除</Button>
-            </div>
-          </div>
-        </Card>
+        <Grid key={p.id} size={{ xs: 12, md: 6, xl: 4 }}>
+          <Card sx={{ height: "100%" }}>
+            <CardContent>
+              <Stack spacing={2}>
+                <TextField
+                  label="ID"
+                  value={p.id}
+                  onChange={(e) =>
+                    onChange(plans.map((x, j) => (j === i ? { ...x, id: e.target.value } : x)))
+                  }
+                />
+                <TextField
+                  label="标题"
+                  value={p.title}
+                  onChange={(e) =>
+                    onChange(plans.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))
+                  }
+                />
+                <TextField
+                  label="Product ID"
+                  value={p.productID}
+                  onChange={(e) =>
+                    onChange(
+                      plans.map((x, j) => (j === i ? { ...x, productID: e.target.value } : x)),
+                    )
+                  }
+                />
+                <TextField
+                  label="价格 (USD)"
+                  type="number"
+                  value={p.priceUSD}
+                  onChange={(e) =>
+                    onChange(
+                      plans.map((x, j) =>
+                        j === i ? { ...x, priceUSD: Number(e.target.value) || 0 } : x,
+                      ),
+                    )
+                  }
+                />
+                <TextField
+                  label="月度 credits"
+                  type="number"
+                  value={p.monthlyCredits}
+                  onChange={(e) =>
+                    onChange(
+                      plans.map((x, j) =>
+                        j === i ? { ...x, monthlyCredits: Number(e.target.value) || 0 } : x,
+                      ),
+                    )
+                  }
+                />
+                <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                  <Button
+                    variant="text"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => onChange(plans.filter((_, j) => j !== i))}
+                  >
+                    删除
+                  </Button>
+                </Box>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
       ))}
-      <Card
-        variant="outlined"
-        className="state-layer flex h-full min-h-64 cursor-pointer items-center justify-center p-5 text-on-surface-variant"
-        onClick={() =>
-          onChange([
-            ...plans,
-            { id: `plan_${Date.now()}`, title: "新套餐", productID: "", priceUSD: 0, monthlyCredits: 0 },
-          ])
-        }
-      >
-        <div className="text-center">
-          <Icon name="add_circle" size={32} />
-          <div className="mt-2 text-m3-body-m">添加套餐</div>
-        </div>
-      </Card>
-    </div>
+      <Grid size={{ xs: 12, md: 6, xl: 4 }}>
+        <Card
+          variant="outlined"
+          sx={{
+            height: "100%",
+            minHeight: 280,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "text.secondary",
+            borderStyle: "dashed",
+            "&:hover": { bgcolor: "action.hover" },
+          }}
+          onClick={() =>
+            onChange([
+              ...plans,
+              {
+                id: `plan_${Date.now()}`,
+                title: "新套餐",
+                productID: "",
+                priceUSD: 0,
+                monthlyCredits: 0,
+              },
+            ])
+          }
+        >
+          <Stack alignItems="center">
+            <AddCircleIcon sx={{ fontSize: 32 }} />
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              添加套餐
+            </Typography>
+          </Stack>
+        </Card>
+      </Grid>
+    </Grid>
   );
 }
 
 function TransactionList({ transactions }: { transactions: Transaction[] }) {
   return (
     <Card>
-      <CardContent className="p-0">
-        <table className="w-full text-left text-m3-body-s">
-          <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-            <tr>
-              <th className="px-3 py-2">Transaction ID</th>
-              <th className="px-3 py-2">Product</th>
-              <th className="px-3 py-2">Env</th>
-              <th className="px-3 py-2">Purchased</th>
-              <th className="px-3 py-2">Expires</th>
-              <th className="px-3 py-2">Revoked</th>
-            </tr>
-          </thead>
-          <tbody>
+      <TableContainer component={Paper} variant="outlined" sx={{ boxShadow: "none", border: 0 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Transaction ID</TableCell>
+              <TableCell>Product</TableCell>
+              <TableCell>Env</TableCell>
+              <TableCell>Purchased</TableCell>
+              <TableCell>Expires</TableCell>
+              <TableCell>Revoked</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {transactions.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-on-surface-variant">没有交易记录</td></tr>
+              <TableRow>
+                <TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 5 }}>
+                  没有交易记录
+                </TableCell>
+              </TableRow>
             )}
             {transactions.map((t) => (
-              <tr key={t.transactionID} className="border-t border-outline-variant">
-                <td className="px-3 py-2 font-mono text-m3-label-s">{t.transactionID}</td>
-                <td className="px-3 py-2">{t.productID}</td>
-                <td className="px-3 py-2">{t.environment}</td>
-                <td className="px-3 py-2">{t.purchaseDate ? new Date(t.purchaseDate).toLocaleDateString() : "—"}</td>
-                <td className="px-3 py-2">{t.expirationDate ? new Date(t.expirationDate).toLocaleDateString() : "—"}</td>
-                <td className="px-3 py-2">
-                  {t.revokedDate ? <Badge tone="error">revoked</Badge> : <Badge tone="success">ok</Badge>}
-                </td>
-              </tr>
+              <TableRow key={t.transactionID} hover>
+                <TableCell sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+                  {t.transactionID}
+                </TableCell>
+                <TableCell>{t.productID}</TableCell>
+                <TableCell>{t.environment}</TableCell>
+                <TableCell>
+                  {t.purchaseDate ? new Date(t.purchaseDate).toLocaleDateString() : "—"}
+                </TableCell>
+                <TableCell>
+                  {t.expirationDate ? new Date(t.expirationDate).toLocaleDateString() : "—"}
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    size="small"
+                    color={t.revokedDate ? "error" : "success"}
+                    label={t.revokedDate ? "revoked" : "ok"}
+                  />
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </CardContent>
+          </TableBody>
+        </Table>
+      </TableContainer>
     </Card>
+  );
+}
+
+function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  valueLabel,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  valueLabel?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} alignItems="baseline" justifyContent="space-between">
+        <Typography variant="body2">{label}</Typography>
+        {valueLabel && (
+          <Typography variant="caption" sx={{ color: "text.secondary", fontFamily: "monospace" }}>
+            {valueLabel}
+          </Typography>
+        )}
+      </Stack>
+      <Slider
+        size="small"
+        value={value}
+        min={min}
+        max={max}
+        step={step ?? 1}
+        onChange={(_, v) => onChange(v as number)}
+      />
+    </Box>
   );
 }

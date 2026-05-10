@@ -1,8 +1,37 @@
 "use client";
 import * as React from "react";
 import Link from "next/link";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Card, CardContent, Chip, Tabs, Icon, IconButton, TextField, Button, Dialog, useSnackbar } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Chip from "@mui/material/Chip";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import MuiLink from "@mui/material/Link";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import SearchIcon from "@mui/icons-material/Search";
+import AddIcon from "@mui/icons-material/Add";
+import AddCardIcon from "@mui/icons-material/AddCard";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import LinkOffIcon from "@mui/icons-material/LinkOff";
+import BlockIcon from "@mui/icons-material/Block";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
+import WatchIcon from "@mui/icons-material/Watch";
+import PhoneIphoneIcon from "@mui/icons-material/PhoneIphone";
+import ComputerIcon from "@mui/icons-material/Computer";
+import { AppShell } from "@/components/shell/app-shell";
+import { useSnackbar } from "@/components/snackbar-provider";
 import type { Account, Device, Key, ActivationCode, PairingToken } from "@/lib/billing/types";
 
 interface BillingData {
@@ -13,35 +42,36 @@ interface BillingData {
   pairingTokens: PairingToken[];
 }
 
-type Tab = "accounts" | "devices" | "keys" | "codes" | "pairing";
+type TabKey = "accounts" | "devices" | "keys" | "codes" | "pairing";
 
 export default function AccountsPage() {
   const snack = useSnackbar();
-  const [tab, setTab] = React.useState<Tab>("accounts");
+  const [tab, setTab] = React.useState<TabKey>("accounts");
   const [data, setData] = React.useState<BillingData | null>(null);
   const [query, setQuery] = React.useState("");
   const [grantAccount, setGrantAccount] = React.useState<Account | null>(null);
   const [codeDialog, setCodeDialog] = React.useState(false);
 
-  async function refresh() {
+  const refresh = React.useCallback(async () => {
     const res = await fetch("/api/admin/billing");
     setData(await res.json());
-  }
-  React.useEffect(() => { refresh(); }, []);
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const q = query.toLowerCase();
-  const accounts = (data?.accounts ?? []).filter((a) =>
-    !q || a.accountID.includes(q) || (a.displayName ?? "").toLowerCase().includes(q),
+  const accounts = (data?.accounts ?? []).filter(
+    (a) => !q || a.accountID.includes(q) || (a.displayName ?? "").toLowerCase().includes(q),
   );
-  const devices = (data?.devices ?? []).filter((d) =>
-    !q || d.deviceID.toLowerCase().includes(q) || (d.alias ?? "").toLowerCase().includes(q),
+  const devices = (data?.devices ?? []).filter(
+    (d) => !q || d.deviceID.toLowerCase().includes(q) || (d.alias ?? "").toLowerCase().includes(q),
   );
-  const keys = (data?.keys ?? []).filter((k) =>
-    !q || k.keyValue.toLowerCase().includes(q) || (k.note ?? "").toLowerCase().includes(q),
+  const keys = (data?.keys ?? []).filter(
+    (k) => !q || k.keyValue.toLowerCase().includes(q) || (k.note ?? "").toLowerCase().includes(q),
   );
-  const codes = (data?.activationCodes ?? []).filter((c) =>
-    !q || c.code.toLowerCase().includes(q),
-  );
+  const codes = (data?.activationCodes ?? []).filter((c) => !q || c.code.toLowerCase().includes(q));
 
   async function revokeCode(code: string) {
     if (!confirm(`吊销激活码 ${code}？`)) return;
@@ -63,36 +93,50 @@ export default function AccountsPage() {
   }
 
   return (
-    <AdminShell title="Accounts" breadcrumb={["Billing"]}>
-      <div className="space-y-4 p-6">
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "accounts", label: `账户 (${data?.accounts.length ?? 0})` },
-            { value: "devices", label: `设备 (${data?.devices.length ?? 0})` },
-            { value: "keys", label: `Keys (${data?.keys.length ?? 0})` },
-            { value: "codes", label: `激活码 (${data?.activationCodes.length ?? 0})` },
-            { value: "pairing", label: `配对 (${data?.pairingTokens.length ?? 0})` },
-          ]}
-        />
-        <div className="flex items-center gap-3">
-          <div className="flex-1 max-w-md">
-            <TextField leading="search" placeholder="搜索" value={query} onChange={(e) => setQuery(e.target.value)} variant="filled" />
-          </div>
-          {tab === "codes" && <Button icon="add" onClick={() => setCodeDialog(true)}>生成激活码</Button>}
-        </div>
+    <AppShell title="Accounts" breadcrumb={["Billing"]}>
+      <Box sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Tabs value={tab} onChange={(_, v) => setTab(v as TabKey)} variant="scrollable" scrollButtons="auto">
+            <Tab value="accounts" label={`账户 (${data?.accounts.length ?? 0})`} />
+            <Tab value="devices" label={`设备 (${data?.devices.length ?? 0})`} />
+            <Tab value="keys" label={`Keys (${data?.keys.length ?? 0})`} />
+            <Tab value="codes" label={`激活码 (${data?.activationCodes.length ?? 0})`} />
+            <Tab value="pairing" label={`配对 (${data?.pairingTokens.length ?? 0})`} />
+          </Tabs>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Box sx={{ flex: 1, maxWidth: 480 }}>
+              <TextField
+                size="small"
+                placeholder="搜索"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+            {tab === "codes" && (
+              <Button startIcon={<AddIcon />} onClick={() => setCodeDialog(true)}>
+                生成激活码
+              </Button>
+            )}
+          </Stack>
 
-        <Card>
-          <CardContent className="p-0">
+          <Card>
             {tab === "accounts" && <AccountTable accounts={accounts} onGrant={setGrantAccount} />}
             {tab === "devices" && <DeviceTable devices={devices} onUnbind={unbindDevice} />}
             {tab === "keys" && <KeyTable keys={keys} />}
             {tab === "codes" && <CodeTable codes={codes} onRevoke={revokeCode} />}
-            {tab === "pairing" && <PairingTable tokens={data?.pairingTokens ?? []} onRevoke={revokeToken} />}
-          </CardContent>
-        </Card>
-      </div>
+            {tab === "pairing" && (
+              <PairingTable tokens={data?.pairingTokens ?? []} onRevoke={revokeToken} />
+            )}
+          </Card>
+        </Stack>
+      </Box>
 
       {grantAccount && (
         <GrantDialog
@@ -115,205 +159,442 @@ export default function AccountsPage() {
           }}
         />
       )}
-    </AdminShell>
+    </AppShell>
   );
 }
 
-function AccountTable({ accounts, onGrant }: { accounts: Account[]; onGrant: (a: Account) => void }) {
-  if (accounts.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有账户</div>;
+function AccountTable({
+  accounts,
+  onGrant,
+}: {
+  accounts: Account[];
+  onGrant: (a: Account) => void;
+}) {
+  const columns: GridColDef<Account>[] = [
+    {
+      field: "displayName",
+      headerName: "名称",
+      flex: 1,
+      minWidth: 220,
+      renderCell: (params) => (
+        <Box>
+          <MuiLink component={Link} href={`/accounts/${params.row.accountID}`} underline="hover" variant="body2">
+            {params.row.displayName ?? params.row.accountID.slice(0, 8)}
+          </MuiLink>
+          <Typography
+            variant="caption"
+            sx={{ display: "block", fontFamily: "monospace", color: "text.secondary" }}
+          >
+            {params.row.accountID}
+          </Typography>
+        </Box>
+      ),
+    },
+    {
+      field: "state",
+      headerName: "状态",
+      width: 110,
+      renderCell: (params) => (
+        <Chip
+          size="small"
+          color={
+            params.row.state === "active"
+              ? "success"
+              : params.row.state === "paused"
+                ? "warning"
+                : "error"
+          }
+          label={params.row.state}
+        />
+      ),
+    },
+    { field: "source", headerName: "来源", width: 130 },
+    {
+      field: "creditBalance",
+      headerName: "余额",
+      width: 110,
+      valueFormatter: (v: number) => v.toLocaleString(),
+    },
+    {
+      field: "creditExpiresAt",
+      headerName: "到期",
+      width: 130,
+      valueFormatter: (v: string | undefined) => (v ? new Date(v).toLocaleDateString() : "—"),
+    },
+    {
+      field: "lastUsageAt",
+      headerName: "最近使用",
+      width: 180,
+      valueFormatter: (v: string | undefined) => (v ? new Date(v).toLocaleString() : "—"),
+    },
+    {
+      field: "_actions",
+      headerName: "",
+      width: 120,
+      sortable: false,
+      renderCell: (params) => (
+        <Stack direction="row" spacing={0.5}>
+          <Tooltip title="发额度">
+            <IconButton size="small" onClick={() => onGrant(params.row)}>
+              <AddCardIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="详情">
+            <IconButton size="small" component={Link} href={`/accounts/${params.row.accountID}`}>
+              <ArrowForwardIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      ),
+    },
+  ];
   return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">名称</th>
-          <th className="px-3 py-2">状态</th>
-          <th className="px-3 py-2">来源</th>
-          <th className="px-3 py-2">余额</th>
-          <th className="px-3 py-2">到期</th>
-          <th className="px-3 py-2">最近使用</th>
-          <th className="px-3 py-2 w-24"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {accounts.map((a) => (
-          <tr key={a.accountID} className="border-t border-outline-variant">
-            <td className="px-3 py-2">
-              <Link href={`/accounts/${a.accountID}`} className="text-primary hover:underline">
-                {a.displayName ?? a.accountID.slice(0, 8)}
-              </Link>
-              <div className="font-mono text-m3-label-s text-on-surface-variant">{a.accountID}</div>
-            </td>
-            <td className="px-3 py-2">
-              <Badge tone={a.state === "active" ? "success" : a.state === "paused" ? "warn" : "error"}>
-                {a.state}
-              </Badge>
-            </td>
-            <td className="px-3 py-2">{a.source}</td>
-            <td className="px-3 py-2">{a.creditBalance.toLocaleString()}</td>
-            <td className="px-3 py-2">{a.creditExpiresAt ? new Date(a.creditExpiresAt).toLocaleDateString() : "—"}</td>
-            <td className="px-3 py-2">{a.lastUsageAt ? new Date(a.lastUsageAt).toLocaleString() : "—"}</td>
-            <td className="px-3 py-2 text-right">
-              <IconButton icon="add_card" onClick={() => onGrant(a)} aria-label="发额度" />
-              <Link href={`/accounts/${a.accountID}`} aria-label="详情">
-                <IconButton icon="arrow_forward" aria-label="详情" />
-              </Link>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Box sx={{ height: 600 }}>
+      <DataGrid
+        rows={accounts}
+        columns={columns}
+        getRowId={(r) => r.accountID}
+        density="compact"
+        pageSizeOptions={[25, 50, 100]}
+        initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+        localeText={{ noRowsLabel: "没有账户" }}
+        disableRowSelectionOnClick
+      />
+    </Box>
   );
 }
 
 function DeviceTable({ devices, onUnbind }: { devices: Device[]; onUnbind: (id: string) => void }) {
-  if (devices.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有设备</div>;
+  const columns: GridColDef<Device>[] = [
+    {
+      field: "alias",
+      headerName: "设备",
+      flex: 1,
+      minWidth: 220,
+      renderCell: (params) => (
+        <Box>
+          <Typography variant="body2" fontWeight={500}>
+            {params.row.alias ?? params.row.deviceID.slice(0, 10)}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{ display: "block", fontFamily: "monospace", color: "text.secondary" }}
+          >
+            {params.row.deviceID}
+          </Typography>
+        </Box>
+      ),
+    },
+    {
+      field: "platform",
+      headerName: "平台",
+      width: 140,
+      renderCell: (params) => {
+        const Icon =
+          params.row.platform === "watch"
+            ? WatchIcon
+            : params.row.platform === "iPhone"
+              ? PhoneIphoneIcon
+              : ComputerIcon;
+        return (
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ height: "100%" }}>
+            <Icon fontSize="small" />
+            <Typography variant="body2">{params.row.platform}</Typography>
+          </Stack>
+        );
+      },
+    },
+    {
+      field: "accountID",
+      headerName: "账户",
+      width: 140,
+      renderCell: (params) => (
+        <MuiLink
+          component={Link}
+          href={`/accounts/${params.row.accountID}`}
+          underline="hover"
+          sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
+        >
+          {params.row.accountID.slice(0, 8)}
+        </MuiLink>
+      ),
+    },
+    {
+      field: "keyID",
+      headerName: "Key",
+      width: 120,
+      valueFormatter: (v: string | undefined) => v?.slice(0, 8) ?? "—",
+    },
+    {
+      field: "lastSeenAt",
+      headerName: "最近",
+      width: 180,
+      valueFormatter: (v: string | undefined) => (v ? new Date(v).toLocaleString() : "—"),
+    },
+    {
+      field: "_actions",
+      headerName: "",
+      width: 60,
+      sortable: false,
+      renderCell: (params) => (
+        <Tooltip title="解绑">
+          <IconButton size="small" onClick={() => onUnbind(params.row.deviceID)}>
+            <LinkOffIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
+  ];
   return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">设备</th>
-          <th className="px-3 py-2">平台</th>
-          <th className="px-3 py-2">账户</th>
-          <th className="px-3 py-2">Key</th>
-          <th className="px-3 py-2">最近</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {devices.map((d) => (
-          <tr key={d.deviceID} className="border-t border-outline-variant">
-            <td className="px-3 py-2">
-              <div className="font-medium">{d.alias ?? d.deviceID.slice(0, 10)}</div>
-              <div className="font-mono text-m3-label-s text-on-surface-variant">{d.deviceID}</div>
-            </td>
-            <td className="px-3 py-2">
-              <span className="inline-flex items-center gap-1">
-                <Icon name={d.platform === "watch" ? "watch" : d.platform === "iPhone" ? "phone_iphone" : "computer"} size={18} />
-                {d.platform}
-              </span>
-            </td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">
-              <Link className="text-primary hover:underline" href={`/accounts/${d.accountID}`}>{d.accountID.slice(0, 8)}</Link>
-            </td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{d.keyID?.slice(0, 8) ?? "—"}</td>
-            <td className="px-3 py-2">{d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "—"}</td>
-            <td className="px-3 py-2">
-              <IconButton icon="link_off" size="sm" onClick={() => onUnbind(d.deviceID)} aria-label="解绑" />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Box sx={{ height: 600 }}>
+      <DataGrid
+        rows={devices}
+        columns={columns}
+        getRowId={(r) => r.deviceID}
+        density="compact"
+        pageSizeOptions={[25, 50, 100]}
+        initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+        localeText={{ noRowsLabel: "没有设备" }}
+        disableRowSelectionOnClick
+      />
+    </Box>
   );
 }
 
 function KeyTable({ keys }: { keys: Key[] }) {
   const [reveal, setReveal] = React.useState(false);
-  if (keys.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有 Key</div>;
+  const columns: GridColDef<Key>[] = [
+    {
+      field: "keyValue",
+      headerName: "Key",
+      flex: 1,
+      minWidth: 260,
+      renderCell: (params) => (
+        <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+          {reveal ? params.row.keyValue : `${params.row.keyValue.slice(0, 8)}••••`}
+        </Typography>
+      ),
+    },
+    {
+      field: "accountID",
+      headerName: "账户",
+      width: 140,
+      renderCell: (params) => (
+        <MuiLink
+          component={Link}
+          href={`/accounts/${params.row.accountID}`}
+          underline="hover"
+          sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}
+        >
+          {params.row.accountID.slice(0, 8)}
+        </MuiLink>
+      ),
+    },
+    {
+      field: "state",
+      headerName: "状态",
+      width: 110,
+      renderCell: (params) => (
+        <Chip
+          size="small"
+          color={
+            params.row.state === "active"
+              ? "success"
+              : params.row.state === "paused"
+                ? "warning"
+                : "error"
+          }
+          label={params.row.state}
+        />
+      ),
+    },
+    { field: "source", headerName: "来源", width: 140 },
+    {
+      field: "issuedAt",
+      headerName: "发放时间",
+      width: 140,
+      valueFormatter: (v: string) => new Date(v).toLocaleDateString(),
+    },
+  ];
   return (
     <>
-      <div className="flex items-center justify-end gap-2 px-3 py-2">
-        <Chip selected={reveal} onClick={() => setReveal((v) => !v)} icon="visibility">
-          {reveal ? "隐藏" : "显示"}明文
-        </Chip>
-      </div>
-      <table className="w-full text-left text-m3-body-s">
-        <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-          <tr>
-            <th className="px-3 py-2">Key</th>
-            <th className="px-3 py-2">账户</th>
-            <th className="px-3 py-2">状态</th>
-            <th className="px-3 py-2">来源</th>
-            <th className="px-3 py-2">发放时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k.keyID} className="border-t border-outline-variant">
-              <td className="px-3 py-2 font-mono">{reveal ? k.keyValue : `${k.keyValue.slice(0, 8)}••••`}</td>
-              <td className="px-3 py-2 font-mono text-m3-label-s">
-                <Link href={`/accounts/${k.accountID}`} className="text-primary hover:underline">{k.accountID.slice(0, 8)}</Link>
-              </td>
-              <td className="px-3 py-2">
-                <Badge tone={k.state === "active" ? "success" : k.state === "paused" ? "warn" : "error"}>
-                  {k.state}
-                </Badge>
-              </td>
-              <td className="px-3 py-2">{k.source}</td>
-              <td className="px-3 py-2">{new Date(k.issuedAt).toLocaleDateString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", p: 1.5 }}>
+        <Chip
+          icon={reveal ? <VisibilityOffIcon /> : <VisibilityIcon />}
+          label={`${reveal ? "隐藏" : "显示"}明文`}
+          color={reveal ? "primary" : "default"}
+          variant={reveal ? "filled" : "outlined"}
+          onClick={() => setReveal((v) => !v)}
+        />
+      </Box>
+      <Box sx={{ height: 540 }}>
+        <DataGrid
+          rows={keys}
+          columns={columns}
+          getRowId={(r) => r.keyID}
+          density="compact"
+          pageSizeOptions={[25, 50, 100]}
+          initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+          localeText={{ noRowsLabel: "没有 Key" }}
+          disableRowSelectionOnClick
+        />
+      </Box>
     </>
   );
 }
 
-function CodeTable({ codes, onRevoke }: { codes: ActivationCode[]; onRevoke: (code: string) => void }) {
-  if (codes.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有激活码</div>;
+function CodeTable({
+  codes,
+  onRevoke,
+}: {
+  codes: ActivationCode[];
+  onRevoke: (code: string) => void;
+}) {
+  const columns: GridColDef<ActivationCode>[] = [
+    {
+      field: "code",
+      headerName: "激活码",
+      flex: 1,
+      minWidth: 240,
+      renderCell: (params) => (
+        <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+          {params.row.code}
+        </Typography>
+      ),
+    },
+    { field: "plan", headerName: "Plan", width: 140, valueFormatter: (v: string | undefined) => v ?? "—" },
+    {
+      field: "credits",
+      headerName: "Credits",
+      width: 110,
+      valueFormatter: (v: number) => v.toLocaleString(),
+    },
+    {
+      field: "expiresAt",
+      headerName: "到期",
+      width: 130,
+      valueFormatter: (v: string | undefined) => (v ? new Date(v).toLocaleDateString() : "—"),
+    },
+    {
+      field: "state",
+      headerName: "状态",
+      width: 110,
+      renderCell: (params) => (
+        <Chip
+          size="small"
+          color={
+            params.row.state === "unused"
+              ? "info"
+              : params.row.state === "redeemed"
+                ? "success"
+                : "error"
+          }
+          label={params.row.state}
+        />
+      ),
+    },
+    {
+      field: "note",
+      headerName: "备注",
+      flex: 1,
+      minWidth: 160,
+      valueFormatter: (v: string | undefined) => v ?? "—",
+    },
+    {
+      field: "_actions",
+      headerName: "",
+      width: 60,
+      sortable: false,
+      renderCell: (params) =>
+        params.row.state === "unused" ? (
+          <Tooltip title="吊销">
+            <IconButton size="small" onClick={() => onRevoke(params.row.code)}>
+              <BlockIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ) : null,
+    },
+  ];
   return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">激活码</th>
-          <th className="px-3 py-2">Plan</th>
-          <th className="px-3 py-2">Credits</th>
-          <th className="px-3 py-2">到期</th>
-          <th className="px-3 py-2">状态</th>
-          <th className="px-3 py-2">备注</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {codes.map((c) => (
-          <tr key={c.code} className="border-t border-outline-variant">
-            <td className="px-3 py-2 font-mono">{c.code}</td>
-            <td className="px-3 py-2">{c.plan ?? "—"}</td>
-            <td className="px-3 py-2">{c.credits.toLocaleString()}</td>
-            <td className="px-3 py-2">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}</td>
-            <td className="px-3 py-2">
-              <Badge tone={c.state === "unused" ? "info" : c.state === "redeemed" ? "success" : "error"}>
-                {c.state}
-              </Badge>
-            </td>
-            <td className="px-3 py-2 text-on-surface-variant">{c.note ?? "—"}</td>
-            <td className="px-3 py-2">
-              {c.state === "unused" && <IconButton icon="block" size="sm" onClick={() => onRevoke(c.code)} aria-label="吊销" />}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Box sx={{ height: 600 }}>
+      <DataGrid
+        rows={codes}
+        columns={columns}
+        getRowId={(r) => r.code}
+        density="compact"
+        pageSizeOptions={[25, 50, 100]}
+        initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+        localeText={{ noRowsLabel: "没有激活码" }}
+        disableRowSelectionOnClick
+      />
+    </Box>
   );
 }
 
-function PairingTable({ tokens, onRevoke }: { tokens: PairingToken[]; onRevoke: (token: string) => void }) {
-  if (tokens.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有配对码</div>;
+function PairingTable({
+  tokens,
+  onRevoke,
+}: {
+  tokens: PairingToken[];
+  onRevoke: (token: string) => void;
+}) {
+  const columns: GridColDef<PairingToken>[] = [
+    {
+      field: "token",
+      headerName: "Token",
+      flex: 1,
+      minWidth: 240,
+      renderCell: (params) => (
+        <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+          {params.row.token}
+        </Typography>
+      ),
+    },
+    {
+      field: "accountID",
+      headerName: "账户",
+      width: 140,
+      valueFormatter: (v: string) => v.slice(0, 8),
+    },
+    {
+      field: "issuedBy",
+      headerName: "发起设备",
+      width: 160,
+      valueFormatter: (v: string) => v.slice(0, 10),
+    },
+    {
+      field: "expiresAt",
+      headerName: "过期",
+      width: 180,
+      valueFormatter: (v: string) => new Date(v).toLocaleString(),
+    },
+    {
+      field: "_actions",
+      headerName: "",
+      width: 60,
+      sortable: false,
+      renderCell: (params) => (
+        <Tooltip title="吊销">
+          <IconButton size="small" onClick={() => onRevoke(params.row.token)}>
+            <BlockIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
+  ];
   return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">Token</th>
-          <th className="px-3 py-2">账户</th>
-          <th className="px-3 py-2">发起设备</th>
-          <th className="px-3 py-2">过期</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {tokens.map((t) => (
-          <tr key={t.token} className="border-t border-outline-variant">
-            <td className="px-3 py-2 font-mono">{t.token}</td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{t.accountID.slice(0, 8)}</td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{t.issuedBy.slice(0, 10)}</td>
-            <td className="px-3 py-2">{new Date(t.expiresAt).toLocaleString()}</td>
-            <td className="px-3 py-2">
-              <IconButton icon="block" size="sm" onClick={() => onRevoke(t.token)} aria-label="吊销" />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Box sx={{ height: 600 }}>
+      <DataGrid
+        rows={tokens}
+        columns={columns}
+        getRowId={(r) => r.token}
+        density="compact"
+        pageSizeOptions={[25, 50, 100]}
+        initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+        localeText={{ noRowsLabel: "没有配对码" }}
+        disableRowSelectionOnClick
+      />
+    </Box>
   );
 }
 
@@ -341,48 +622,55 @@ function GrantDialog({
     onDone();
   }
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="发放额度"
-      actions={
-        <>
-          <Button variant="text" onClick={onClose}>取消</Button>
-          <Button onClick={submit} loading={busy}>发放</Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <div className="text-m3-body-s">账户：{account.displayName ?? account.accountID}</div>
-        <TextField
-          label="Credits"
-          type="number"
-          value={credits}
-          onChange={(e) => setCredits(Number(e.target.value) || 0)}
-        />
-        <div>
-          <div className="text-m3-label-m text-on-surface-variant">来源</div>
-          <div className="mt-1 flex gap-2">
-            {(["subscription", "trial", "offlineManual"] as const).map((s) => (
-              <Chip key={s} selected={source === s} onClick={() => setSource(s)}>
-                {s}
-              </Chip>
-            ))}
-          </div>
-        </div>
-        <TextField label="备注（可选）" value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>发放额度</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Typography variant="body2">
+            账户：{account.displayName ?? account.accountID}
+          </Typography>
+          <TextField
+            label="Credits"
+            type="number"
+            value={credits}
+            onChange={(e) => setCredits(Number(e.target.value) || 0)}
+          />
+          <Box>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              来源
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+              {(["subscription", "trial", "offlineManual"] as const).map((s) => (
+                <Chip
+                  key={s}
+                  label={s}
+                  color={source === s ? "primary" : "default"}
+                  variant={source === s ? "filled" : "outlined"}
+                  onClick={() => setSource(s)}
+                />
+              ))}
+            </Stack>
+          </Box>
+          <TextField
+            label="备注（可选）"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose}>
+          取消
+        </Button>
+        <Button onClick={submit} disabled={busy}>
+          {busy ? "处理中…" : "发放"}
+        </Button>
+      </DialogActions>
     </Dialog>
   );
 }
 
-function ActivationCodeDialog({
-  onClose,
-  onDone,
-}: {
-  onClose: () => void;
-  onDone: () => void;
-}) {
+function ActivationCodeDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [count, setCount] = React.useState(10);
   const [credits, setCredits] = React.useState(10000);
   const [plan, setPlan] = React.useState("");
@@ -398,22 +686,37 @@ function ActivationCodeDialog({
     onDone();
   }
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="批量生成激活码"
-      actions={
-        <>
-          <Button variant="text" onClick={onClose}>取消</Button>
-          <Button onClick={submit} loading={busy}>生成</Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <TextField label="数量" type="number" value={count} onChange={(e) => setCount(Number(e.target.value) || 0)} />
-        <TextField label="每个 credits" type="number" value={credits} onChange={(e) => setCredits(Number(e.target.value) || 0)} />
-        <TextField label="Plan ID（可选）" value={plan} onChange={(e) => setPlan(e.target.value)} />
-      </div>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>批量生成激活码</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <TextField
+            label="数量"
+            type="number"
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value) || 0)}
+          />
+          <TextField
+            label="每个 credits"
+            type="number"
+            value={credits}
+            onChange={(e) => setCredits(Number(e.target.value) || 0)}
+          />
+          <TextField
+            label="Plan ID（可选）"
+            value={plan}
+            onChange={(e) => setPlan(e.target.value)}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose}>
+          取消
+        </Button>
+        <Button onClick={submit} disabled={busy}>
+          {busy ? "处理中…" : "生成"}
+        </Button>
+      </DialogActions>
     </Dialog>
   );
 }

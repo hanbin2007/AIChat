@@ -1,5 +1,14 @@
-import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle, Button } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import Grid from "@mui/material/Grid2";
+import DownloadIcon from "@mui/icons-material/Download";
+import HealthAndSafetyIcon from "@mui/icons-material/HealthAndSafety";
+import { AppShell } from "@/components/shell/app-shell";
 import { config, configDiagnostics } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -7,60 +16,77 @@ export const dynamic = "force-dynamic";
 export default function AboutPage() {
   const diag = configDiagnostics();
   return (
-    <AdminShell title="About" breadcrumb={["System"]}>
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
-        <Card variant="elevated" className="p-6">
-          <CardTitle>AIChat Relay</CardTitle>
-          <p className="mt-2 text-m3-body-m text-on-surface-variant">
-            企业级 Next.js 中继网关。与 macOS AIChat Relay 在路径、SSE 事件名、Gemini 请求变换上完全兼容；
-            在此之上提供 Material Design 3 管理控制台、计费状态机、可视化策略编辑器，以及会话级对话重建。
-          </p>
-        </Card>
+    <AppShell title="About" breadcrumb={["System"]}>
+      <Box sx={{ maxWidth: 880, mx: "auto", p: 3 }}>
+        <Stack spacing={2}>
+          <Card sx={{ boxShadow: 1 }}>
+            <CardContent>
+              <Typography variant="h6">AIChat Relay</Typography>
+              <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
+                企业级 Next.js 中继网关。与 macOS AIChat Relay 在路径、SSE 事件名、Gemini 请求变换上完全兼容；
+                在此之上提供 Material Design 管理控制台、计费状态机、可视化策略编辑器，以及会话级对话重建。
+              </Typography>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>部署信息</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-1 gap-3 md:grid-cols-2 text-m3-body-m">
-              <Info label="版本" value="1.0.0" />
-              <Info label="Node" value={process.version} />
-              <Info label="监听端口" value={String(config.port)} />
-              <Info label="数据目录" value={config.dataDir} />
-              <Info label="Billing 模式" value={diag.billingMode} />
-              <Info label="Gemini key" value={diag.geminiConfigured ? "已配置" : "未配置"} />
-              <Info label="Bearer token" value={diag.bearerConfigured ? "已配置" : "未配置"} />
-              <Info label="Session secret" value={diag.sessionSecretConfigured ? "已配置" : "未配置"} />
-            </dl>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader title="部署信息" titleTypographyProps={{ variant: "subtitle1" }} />
+            <CardContent>
+              <Grid container spacing={2}>
+                <InfoCell label="版本" value="1.0.0" />
+                <InfoCell label="Node" value={process.version} />
+                <InfoCell label="监听端口" value={String(config.port)} />
+                <InfoCell label="数据目录" value={config.dataDir} />
+                <InfoCell label="Billing 模式" value={diag.billingMode} />
+                <InfoCell label="Gemini key" value={diag.geminiConfigured ? "已配置" : "未配置"} />
+                <InfoCell label="Bearer token" value={diag.bearerConfigured ? "已配置" : "未配置"} />
+                <InfoCell label="Session secret" value={diag.sessionSecretConfigured ? "已配置" : "未配置"} />
+              </Grid>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>诊断与支持</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/requests")}>
-              下载 requests JSON
-            </Button>
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/audit")}>
-              下载 audit JSON
-            </Button>
-            <Button variant="outlined" icon="health_and_safety" onClick={() => window.open("/api/health", "_blank")}>
-              /api/health
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    </AdminShell>
+          <Card>
+            <CardHeader title="诊断与支持" titleTypographyProps={{ variant: "subtitle1" }} />
+            <CardContent>
+              <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                <DownloadButton href="/api/admin/requests" label="下载 requests JSON" />
+                <DownloadButton href="/api/admin/audit" label="下载 audit JSON" />
+                <Button
+                  variant="outlined"
+                  startIcon={<HealthAndSafetyIcon />}
+                  component="a"
+                  href="/api/health"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  /api/health
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Stack>
+      </Box>
+    </AppShell>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function InfoCell({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt className="text-m3-label-m text-on-surface-variant">{label}</dt>
-      <dd className="mt-1 font-mono">{value}</dd>
-    </div>
+    <Grid size={{ xs: 12, md: 6 }}>
+      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontFamily: "monospace", mt: 0.25, wordBreak: "break-all" }}>
+        {value}
+      </Typography>
+    </Grid>
+  );
+}
+
+function DownloadButton({ href, label }: { href: string; label: string }) {
+  return (
+    <Button variant="outlined" startIcon={<DownloadIcon />} component="a" href={href} download>
+      {label}
+    </Button>
   );
 }

@@ -1,7 +1,14 @@
 "use client";
 import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle, Tabs } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Link from "@mui/material/Link";
+import { AppShell } from "@/components/shell/app-shell";
 
 type Lang = "curl" | "swift" | "node";
 
@@ -28,7 +35,8 @@ const ENDPOINTS = [
   {
     id: "chat",
     title: "POST /api/v1/chat/stream",
-    description: "SSE 流式对话端点。接受与 Swift relay 完全相同的请求体（messages[]、thinkingIntensity、systemPrompt 等）。",
+    description:
+      "SSE 流式对话端点。接受与 Swift relay 完全相同的请求体（messages[]、thinkingIntensity、systemPrompt 等）。",
     request: `curl -N http://localhost:8787/api/v1/chat/stream \\
   -H 'Authorization: Bearer <token>' \\
   -H 'Content-Type: application/json' \\
@@ -69,54 +77,93 @@ const ENDPOINTS = [
   },
 ];
 
+const codeBlockSx = {
+  mt: 1.5,
+  bgcolor: "action.hover",
+  borderRadius: 2,
+  p: 2,
+  fontFamily: "monospace",
+  fontSize: "0.8125rem",
+  whiteSpace: "pre",
+  overflow: "auto",
+} as const;
+
 export default function DocsPage() {
   const [lang, setLang] = React.useState<Lang>("curl");
   return (
-    <AdminShell title="API Docs" breadcrumb={["System"]}>
-      <div className="grid gap-4 p-6 lg:grid-cols-[220px_1fr]">
-        <aside className="space-y-1 lg:sticky lg:top-20 self-start">
-          {ENDPOINTS.map((e) => (
-            <a key={e.id} href={`#${e.id}`} className="state-layer block rounded-m3-sm px-3 py-2 text-m3-body-m">
-              {e.title}
-            </a>
-          ))}
-          <a href="#xcconfig" className="state-layer block rounded-m3-sm px-3 py-2 text-m3-body-m font-medium">
-            把 Watch 切到此 relay
-          </a>
-        </aside>
-        <div className="space-y-6">
-          <Card variant="filled" id="xcconfig" className="p-6">
-            <CardTitle>把 Watch 客户端切到此 relay</CardTitle>
-            <p className="mt-2 text-m3-body-m text-on-surface-variant">
-              打开 <code className="font-mono">Config/Secrets.xcconfig</code>，把下面这段原样贴进去（注意 xcconfig 中
-              <code className="font-mono">//</code> 会被当注释，所以 URL 用 <code className="font-mono">/$()/</code>）：
-            </p>
-            <pre className="mt-3 rounded-m3-sm bg-surface-container-high p-4 font-mono text-m3-body-s">
+    <AppShell title="API Docs" breadcrumb={["System"]}>
+      <Box sx={{ p: 3, display: "grid", gap: 3, gridTemplateColumns: { xs: "1fr", lg: "220px 1fr" } }}>
+        <Box component="aside" sx={{ position: { lg: "sticky" }, top: { lg: 80 }, alignSelf: "start" }}>
+          <Stack spacing={0.5}>
+            {ENDPOINTS.map((e) => (
+              <Link
+                key={e.id}
+                href={`#${e.id}`}
+                underline="hover"
+                color="inherit"
+                sx={{ px: 1.5, py: 1, borderRadius: 1, fontSize: "0.875rem" }}
+              >
+                {e.title}
+              </Link>
+            ))}
+            <Link
+              href="#xcconfig"
+              underline="hover"
+              color="inherit"
+              sx={{ px: 1.5, py: 1, borderRadius: 1, fontSize: "0.875rem", fontWeight: 500 }}
+            >
+              把 Watch 切到此 relay
+            </Link>
+          </Stack>
+        </Box>
+        <Stack spacing={3}>
+          <Card id="xcconfig" sx={{ bgcolor: "action.hover" }}>
+            <CardContent>
+              <Typography variant="h6">把 Watch 客户端切到此 relay</Typography>
+              <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
+                打开{" "}
+                <Typography component="code" sx={{ fontFamily: "monospace" }}>
+                  Config/Secrets.xcconfig
+                </Typography>
+                ，把下面这段原样贴进去（注意 xcconfig 中{" "}
+                <Typography component="code" sx={{ fontFamily: "monospace" }}>
+                  //
+                </Typography>{" "}
+                会被当注释，所以 URL 用{" "}
+                <Typography component="code" sx={{ fontFamily: "monospace" }}>
+                  /$()/
+                </Typography>
+                ）：
+              </Typography>
+              <Box component="pre" sx={codeBlockSx}>
 {`AI_BACKEND_MODE      = relay
 AI_RELAY_BASE_URL    = http:/$()/127.0.0.1:8787
 AI_RELAY_BEARER_TOKEN = <RELAY_BEARER_TOKEN>
 GEMINI_MODEL         = gemini-3-flash-preview`}
-            </pre>
+              </Box>
+            </CardContent>
           </Card>
 
-          <Tabs
-            value={lang}
-            onChange={setLang}
-            options={[
-              { value: "curl", label: "curl" },
-              { value: "swift", label: "Swift" },
-              { value: "node", label: "Node" },
-            ]}
-          />
+          <Tabs value={lang} onChange={(_, v) => setLang(v as Lang)}>
+            <Tab value="curl" label="curl" />
+            <Tab value="swift" label="Swift" />
+            <Tab value="node" label="Node" />
+          </Tabs>
           {ENDPOINTS.map((e) => (
-            <Card key={e.id} id={e.id} variant="outlined" className="p-6 scroll-mt-24">
-              <CardTitle>{e.title}</CardTitle>
-              <p className="mt-1 text-m3-body-m text-on-surface-variant">{e.description}</p>
-              <pre className="mt-3 overflow-auto rounded-m3-sm bg-surface-container-high p-4 font-mono text-m3-body-s thin-scroll">{e.request}</pre>
+            <Card key={e.id} id={e.id} sx={{ scrollMarginTop: 96 }}>
+              <CardContent>
+                <Typography variant="h6">{e.title}</Typography>
+                <Typography variant="body2" sx={{ mt: 0.5, color: "text.secondary" }}>
+                  {e.description}
+                </Typography>
+                <Box component="pre" sx={codeBlockSx}>
+                  {e.request}
+                </Box>
+              </CardContent>
             </Card>
           ))}
-        </div>
-      </div>
-    </AdminShell>
+        </Stack>
+      </Box>
+    </AppShell>
   );
 }

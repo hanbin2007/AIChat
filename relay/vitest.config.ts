@@ -24,7 +24,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/lib/**/*.ts", "src/components/m3/**/*.tsx"],
+      include: ["src/lib/**/*.ts", "src/components/**/*.tsx", "src/theme/**/*.ts"],
       exclude: ["src/lib/gemini/models.ts"],
     },
   },

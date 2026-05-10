@@ -1,95 +1,33 @@
-@import "../styles/m3-tokens.css";
+/* Minimal global resets — most resets come from MUI's CssBaseline. */
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Google Fonts (Material Symbols Rounded, Roboto Flex/Mono, Noto Sans SC) are
-   loaded via <link> in src/app/layout.tsx — a CSS @import here would land
-   after the @tailwind expansions and the browser would silently drop it. */
-
-@layer base {
-  html,
-  body {
-    @apply bg-surface text-on-surface antialiased;
-    font-family: var(--font-sans);
-  }
-  body {
-    @apply text-m3-body-m;
-    min-height: 100vh;
-  }
-  ::selection {
-    background: rgb(var(--md-sys-color-primary) / 0.24);
-  }
-  :focus-visible {
-    outline: 3px solid rgb(var(--md-sys-color-primary));
-    outline-offset: 2px;
-    border-radius: 4px;
-  }
-  .material-symbols-rounded {
-    font-family: "Material Symbols Rounded";
-    font-weight: 400;
-    font-style: normal;
-    font-size: 24px;
-    line-height: 1;
-    letter-spacing: normal;
-    text-transform: none;
-    display: inline-block;
-    white-space: nowrap;
-    word-wrap: normal;
-    direction: ltr;
-    -webkit-font-feature-settings: "liga";
-    -webkit-font-smoothing: antialiased;
-    user-select: none;
-  }
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
 }
 
-@layer components {
-  /* M3 state-layer helper: add to any interactive surface. */
-  .state-layer {
-    position: relative;
-    isolation: isolate;
-  }
-  .state-layer::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: currentColor;
-    opacity: 0;
-    transition: opacity 150ms cubic-bezier(0.2, 0, 0, 1);
-    z-index: 0;
-  }
-  .state-layer:hover::after {
-    opacity: var(--md-sys-state-hover);
-  }
-  .state-layer:focus-visible::after {
-    opacity: var(--md-sys-state-focus);
-  }
-  .state-layer:active::after {
-    opacity: var(--md-sys-state-pressed);
-  }
-  .state-layer > * {
-    position: relative;
-    z-index: 1;
-  }
-
-  /* Scrollbar — subtle, M3-coloured. */
-  .thin-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  .thin-scroll::-webkit-scrollbar-thumb {
-    background: rgb(var(--md-sys-color-outline-variant));
-    border-radius: 6px;
-  }
-  .thin-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
+#__next {
+  min-height: 100vh;
 }
 
-@keyframes m3-shimmer {
+/* Subtle scrollbar in WebKit browsers; Firefox uses scrollbar-color. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--mui-palette-divider, #c6c6d0);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+* {
+  scrollbar-color: var(--mui-palette-divider, #c6c6d0) transparent;
+}
+
+@keyframes relay-shimmer {
   0% {
     background-position: -400px 0;
   }
@@ -97,13 +35,13 @@
     background-position: 400px 0;
   }
 }
-.skeleton {
+.relay-skeleton {
   background: linear-gradient(
     90deg,
-    rgb(var(--md-sys-color-surface-container)) 0%,
-    rgb(var(--md-sys-color-surface-container-high)) 50%,
-    rgb(var(--md-sys-color-surface-container)) 100%
+    var(--mui-palette-action-hover, rgba(0, 0, 0, 0.04)) 0%,
+    var(--mui-palette-action-selected, rgba(0, 0, 0, 0.08)) 50%,
+    var(--mui-palette-action-hover, rgba(0, 0, 0, 0.04)) 100%
   );
   background-size: 800px 100%;
-  animation: m3-shimmer 1.4s linear infinite;
+  animation: relay-shimmer 1.4s linear infinite;
 }

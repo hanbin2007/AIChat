@@ -1,10 +1,31 @@
 "use client";
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Icon, IconButton, Switch, Button } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import Chip from "@mui/material/Chip";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Button from "@mui/material/Button";
+import LinearProgress from "@mui/material/LinearProgress";
+import Grid from "@mui/material/Grid2";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import Divider from "@mui/material/Divider";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ReplayIcon from "@mui/icons-material/Replay";
+import DownloadIcon from "@mui/icons-material/Download";
+import FlagIcon from "@mui/icons-material/Flag";
+import { AppShell } from "@/components/shell/app-shell";
 import type { Conversation } from "@/lib/store/conversations";
-import { cn } from "@/lib/cn";
 
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
@@ -20,9 +41,9 @@ export default function ConversationPage() {
 
   if (!conversation) {
     return (
-      <AdminShell title="Conversation">
-        <div className="p-6 text-on-surface-variant">加载中…</div>
-      </AdminShell>
+      <AppShell title="Conversation">
+        <Box sx={{ p: 3, color: "text.secondary" }}>加载中…</Box>
+      </AppShell>
     );
   }
 
@@ -33,120 +54,180 @@ export default function ConversationPage() {
   }
 
   return (
-    <AdminShell
+    <AppShell
       title={conversation.title}
       breadcrumb={["Relay", "Requests", "Conversations"]}
       actions={
-        <div className="flex items-center gap-2">
-          <Switch checked={reveal} onChange={() => setReveal((v) => !v)} label="Reveal" />
-          <IconButton icon="arrow_back" onClick={() => router.back()} aria-label="返回" />
-        </div>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <FormControlLabel
+            control={<Switch checked={reveal} onChange={() => setReveal((v) => !v)} />}
+            label="Reveal"
+          />
+          <Tooltip title="返回">
+            <IconButton onClick={() => router.back()} aria-label="返回">
+              <ArrowBackIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       }
     >
-      <div className="space-y-4 p-6 pb-24">
-        <Card variant="elevated">
-          <CardHeader>
-            <CardTitle>会话概览</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-6">
-            <Stat label="Turns" value={conversation.turnCount.toString()} />
-            <Stat label="Tokens in / out" value={`${formatNumber(conversation.totalInputTokens)} / ${formatNumber(conversation.totalOutputTokens)}`} />
-            <Stat label="Credits" value={formatNumber(conversation.totalCredits)} />
-            <Stat label="Models" value={conversation.modelsUsed.join(", ")} />
-            <Stat label="Device" value={`${conversation.devicePlatform ?? "?"} · ${conversation.deviceID?.slice(0, 10) ?? "—"}`} />
-            <Stat label="Range" value={`${new Date(conversation.firstAt).toLocaleString()} → ${new Date(conversation.lastAt).toLocaleString()}`} />
-            {conversation.hasErrors && <Badge tone="error">has errors</Badge>}
-            {conversation.confidence === "low" && <Badge tone="warn">推断归属</Badge>}
-          </CardContent>
-        </Card>
+      <Box sx={{ p: 3, pb: 12 }}>
+        <Stack spacing={2}>
+          <Card sx={{ boxShadow: 1 }}>
+            <CardHeader title="会话概览" titleTypographyProps={{ variant: "subtitle1" }} />
+            <CardContent>
+              <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+                <Stat label="Turns" value={conversation.turnCount.toString()} />
+                <Stat
+                  label="Tokens in / out"
+                  value={`${formatNumber(conversation.totalInputTokens)} / ${formatNumber(conversation.totalOutputTokens)}`}
+                />
+                <Stat label="Credits" value={formatNumber(conversation.totalCredits)} />
+                <Stat label="Models" value={conversation.modelsUsed.join(", ")} />
+                <Stat
+                  label="Device"
+                  value={`${conversation.devicePlatform ?? "?"} · ${conversation.deviceID?.slice(0, 10) ?? "—"}`}
+                />
+                <Stat
+                  label="Range"
+                  value={`${new Date(conversation.firstAt).toLocaleString()} → ${new Date(conversation.lastAt).toLocaleString()}`}
+                />
+                {conversation.hasErrors && <Chip color="error" label="has errors" />}
+                {conversation.confidence === "low" && <Chip color="warning" label="推断归属" />}
+              </Stack>
+            </CardContent>
+          </Card>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="space-y-4">
-            {conversation.turns.map((turn, i) => (
-              <article key={turn.id} className="space-y-2">
-                {turn.userText && (
-                  <Bubble role="user" reveal={reveal}>
-                    {turn.userText}
-                  </Bubble>
-                )}
-                {turn.thoughtText && (
-                  <ThoughtBlock text={turn.thoughtText} reveal={reveal} />
-                )}
-                {turn.assistantText && (
-                  <Bubble role="assistant" reveal={reveal}>
-                    {turn.assistantText}
-                  </Bubble>
-                )}
-                {turn.error && (
-                  <Bubble role="error" reveal={true}>
-                    {turn.error}
-                  </Bubble>
-                )}
-                <div className="ml-1 flex flex-wrap items-center gap-2 text-m3-label-s text-on-surface-variant">
-                  <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
-                  <span>·</span>
-                  <span>{turn.modelID ?? "—"}</span>
-                  {turn.thinkingIntensity && (
-                    <>
-                      <span>·</span>
-                      <span>{turn.thinkingIntensity}</span>
-                    </>
-                  )}
-                  <span>·</span>
-                  <span>{turn.inputTokens ?? 0}→{turn.outputTokens ?? 0} tokens</span>
-                  <span>·</span>
-                  <span>{turn.credits ?? 0} credits</span>
-                  <span>·</span>
-                  <span>{turn.latencyMs ?? 0}ms</span>
-                  {turn.finishReason && (
-                    <>
-                      <span>·</span>
-                      <span>{turn.finishReason}</span>
-                    </>
-                  )}
-                  {i < conversation.turns.length - 1 && (
-                    <span className="mx-2 h-px flex-1 bg-outline-variant" />
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, lg: 8 }}>
+              <Stack spacing={2}>
+                {conversation.turns.map((turn, i) => (
+                  <Box component="article" key={turn.id}>
+                    <Stack spacing={1}>
+                      {turn.userText && (
+                        <Bubble role="user" reveal={reveal}>
+                          {turn.userText}
+                        </Bubble>
+                      )}
+                      {turn.thoughtText && <ThoughtBlock text={turn.thoughtText} reveal={reveal} />}
+                      {turn.assistantText && (
+                        <Bubble role="assistant" reveal={reveal}>
+                          {turn.assistantText}
+                        </Bubble>
+                      )}
+                      {turn.error && (
+                        <Bubble role="error" reveal>
+                          {turn.error}
+                        </Bubble>
+                      )}
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center" sx={{ ml: 1 }}>
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          {new Date(turn.timestamp).toLocaleTimeString()}
+                        </Typography>
+                        <DotSep />
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          {turn.modelID ?? "—"}
+                        </Typography>
+                        {turn.thinkingIntensity && (
+                          <>
+                            <DotSep />
+                            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                              {turn.thinkingIntensity}
+                            </Typography>
+                          </>
+                        )}
+                        <DotSep />
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          {turn.inputTokens ?? 0}→{turn.outputTokens ?? 0} tokens
+                        </Typography>
+                        <DotSep />
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          {turn.credits ?? 0} credits
+                        </Typography>
+                        <DotSep />
+                        <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                          {turn.latencyMs ?? 0}ms
+                        </Typography>
+                        {turn.finishReason && (
+                          <>
+                            <DotSep />
+                            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                              {turn.finishReason}
+                            </Typography>
+                          </>
+                        )}
+                      </Stack>
+                      {i < conversation.turns.length - 1 && <Divider sx={{ mt: 2 }} />}
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            </Grid>
 
-          <aside className="space-y-3 lg:sticky lg:top-20 self-start">
-            <Card variant="filled" className="p-4">
-              <div className="text-m3-label-m text-on-surface-variant">Model breakdown</div>
-              <ul className="mt-2 space-y-2 text-m3-body-s">
-                {Array.from(modelBreakdown.entries()).map(([m, credits]) => {
-                  const total = conversation.totalCredits || 1;
-                  return (
-                    <li key={m}>
-                      <div className="flex justify-between">
-                        <span>{m}</span>
-                        <span className="text-on-surface-variant">{formatNumber(credits)}</span>
-                      </div>
-                      <div className="mt-1 h-1 rounded-full bg-surface-container-highest">
-                        <div
-                          className="h-1 rounded-full bg-primary"
-                          style={{ width: `${Math.round((credits / total) * 100)}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
-            <Card variant="filled" className="p-4">
-              <div className="text-m3-label-m text-on-surface-variant">操作</div>
-              <div className="mt-3 flex flex-col gap-2">
-                <Button variant="outlined" icon="replay">Replay in Playground</Button>
-                <Button variant="outlined" icon="download">Export JSON</Button>
-                <Button variant="outlined" icon="flag">Flag for review</Button>
-              </div>
-            </Card>
-          </aside>
-        </div>
-      </div>
-    </AdminShell>
+            <Grid size={{ xs: 12, lg: 4 }}>
+              <Box sx={{ position: { lg: "sticky" }, top: { lg: 80 } }}>
+                <Stack spacing={2}>
+                  <Card sx={{ bgcolor: "action.hover" }}>
+                    <CardContent>
+                      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                        Model breakdown
+                      </Typography>
+                      <Stack spacing={1.5} sx={{ mt: 1 }}>
+                        {Array.from(modelBreakdown.entries()).map(([m, credits]) => {
+                          const total = conversation.totalCredits || 1;
+                          const pct = Math.round((credits / total) * 100);
+                          return (
+                            <Box key={m}>
+                              <Stack direction="row" justifyContent="space-between">
+                                <Typography variant="body2">{m}</Typography>
+                                <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                                  {formatNumber(credits)}
+                                </Typography>
+                              </Stack>
+                              <LinearProgress
+                                variant="determinate"
+                                value={pct}
+                                sx={{ mt: 0.5, height: 4, borderRadius: 2 }}
+                              />
+                            </Box>
+                          );
+                        })}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                  <Card sx={{ bgcolor: "action.hover" }}>
+                    <CardContent>
+                      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                        操作
+                      </Typography>
+                      <Stack spacing={1} sx={{ mt: 1.5 }}>
+                        <Button variant="outlined" startIcon={<ReplayIcon />}>
+                          Replay in Playground
+                        </Button>
+                        <Button variant="outlined" startIcon={<DownloadIcon />}>
+                          Export JSON
+                        </Button>
+                        <Button variant="outlined" startIcon={<FlagIcon />}>
+                          Flag for review
+                        </Button>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Stack>
+              </Box>
+            </Grid>
+          </Grid>
+        </Stack>
+      </Box>
+    </AppShell>
+  );
+}
+
+function DotSep() {
+  return (
+    <Typography variant="caption" sx={{ color: "text.disabled" }}>
+      ·
+    </Typography>
   );
 }
 
@@ -159,42 +240,76 @@ function Bubble({
   reveal: boolean;
   children: React.ReactNode;
 }) {
-  const content = reveal ? children : typeof children === "string" ? redactHints(children) : children;
+  const content = reveal
+    ? children
+    : typeof children === "string"
+      ? redactHints(children)
+      : children;
+  const bg =
+    role === "user"
+      ? "primary.main"
+      : role === "error"
+        ? "error.light"
+        : "action.hover";
+  const fg =
+    role === "user"
+      ? "primary.contrastText"
+      : role === "error"
+        ? "error.contrastText"
+        : "text.primary";
   return (
-    <div className={cn("flex", role === "user" ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
-          role === "user" && "rounded-br-m3-xs bg-primary-container text-on-primary-container",
-          role === "assistant" && "rounded-bl-m3-xs bg-surface-container text-on-surface",
-          role === "error" && "rounded-bl-m3-xs bg-error-container text-on-error-container",
-        )}
+    <Box sx={{ display: "flex", justifyContent: role === "user" ? "flex-end" : "flex-start" }}>
+      <Box
+        sx={{
+          maxWidth: 640,
+          whiteSpace: "pre-wrap",
+          px: 2,
+          py: 1.5,
+          borderRadius: 2,
+          bgcolor: bg,
+          color: fg,
+          borderBottomRightRadius: role === "user" ? 4 : 16,
+          borderBottomLeftRadius: role === "user" ? 16 : 4,
+        }}
       >
         {content}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 }
 
 function ThoughtBlock({ text, reveal }: { text: string; reveal: boolean }) {
-  const [open, setOpen] = React.useState(false);
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[640px] rounded-m3-md border-l-2 border-tertiary bg-surface-container-lowest px-3 py-2 text-m3-body-s text-on-surface-variant">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 text-m3-label-m"
-        >
-          <Icon name={open ? "expand_less" : "expand_more"} size={16} />
-          💭 Thought · {text.length.toLocaleString()} chars
-        </button>
-        {open && (
-          <div className="mt-2 whitespace-pre-wrap italic">
+    <Box sx={{ display: "flex", justifyContent: "flex-start" }}>
+      <Accordion
+        disableGutters
+        elevation={0}
+        sx={{
+          maxWidth: 640,
+          width: "100%",
+          bgcolor: "background.paper",
+          borderLeft: 2,
+          borderColor: "secondary.main",
+          borderRadius: 2,
+          "&:before": { display: "none" },
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon fontSize="small" />} sx={{ minHeight: 0 }}>
+          <Typography variant="caption" sx={{ color: "text.secondary" }}>
+            💭 Thought · {text.length.toLocaleString()} chars
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography
+            variant="caption"
+            component="div"
+            sx={{ whiteSpace: "pre-wrap", fontStyle: "italic", color: "text.secondary" }}
+          >
             {reveal ? text : redactHints(text)}
-          </div>
-        )}
-      </div>
-    </div>
+          </Typography>
+        </AccordionDetails>
+      </Accordion>
+    </Box>
   );
 }
 
@@ -206,10 +321,14 @@ function redactHints(text: React.ReactNode): string {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-m3-label-m text-on-surface-variant">{label}</div>
-      <div className="mt-1 text-m3-title-s text-on-surface">{value}</div>
-    </div>
+    <Box>
+      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+        {label}
+      </Typography>
+      <Typography variant="subtitle2" sx={{ mt: 0.25 }}>
+        {value}
+      </Typography>
+    </Box>
   );
 }
 

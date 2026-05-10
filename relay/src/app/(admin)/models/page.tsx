@@ -1,56 +1,84 @@
 "use client";
 import * as React from "react";
 import Link from "next/link";
-import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle, Badge, Icon } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
+import Grid from "@mui/material/Grid2";
+import MuiLink from "@mui/material/Link";
+import PsychologyIcon from "@mui/icons-material/Psychology";
+import TravelExploreIcon from "@mui/icons-material/TravelExplore";
+import CodeIcon from "@mui/icons-material/Code";
+import HeadphonesIcon from "@mui/icons-material/Headphones";
+import ImageIcon from "@mui/icons-material/Image";
+import { AppShell } from "@/components/shell/app-shell";
 import { DEFAULT_MODELS } from "@/lib/gemini/models";
 
-const CAPABILITY_ICONS: Record<string, { icon: string; label: string }> = {
-  thinking: { icon: "psychology", label: "Thinking" },
-  search: { icon: "travel_explore", label: "Search" },
-  codeExecution: { icon: "code", label: "Code" },
-  audio: { icon: "headphones", label: "Audio" },
-  vision: { icon: "image", label: "Vision" },
+const CAPABILITY_META: Record<string, { Icon: React.ComponentType<{ fontSize?: "small" | "inherit" }>; label: string }> = {
+  thinking: { Icon: PsychologyIcon, label: "Thinking" },
+  search: { Icon: TravelExploreIcon, label: "Search" },
+  codeExecution: { Icon: CodeIcon, label: "Code" },
+  audio: { Icon: HeadphonesIcon, label: "Audio" },
+  vision: { Icon: ImageIcon, label: "Vision" },
 };
 
 export default function ModelsPage() {
   return (
-    <AdminShell title="Models" breadcrumb={["Relay"]}>
-      <div className="p-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <AppShell title="Models" breadcrumb={["Relay"]}>
+      <Box sx={{ p: 3 }}>
+        <Grid container spacing={2}>
           {DEFAULT_MODELS.map((m) => (
-            <Card key={m.id} variant="outlined" className="p-5">
-              <CardTitle>{m.displayName}</CardTitle>
-              <div className="mt-1 font-mono text-m3-label-m text-on-surface-variant">{m.id}</div>
-              <div className="mt-1 text-m3-body-s text-on-surface-variant">family: {m.family}</div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {Object.entries(m.capabilities).map(([k, enabled]) =>
-                  enabled ? (
-                    <span
-                      key={k}
-                      className="inline-flex items-center gap-1 rounded-full bg-surface-container-highest px-3 py-1 text-m3-label-s"
-                    >
-                      <Icon name={CAPABILITY_ICONS[k].icon} size={16} />
-                      {CAPABILITY_ICONS[k].label}
-                    </span>
-                  ) : null,
-                )}
-              </div>
-              <div className="mt-4">
-                <div className="text-m3-label-m text-on-surface-variant">支持的思考强度</div>
-                <div className="mt-1 flex gap-2">
-                  {m.supportedIntensities.map((i) => <Badge key={i}>{i}</Badge>)}
-                </div>
-              </div>
-              <div className="mt-4 border-t border-outline-variant pt-3">
-                <Link href="/billing" className="text-m3-label-l text-primary hover:underline">
-                  在 Billing Studio 中编辑计价 →
-                </Link>
-              </div>
-            </Card>
+            <Grid key={m.id} size={{ xs: 12, md: 6, xl: 4 }}>
+              <Card sx={{ height: "100%" }}>
+                <CardContent>
+                  <Typography variant="h6">{m.displayName}</Typography>
+                  <Typography variant="caption" sx={{ fontFamily: "monospace", color: "text.secondary", display: "block", mt: 0.5 }}>
+                    {m.id}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
+                    family: {m.family}
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+                    {Object.entries(m.capabilities).map(([k, enabled]) => {
+                      if (!enabled) return null;
+                      const meta = CAPABILITY_META[k];
+                      if (!meta) return null;
+                      const { Icon, label } = meta;
+                      return (
+                        <Chip
+                          key={k}
+                          size="small"
+                          variant="outlined"
+                          icon={<Icon fontSize="small" />}
+                          label={label}
+                        />
+                      );
+                    })}
+                  </Stack>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                      支持的思考强度
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+                      {m.supportedIntensities.map((i) => (
+                        <Chip key={i} size="small" label={i} />
+                      ))}
+                    </Stack>
+                  </Box>
+                  <Divider sx={{ my: 2 }} />
+                  <MuiLink component={Link} href="/billing" variant="body2" underline="hover">
+                    在 Billing Studio 中编辑计价 →
+                  </MuiLink>
+                </CardContent>
+              </Card>
+            </Grid>
           ))}
-        </div>
-      </div>
-    </AdminShell>
+        </Grid>
+      </Box>
+    </AppShell>
   );
 }

@@ -1,11 +1,37 @@
 "use client";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Chip, Segmented, TextField, Icon, IconButton } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
+import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Drawer from "@mui/material/Drawer";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Avatar from "@mui/material/Avatar";
+import Divider from "@mui/material/Divider";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import BoltIcon from "@mui/icons-material/Bolt";
+import HistoryIcon from "@mui/icons-material/History";
+import ChatIcon from "@mui/icons-material/Chat";
+import SearchIcon from "@mui/icons-material/Search";
+import PauseIcon from "@mui/icons-material/Pause";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import CloseIcon from "@mui/icons-material/Close";
+import WatchIcon from "@mui/icons-material/Watch";
+import PhoneIphoneIcon from "@mui/icons-material/PhoneIphone";
+import ComputerIcon from "@mui/icons-material/Computer";
+import { AppShell } from "@/components/shell/app-shell";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { Conversation } from "@/lib/store/conversations";
-import { cn } from "@/lib/cn";
 
 type View = "live" | "history" | "conversations";
 type Level = "info" | "success" | "warning" | "error";
@@ -37,7 +63,9 @@ export default function RequestsPage() {
       const params = new URLSearchParams();
       if (hasErrorsOnly) params.set("hasErrors", "1");
       if (query) params.set("q", query);
-      fetch(`/api/admin/conversations?${params}`).then((r) => r.json()).then((d) => setConversations(d.conversations));
+      fetch(`/api/admin/conversations?${params}`)
+        .then((r) => r.json())
+        .then((d) => setConversations(d.conversations));
     }
   }, [view, hasErrorsOnly, query]);
 
@@ -48,7 +76,9 @@ export default function RequestsPage() {
       try {
         const entry = JSON.parse((evt as MessageEvent).data) as ActivityEntry;
         setEntries((prev) => [entry, ...prev].slice(0, 500));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     });
     return () => es.close();
   }, [view, paused]);
@@ -70,119 +100,166 @@ export default function RequestsPage() {
     return true;
   });
 
+  const columns: GridColDef<ActivityEntry>[] = [
+    {
+      field: "timestamp",
+      headerName: "时间",
+      width: 110,
+      valueFormatter: (v: string) => new Date(v).toLocaleTimeString(),
+    },
+    {
+      field: "path",
+      headerName: "端点",
+      width: 220,
+      renderCell: (params) => (
+        <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+          {params.row.path ?? "—"}
+        </Typography>
+      ),
+    },
+    {
+      field: "statusCode",
+      headerName: "状态",
+      width: 100,
+      renderCell: (params) => (
+        <Chip
+          size="small"
+          color={
+            params.row.level === "error"
+              ? "error"
+              : params.row.level === "warning"
+                ? "warning"
+                : "success"
+          }
+          label={params.row.statusCode ?? params.row.level}
+        />
+      ),
+    },
+    {
+      field: "latencyMs",
+      headerName: "延迟",
+      width: 80,
+      valueGetter: (_v, row) => `${row.latencyMs ?? 0}ms`,
+    },
+    {
+      field: "tokens",
+      headerName: "Tokens",
+      width: 140,
+      renderCell: (params) =>
+        `${(params.row.inputTokens ?? 0).toLocaleString()} / ${(params.row.outputTokens ?? 0).toLocaleString()}`,
+    },
+    { field: "modelID", headerName: "模型", width: 180, valueGetter: (_v, row) => row.modelID ?? "—" },
+    {
+      field: "deviceID",
+      headerName: "设备",
+      width: 120,
+      valueGetter: (_v, row) => row.deviceID?.slice(0, 10) ?? "—",
+    },
+    {
+      field: "credits",
+      headerName: "Credits",
+      width: 100,
+      valueGetter: (_v, row) => row.settledCredits ?? row.reservedCredits ?? "—",
+    },
+  ];
+
   return (
-    <AdminShell
+    <AppShell
       title="Requests"
       breadcrumb={["Relay"]}
       actions={
-        view === "live" && (
-          <IconButton
-            icon={paused ? "play_arrow" : "pause"}
-            onClick={() => setPaused((p) => !p)}
-            aria-label={paused ? "恢复" : "暂停"}
-          />
-        )
+        view === "live" ? (
+          <Tooltip title={paused ? "恢复" : "暂停"}>
+            <IconButton onClick={() => setPaused((p) => !p)} aria-label={paused ? "恢复" : "暂停"}>
+              {paused ? <PlayArrowIcon /> : <PauseIcon />}
+            </IconButton>
+          </Tooltip>
+        ) : null
       }
     >
-      <div className="space-y-4 p-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "live", label: "Live", icon: "bolt" },
-              { value: "history", label: "History", icon: "history" },
-              { value: "conversations", label: "Conversations", icon: "chat" },
-            ]}
-          />
-          <div className="flex-1 min-w-64 max-w-md">
-            <TextField
-              leading="search"
-              placeholder="搜索路径 / 模型 / 账户 / 消息"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              variant="filled"
-            />
-          </div>
-        </div>
+      <Box sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={view}
+              onChange={(_, v) => v && setView(v as View)}
+            >
+              <ToggleButton value="live">
+                <BoltIcon fontSize="small" sx={{ mr: 0.5 }} /> Live
+              </ToggleButton>
+              <ToggleButton value="history">
+                <HistoryIcon fontSize="small" sx={{ mr: 0.5 }} /> History
+              </ToggleButton>
+              <ToggleButton value="conversations">
+                <ChatIcon fontSize="small" sx={{ mr: 0.5 }} /> Conversations
+              </ToggleButton>
+            </ToggleButtonGroup>
+            <Box sx={{ flex: 1, minWidth: 256, maxWidth: 480 }}>
+              <TextField
+                size="small"
+                placeholder="搜索路径 / 模型 / 账户 / 消息"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+          </Stack>
 
-        {view !== "conversations" && (
-          <div className="flex flex-wrap gap-2">
-            {(["info", "success", "warning", "error"] as Level[]).map((lvl) => (
+          {view !== "conversations" && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {(["info", "success", "warning", "error"] as Level[]).map((lvl) => (
+                <Chip
+                  key={lvl}
+                  label={lvl}
+                  color={levels[lvl] ? "primary" : "default"}
+                  variant={levels[lvl] ? "filled" : "outlined"}
+                  onClick={() => setLevels((p) => ({ ...p, [lvl]: !p[lvl] }))}
+                />
+              ))}
               <Chip
-                key={lvl}
-                selected={levels[lvl]}
-                onClick={() => setLevels((p) => ({ ...p, [lvl]: !p[lvl] }))}
-              >
-                {lvl}
-              </Chip>
-            ))}
-            <Chip selected={hasErrorsOnly} onClick={() => setHasErrorsOnly((v) => !v)}>
-              仅错误
-            </Chip>
-          </div>
-        )}
+                label="仅错误"
+                color={hasErrorsOnly ? "error" : "default"}
+                variant={hasErrorsOnly ? "filled" : "outlined"}
+                onClick={() => setHasErrorsOnly((v) => !v)}
+              />
+            </Stack>
+          )}
 
-        {view === "conversations" ? (
-          <ConversationList conversations={conversations} onOpen={(id) => router.push(`/requests/conversations/${id}`)} />
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-hidden rounded-m3-md">
-                <table className="w-full text-left text-m3-body-s">
-                  <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-                    <tr>
-                      <th className="px-3 py-2">时间</th>
-                      <th className="px-3 py-2">端点</th>
-                      <th className="px-3 py-2">状态</th>
-                      <th className="px-3 py-2">延迟</th>
-                      <th className="px-3 py-2">Tokens</th>
-                      <th className="px-3 py-2">模型</th>
-                      <th className="px-3 py-2">设备</th>
-                      <th className="px-3 py-2">Credits</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.length === 0 && (
-                      <tr>
-                        <td colSpan={8} className="px-3 py-8 text-center text-on-surface-variant">
-                          没有匹配的请求
-                        </td>
-                      </tr>
-                    )}
-                    {filtered.map((e) => (
-                      <tr
-                        key={e.id}
-                        onClick={() => setSelected(e)}
-                        className="cursor-pointer border-t border-outline-variant hover:bg-surface-container-low"
-                      >
-                        <td className="px-3 py-2 text-on-surface-variant">
-                          {new Date(e.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className="px-3 py-2 font-mono">{e.path ?? "—"}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={e.level === "error" ? "error" : e.level === "warning" ? "warn" : "success"}>
-                            {e.statusCode ?? e.level}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2">{e.latencyMs ?? 0}ms</td>
-                        <td className="px-3 py-2">
-                          {(e.inputTokens ?? 0).toLocaleString()} / {(e.outputTokens ?? 0).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2">{e.modelID ?? "—"}</td>
-                        <td className="px-3 py-2">{e.deviceID?.slice(0, 10) ?? "—"}</td>
-                        <td className="px-3 py-2">{e.settledCredits ?? e.reservedCredits ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
-      {selected && <DetailDrawer entry={selected} onClose={() => setSelected(null)} />}
-    </AdminShell>
+          {view === "conversations" ? (
+            <ConversationList
+              conversations={conversations}
+              onOpen={(id) => router.push(`/requests/conversations/${id}`)}
+            />
+          ) : (
+            <Card>
+              <Box sx={{ height: 640 }}>
+                <DataGrid
+                  rows={filtered}
+                  columns={columns}
+                  getRowId={(r) => r.id}
+                  density="compact"
+                  pageSizeOptions={[25, 50, 100]}
+                  initialState={{ pagination: { paginationModel: { pageSize: 50 } } }}
+                  onRowClick={(p) => setSelected(p.row as ActivityEntry)}
+                  localeText={{ noRowsLabel: "没有匹配的请求" }}
+                  disableRowSelectionOnClick
+                  sx={{ "& .MuiDataGrid-row": { cursor: "pointer" } }}
+                />
+              </Box>
+            </Card>
+          )}
+        </Stack>
+      </Box>
+      <DetailDrawer entry={selected} onClose={() => setSelected(null)} />
+    </AppShell>
   );
 }
 
@@ -195,153 +272,246 @@ function ConversationList({
 }) {
   if (conversations.length === 0) {
     return (
-      <Card className="p-8 text-center text-on-surface-variant">
-        <Icon name="chat" size={36} className="opacity-50" />
-        <div className="mt-3">还没有可重建的会话</div>
-        <div className="text-m3-body-s">客户端发送第一次 /v1/chat/stream 后，这里就会出现</div>
+      <Card>
+        <Stack alignItems="center" sx={{ py: 6, color: "text.secondary" }}>
+          <ChatIcon sx={{ fontSize: 36, opacity: 0.5 }} />
+          <Typography variant="body2" sx={{ mt: 1.5 }}>
+            还没有可重建的会话
+          </Typography>
+          <Typography variant="caption">
+            客户端发送第一次 /v1/chat/stream 后，这里就会出现
+          </Typography>
+        </Stack>
       </Card>
     );
   }
   return (
     <Card>
-      <CardContent className="p-0">
-        <ul className="divide-y divide-outline-variant">
-          {conversations.map((c) => (
-            <li key={c.id}>
-              <button
+      <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+        <Stack divider={<Divider />}>
+          {conversations.map((c) => {
+            const PlatformIcon =
+              c.devicePlatform === "watch"
+                ? WatchIcon
+                : c.devicePlatform === "iPhone"
+                  ? PhoneIphoneIcon
+                  : ComputerIcon;
+            return (
+              <Box
+                key={c.id}
+                component="button"
                 onClick={() => onOpen(c.id)}
-                className="state-layer flex w-full items-start gap-3 px-4 py-4 text-left"
+                sx={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 1.5,
+                  p: 2,
+                  width: "100%",
+                  border: 0,
+                  bgcolor: "transparent",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
               >
-                <span className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-primary-container text-on-primary-container">
-                  <Icon name={c.devicePlatform === "watch" ? "watch" : c.devicePlatform === "iPhone" ? "phone_iphone" : "computer"} size={22} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate text-m3-title-s">{c.title}</h3>
+                <Avatar sx={{ bgcolor: "primary.main", color: "primary.contrastText" }}>
+                  <PlatformIcon />
+                </Avatar>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Typography variant="subtitle2" noWrap sx={{ minWidth: 0 }}>
+                      {c.title}
+                    </Typography>
                     {c.confidence === "low" && (
-                      <span
-                        title="推断归属"
-                        className="h-2 w-2 rounded-full bg-on-surface-variant"
-                      />
+                      <Tooltip title="推断归属">
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            bgcolor: "text.secondary",
+                          }}
+                        />
+                      </Tooltip>
                     )}
-                    {c.hasErrors && <Badge tone="error">has errors</Badge>}
-                    {c.hasImages && <Badge tone="info">images</Badge>}
-                    {c.hasAudio && <Badge tone="info">audio</Badge>}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-m3-body-s text-on-surface-variant">
-                    <span>{c.accountID?.slice(0, 8) ?? "—"}</span>
-                    <span>·</span>
-                    <span>{c.turnCount} turns</span>
-                    <span>·</span>
-                    <span>{c.modelsUsed.join(", ")}</span>
-                    <span>·</span>
-                    <span>{formatNumber(c.totalCredits)} credits</span>
-                  </div>
-                </div>
-                <span className="ml-auto shrink-0 text-m3-body-s text-on-surface-variant">
+                    {c.hasErrors && <Chip size="small" color="error" label="has errors" />}
+                    {c.hasImages && <Chip size="small" color="info" label="images" />}
+                    {c.hasAudio && <Chip size="small" color="info" label="audio" />}
+                  </Stack>
+                  <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.5 }}>
+                    {c.accountID?.slice(0, 8) ?? "—"} · {c.turnCount} turns ·{" "}
+                    {c.modelsUsed.join(", ")} · {formatNumber(c.totalCredits)} credits
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ color: "text.secondary", flexShrink: 0 }}>
                   {relativeTime(c.lastAt)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+                </Typography>
+              </Box>
+            );
+          })}
+        </Stack>
       </CardContent>
     </Card>
   );
 }
 
-function DetailDrawer({ entry, onClose }: { entry: ActivityEntry; onClose: () => void }) {
+function DetailDrawer({ entry, onClose }: { entry: ActivityEntry | null; onClose: () => void }) {
   const [tab, setTab] = React.useState<"request" | "response" | "stream">("request");
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-scrim/40" onClick={onClose}>
-      <div
-        className="h-full w-full max-w-lg overflow-y-auto bg-surface-container-low shadow-2xl thin-scroll"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 flex items-center gap-3 border-b border-outline-variant bg-surface-container p-4">
-          <IconButton icon="close" onClick={onClose} />
-          <div className="flex-1 min-w-0">
-            <div className="truncate text-m3-title-s">{entry.message}</div>
-            <div className="text-m3-body-s text-on-surface-variant">
-              {entry.method} {entry.path} · {entry.statusCode}
-            </div>
-          </div>
-        </div>
-        <div className="flex gap-1 border-b border-outline-variant px-2">
-          {(["request", "response", "stream"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "state-layer rounded-t-m3-xs px-4 py-2 text-m3-label-l",
-                tab === t ? "text-primary" : "text-on-surface-variant",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="p-4">
-          {tab === "request" && (
-            <div className="space-y-3">
-              <InfoRow label="requestId" value={entry.id} />
-              <InfoRow label="timestamp" value={entry.timestamp} />
-              <InfoRow label="remote" value={entry.remoteAddress ?? "—"} />
-              <InfoRow label="account" value={entry.accountID ?? "—"} />
-              <InfoRow label="device" value={entry.deviceID ?? "—"} />
-              <InfoRow label="model" value={entry.modelID ?? "—"} />
-              <CodeBlock content={JSON.stringify(entry.requestBody ?? null, null, 2)} />
-            </div>
-          )}
-          {tab === "response" && (
-            <div className="space-y-3">
-              <InfoRow label="status" value={String(entry.statusCode ?? "—")} />
-              <InfoRow label="finishReason" value={entry.finishReason ?? "—"} />
-              <InfoRow label="latency" value={`${entry.latencyMs ?? 0}ms`} />
-              <InfoRow label="tokens" value={`${entry.inputTokens ?? 0} / ${entry.outputTokens ?? 0}`} />
-              <InfoRow label="credits" value={`${entry.reservedCredits ?? 0} → ${entry.settledCredits ?? 0}`} />
-              {entry.responseSummary && (
-                <div>
-                  <div className="text-m3-label-m text-on-surface-variant">response preview</div>
-                  <div className="mt-1 rounded-m3-sm bg-surface-container-high p-3 text-m3-body-m">
-                    {entry.responseSummary}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {tab === "stream" && (
-            <div className="space-y-2">
-              {(entry.events ?? []).length === 0 ? (
-                <div className="text-m3-body-m text-on-surface-variant">没有捕获流事件</div>
-              ) : (
-                (entry.events ?? []).map((ev, i) => (
-                  <div key={i} className="rounded-m3-sm border border-outline-variant p-3">
-                    <div className="text-m3-label-m text-on-surface-variant">{ev.type} · {ev.at}</div>
-                    <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-m3-body-s text-on-surface">{truncate(JSON.stringify(ev.data), 600)}</pre>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <Drawer
+      anchor="right"
+      open={Boolean(entry)}
+      onClose={onClose}
+      PaperProps={{ sx: { width: { xs: "100%", sm: 520 } } }}
+    >
+      {entry && (
+        <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+          <Box
+            sx={{
+              p: 2,
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+              borderBottom: 1,
+              borderColor: "divider",
+              bgcolor: "background.default",
+            }}
+          >
+            <IconButton onClick={onClose} size="small">
+              <CloseIcon />
+            </IconButton>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle2" noWrap>
+                {entry.message}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                {entry.method} {entry.path} · {entry.statusCode}
+              </Typography>
+            </Box>
+          </Box>
+          <Tabs
+            value={tab}
+            onChange={(_, v) => setTab(v as typeof tab)}
+            sx={{ borderBottom: 1, borderColor: "divider", px: 1 }}
+          >
+            <Tab value="request" label="request" />
+            <Tab value="response" label="response" />
+            <Tab value="stream" label="stream" />
+          </Tabs>
+          <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+            {tab === "request" && (
+              <Stack spacing={1.5}>
+                <InfoRow label="requestId" value={entry.id} />
+                <InfoRow label="timestamp" value={entry.timestamp} />
+                <InfoRow label="remote" value={entry.remoteAddress ?? "—"} />
+                <InfoRow label="account" value={entry.accountID ?? "—"} />
+                <InfoRow label="device" value={entry.deviceID ?? "—"} />
+                <InfoRow label="model" value={entry.modelID ?? "—"} />
+                <CodeBlock content={JSON.stringify(entry.requestBody ?? null, null, 2)} />
+              </Stack>
+            )}
+            {tab === "response" && (
+              <Stack spacing={1.5}>
+                <InfoRow label="status" value={String(entry.statusCode ?? "—")} />
+                <InfoRow label="finishReason" value={entry.finishReason ?? "—"} />
+                <InfoRow label="latency" value={`${entry.latencyMs ?? 0}ms`} />
+                <InfoRow
+                  label="tokens"
+                  value={`${entry.inputTokens ?? 0} / ${entry.outputTokens ?? 0}`}
+                />
+                <InfoRow
+                  label="credits"
+                  value={`${entry.reservedCredits ?? 0} → ${entry.settledCredits ?? 0}`}
+                />
+                {entry.responseSummary && (
+                  <Box>
+                    <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                      response preview
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 0.5,
+                        bgcolor: "action.hover",
+                        borderRadius: 2,
+                        p: 1.5,
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      {entry.responseSummary}
+                    </Box>
+                  </Box>
+                )}
+              </Stack>
+            )}
+            {tab === "stream" && (
+              <Stack spacing={1.5}>
+                {(entry.events ?? []).length === 0 ? (
+                  <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                    没有捕获流事件
+                  </Typography>
+                ) : (
+                  (entry.events ?? []).map((ev, i) => (
+                    <Box key={i} sx={{ border: 1, borderColor: "divider", borderRadius: 2, p: 1.5 }}>
+                      <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                        {ev.type} · {ev.at}
+                      </Typography>
+                      <Box
+                        component="pre"
+                        sx={{
+                          mt: 0.5,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-all",
+                          fontFamily: "monospace",
+                          fontSize: "0.75rem",
+                        }}
+                      >
+                        {truncate(JSON.stringify(ev.data), 600)}
+                      </Box>
+                    </Box>
+                  ))
+                )}
+              </Stack>
+            )}
+          </Box>
+        </Box>
+      )}
+    </Drawer>
   );
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-outline-variant py-2 text-m3-body-s">
-      <span className="text-on-surface-variant">{label}</span>
-      <span className="truncate text-right font-mono">{value}</span>
-    </div>
+    <Stack direction="row" spacing={2} sx={{ borderBottom: 1, borderColor: "divider", py: 1 }}>
+      <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 100 }}>
+        {label}
+      </Typography>
+      <Typography
+        variant="body2"
+        sx={{ fontFamily: "monospace", textAlign: "right", flex: 1, wordBreak: "break-all" }}
+      >
+        {value}
+      </Typography>
+    </Stack>
   );
 }
 
 function CodeBlock({ content }: { content: string }) {
   return (
-    <pre className="rounded-m3-sm bg-surface-container-high p-3 font-mono text-m3-body-s thin-scroll overflow-auto max-h-96">{content}</pre>
+    <Box
+      component="pre"
+      sx={{
+        bgcolor: "action.hover",
+        borderRadius: 2,
+        p: 1.5,
+        fontFamily: "monospace",
+        fontSize: "0.75rem",
+        maxHeight: 384,
+        overflow: "auto",
+        whiteSpace: "pre",
+      }}
+    >
+      {content}
+    </Box>
   );
 }
 

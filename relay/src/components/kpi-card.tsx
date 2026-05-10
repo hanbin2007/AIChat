@@ -1,7 +1,9 @@
 "use client";
 import * as React from "react";
-import { Card } from "@/components/m3";
-import { cn } from "@/lib/cn";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
 
 export function KpiCard({
   label,
@@ -18,26 +20,31 @@ export function KpiCard({
   spark?: number[];
   tone?: "neutral" | "positive" | "negative";
 }) {
+  const deltaColor =
+    tone === "positive" ? "primary.main" : tone === "negative" ? "error.main" : "text.secondary";
   return (
-    <Card variant="elevated" className="p-5">
-      <div className="text-m3-label-m text-on-surface-variant">{label}</div>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-m3-headline-m font-semibold text-on-surface">{value}</span>
-        {delta && (
-          <span
-            className={cn(
-              "text-m3-label-l",
-              tone === "positive" && "text-primary",
-              tone === "negative" && "text-error",
-              tone === "neutral" && "text-on-surface-variant",
-            )}
-          >
-            {delta}
-          </span>
+    <Card>
+      <CardContent>
+        <Typography variant="overline" sx={{ color: "text.secondary" }}>
+          {label}
+        </Typography>
+        <Box sx={{ mt: 1, display: "flex", alignItems: "baseline", gap: 1 }}>
+          <Typography variant="h4" sx={{ fontWeight: 600 }}>
+            {value}
+          </Typography>
+          {delta && (
+            <Typography variant="body2" sx={{ color: deltaColor, fontWeight: 500 }}>
+              {delta}
+            </Typography>
+          )}
+        </Box>
+        {helper && (
+          <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.5 }}>
+            {helper}
+          </Typography>
         )}
-      </div>
-      {helper && <div className="mt-1 text-m3-body-s text-on-surface-variant">{helper}</div>}
-      {spark && spark.length > 1 && <Sparkline values={spark} />}
+        {spark && spark.length > 1 && <Sparkline values={spark} />}
+      </CardContent>
     </Card>
   );
 }
@@ -55,8 +62,10 @@ function Sparkline({ values }: { values: number[] }) {
     })
     .join(" ");
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-10 w-full">
-      <path d={d} fill="none" stroke="rgb(var(--md-sys-color-primary))" strokeWidth={1.5} />
-    </svg>
+    <Box sx={{ mt: 1.5, height: 40, width: "100%" }}>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="none">
+        <path d={d} fill="none" stroke="var(--mui-palette-primary-main)" strokeWidth={1.5} />
+      </svg>
+    </Box>
   );
 }

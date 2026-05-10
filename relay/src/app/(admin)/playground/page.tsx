@@ -1,8 +1,31 @@
 "use client";
 import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Button, Card, CardContent, CardHeader, CardTitle, Chip, Icon, IconButton, Segmented, Slider, Switch, TextField } from "@/components/m3";
-import { cn } from "@/lib/cn";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import TextField from "@mui/material/TextField";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Chip from "@mui/material/Chip";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import Divider from "@mui/material/Divider";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import SendIcon from "@mui/icons-material/Send";
+import ForumIcon from "@mui/icons-material/Forum";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
+import TravelExploreIcon from "@mui/icons-material/TravelExplore";
+import CodeIcon from "@mui/icons-material/Code";
+import { AppShell } from "@/components/shell/app-shell";
 
 type Intensity = "fast" | "balanced" | "deep" | "extreme";
 
@@ -16,11 +39,12 @@ interface Message {
 }
 
 const MODELS = ["gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
+const INTENSITIES: Intensity[] = ["fast", "balanced", "deep", "extreme"];
 
 export default function PlaygroundPage() {
   const [bearer, setBearer] = React.useState("");
   const [model, setModel] = React.useState(MODELS[0]);
-  const [intensityIndex, setIntensityIndex] = React.useState(1);
+  const [intensity, setIntensity] = React.useState<Intensity>("balanced");
   const [search, setSearch] = React.useState(false);
   const [codeExec, setCodeExec] = React.useState(false);
   const [systemPrompt, setSystemPrompt] = React.useState("");
@@ -29,9 +53,6 @@ export default function PlaygroundPage() {
   const [streaming, setStreaming] = React.useState(false);
   const [rawEvents, setRawEvents] = React.useState<string[]>([]);
   const [rawOpen, setRawOpen] = React.useState(false);
-
-  const intensities: Intensity[] = ["fast", "balanced", "deep", "extreme"];
-  const intensity = intensities[intensityIndex];
 
   async function send() {
     if (!input.trim() || streaming) return;
@@ -94,7 +115,9 @@ export default function PlaygroundPage() {
               } else if (currentEvent === "error") {
                 updateAssistant(assistant.id, (m) => ({ ...m, text: m.text + `\n\n[error: ${parsed.message}]` }));
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           }
         }
       }
@@ -108,137 +131,250 @@ export default function PlaygroundPage() {
   }
 
   return (
-    <AdminShell title="Playground" breadcrumb={["Relay"]}>
-      <div className="grid h-[calc(100vh-4rem)] grid-cols-1 gap-0 md:grid-cols-[1fr_360px]">
-        <div className="flex min-h-0 flex-col">
-          <div className="sticky top-0 z-10 space-y-3 border-b border-outline-variant bg-surface p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Icon name="neurology" size={18} className="text-on-surface-variant" />
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="rounded-m3-xs border border-outline bg-surface px-3 py-2 text-m3-body-m"
-                >
-                  {MODELS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-m3-label-m text-on-surface-variant">思考强度</span>
-                <Segmented
-                  value={intensity}
-                  onChange={(v) => setIntensityIndex(intensities.indexOf(v as Intensity))}
-                  options={intensities.map((i) => ({ value: i, label: i }))}
+    <AppShell title="Playground" breadcrumb={["Relay"]}>
+      <Box
+        sx={{
+          height: "calc(100vh - 64px)",
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "1fr 360px" },
+        }}
+      >
+        <Box sx={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <Box
+            sx={{
+              p: 2,
+              borderBottom: 1,
+              borderColor: "divider",
+              bgcolor: "background.default",
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
+            }}
+          >
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap alignItems="center">
+                <FormControl size="small" sx={{ minWidth: 220 }}>
+                  <InputLabel id="model-select">Model</InputLabel>
+                  <Select
+                    labelId="model-select"
+                    label="Model"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                  >
+                    {MODELS.map((m) => (
+                      <MenuItem key={m} value={m}>
+                        {m}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                    思考强度
+                  </Typography>
+                  <ToggleButtonGroup
+                    size="small"
+                    value={intensity}
+                    exclusive
+                    onChange={(_, v) => v && setIntensity(v as Intensity)}
+                  >
+                    {INTENSITIES.map((i) => (
+                      <ToggleButton key={i} value={i}>
+                        {i}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
+                </Stack>
+                <Chip
+                  icon={<TravelExploreIcon />}
+                  label="Google Search"
+                  color={search ? "primary" : "default"}
+                  variant={search ? "filled" : "outlined"}
+                  onClick={() => setSearch((v) => !v)}
                 />
-              </div>
-              <Chip selected={search} onClick={() => setSearch((v) => !v)} icon="travel_explore">
-                Google Search
-              </Chip>
-              <Chip selected={codeExec} onClick={() => setCodeExec((v) => !v)} icon="code">
-                Code Execution
-              </Chip>
-            </div>
-            <TextField
-              label="Authorization bearer"
-              placeholder="为空时使用 session — 仅可调 admin token；填入 rk_... 可走客户端路径测试计费"
-              value={bearer}
-              onChange={(e) => setBearer(e.target.value)}
-              variant="filled"
-            />
-            <TextField
-              label="System prompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              variant="filled"
-            />
-          </div>
+                <Chip
+                  icon={<CodeIcon />}
+                  label="Code Execution"
+                  color={codeExec ? "primary" : "default"}
+                  variant={codeExec ? "filled" : "outlined"}
+                  onClick={() => setCodeExec((v) => !v)}
+                />
+              </Stack>
+              <TextField
+                label="Authorization bearer"
+                placeholder="为空时使用 session — 仅可调 admin token；填入 rk_... 可走客户端路径测试计费"
+                value={bearer}
+                onChange={(e) => setBearer(e.target.value)}
+                size="small"
+              />
+              <TextField
+                label="System prompt"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                size="small"
+                multiline
+                maxRows={3}
+              />
+            </Stack>
+          </Box>
 
-          <div className="flex-1 space-y-3 overflow-auto p-4 thin-scroll">
+          <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
             {messages.length === 0 && (
-              <div className="py-20 text-center text-on-surface-variant">
-                <Icon name="forum" size={48} className="opacity-40" />
-                <div className="mt-3 text-m3-body-m">输入消息开始对话</div>
-              </div>
+              <Stack alignItems="center" sx={{ py: 8, color: "text.secondary" }}>
+                <ForumIcon sx={{ fontSize: 48, opacity: 0.4 }} />
+                <Typography variant="body2" sx={{ mt: 1.5 }}>
+                  输入消息开始对话
+                </Typography>
+              </Stack>
             )}
-            {messages.map((m) => (
-              <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
-                    m.role === "user"
-                      ? "rounded-br-m3-xs bg-primary-container text-on-primary-container"
-                      : "rounded-bl-m3-xs bg-surface-container text-on-surface",
-                  )}
+            <Stack spacing={2}>
+              {messages.map((m) => (
+                <Box
+                  key={m.id}
+                  sx={{
+                    display: "flex",
+                    justifyContent: m.role === "user" ? "flex-end" : "flex-start",
+                  }}
                 >
-                  {m.thought && m.role === "assistant" && (
-                    <details className="mb-2 border-l-2 border-tertiary pl-2 text-m3-body-s italic text-on-surface-variant">
-                      <summary className="cursor-pointer text-m3-label-m">
-                        💭 Thought · {m.thought.length} chars
-                      </summary>
-                      <div className="mt-1 whitespace-pre-wrap">{m.thought}</div>
-                    </details>
-                  )}
-                  {m.text || (m.role === "assistant" && streaming ? "…" : "")}
-                  {m.finishReason && m.finishReason !== "STOP" && (
-                    <div className="mt-2 text-m3-label-m text-on-surface-variant">
-                      finishReason: {m.finishReason}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+                  <Box
+                    sx={{
+                      maxWidth: 640,
+                      whiteSpace: "pre-wrap",
+                      px: 2,
+                      py: 1.5,
+                      borderRadius: 2,
+                      bgcolor: m.role === "user" ? "primary.main" : "action.hover",
+                      color: m.role === "user" ? "primary.contrastText" : "text.primary",
+                      borderBottomRightRadius: m.role === "user" ? 4 : 16,
+                      borderBottomLeftRadius: m.role === "user" ? 16 : 4,
+                    }}
+                  >
+                    {m.thought && m.role === "assistant" && (
+                      <Accordion
+                        disableGutters
+                        elevation={0}
+                        square
+                        sx={{ bgcolor: "transparent", mb: 1, "&:before": { display: "none" } }}
+                      >
+                        <AccordionSummary
+                          expandIcon={<ExpandMoreIcon fontSize="small" />}
+                          sx={{ minHeight: 0, px: 0, py: 0 }}
+                        >
+                          <Typography variant="caption" sx={{ fontStyle: "italic", color: "text.secondary" }}>
+                            💭 Thought · {m.thought.length} chars
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ px: 0, pb: 0 }}>
+                          <Typography
+                            variant="caption"
+                            component="div"
+                            sx={{
+                              whiteSpace: "pre-wrap",
+                              fontStyle: "italic",
+                              color: "text.secondary",
+                              borderLeft: 2,
+                              borderColor: "divider",
+                              pl: 1,
+                            }}
+                          >
+                            {m.thought}
+                          </Typography>
+                        </AccordionDetails>
+                      </Accordion>
+                    )}
+                    <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-wrap" }}>
+                      {m.text || (m.role === "assistant" && streaming ? "…" : "")}
+                    </Typography>
+                    {m.finishReason && m.finishReason !== "STOP" && (
+                      <Typography variant="caption" sx={{ display: "block", mt: 1, color: "text.secondary" }}>
+                        finishReason: {m.finishReason}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+              ))}
+            </Stack>
+          </Box>
 
-          <div className="flex items-end gap-2 border-t border-outline-variant bg-surface-container-low p-4">
-            <textarea
+          <Box
+            sx={{
+              p: 2,
+              borderTop: 1,
+              borderColor: "divider",
+              bgcolor: "action.hover",
+              display: "flex",
+              alignItems: "flex-end",
+              gap: 1,
+            }}
+          >
+            <TextField
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              rows={2}
               placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-              className="flex-1 resize-none rounded-m3-md bg-surface-container-high px-3 py-2 text-m3-body-m outline-none"
+              multiline
+              minRows={2}
+              maxRows={6}
+              size="small"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
                 }
               }}
+              sx={{ flex: 1 }}
             />
-            <Button icon="send" onClick={send} loading={streaming} disabled={!input.trim()}>
-              发送
+            <Button
+              startIcon={<SendIcon />}
+              onClick={send}
+              disabled={!input.trim() || streaming}
+            >
+              {streaming ? "处理中…" : "发送"}
             </Button>
-          </div>
-        </div>
+          </Box>
+        </Box>
 
-        <aside className="hidden border-l border-outline-variant bg-surface-container-low md:flex md:flex-col">
-          <div className="border-b border-outline-variant p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-m3-title-s">Raw SSE</div>
-              <IconButton
-                icon={rawOpen ? "visibility_off" : "visibility"}
-                size="sm"
-                onClick={() => setRawOpen((v) => !v)}
-              />
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto p-3 thin-scroll">
+        <Box
+          component="aside"
+          sx={{
+            display: { xs: "none", md: "flex" },
+            flexDirection: "column",
+            borderLeft: 1,
+            borderColor: "divider",
+            bgcolor: "action.hover",
+          }}
+        >
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Typography variant="subtitle2">Raw SSE</Typography>
+            <Tooltip title={rawOpen ? "隐藏原始事件" : "显示原始事件"}>
+              <IconButton size="small" onClick={() => setRawOpen((v) => !v)}>
+                {rawOpen ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          </Box>
+          <Divider />
+          <Box sx={{ flex: 1, overflow: "auto", p: 1.5 }}>
             {rawOpen ? (
               rawEvents.length === 0 ? (
-                <div className="text-m3-body-s text-on-surface-variant">尚未收到事件</div>
+                <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                  尚未收到事件
+                </Typography>
               ) : (
-                <ul className="space-y-1 font-mono text-m3-body-s">
+                <Stack component="ul" spacing={0.25} sx={{ p: 0, m: 0, listStyle: "none", fontFamily: "monospace", fontSize: "0.75rem" }}>
                   {rawEvents.map((e, i) => (
-                    <li key={i} className="truncate">{e}</li>
+                    <Box key={i} component="li" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {e}
+                    </Box>
                   ))}
-                </ul>
+                </Stack>
               )
             ) : (
-              <div className="text-m3-body-s text-on-surface-variant">点击眼睛图标查看原始 SSE 事件</div>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                点击眼睛图标查看原始 SSE 事件
+              </Typography>
             )}
-          </div>
-        </aside>
-      </div>
-    </AdminShell>
+          </Box>
+        </Box>
+      </Box>
+    </AppShell>
   );
 }

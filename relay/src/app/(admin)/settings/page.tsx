@@ -1,22 +1,54 @@
 "use client";
 import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Banner, Card, CardContent, CardHeader, CardTitle, Chip, Switch, TextField, Slider, Segmented, Button, Icon, Badge, Dialog, useSnackbar } from "@/components/m3";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import TextField from "@mui/material/TextField";
+import Button from "@mui/material/Button";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import FormGroup from "@mui/material/FormGroup";
+import Slider from "@mui/material/Slider";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Chip from "@mui/material/Chip";
+import Alert from "@mui/material/Alert";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Autocomplete from "@mui/material/Autocomplete";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableBody from "@mui/material/TableBody";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import Paper from "@mui/material/Paper";
+import AddIcon from "@mui/icons-material/Add";
+import { AppShell } from "@/components/shell/app-shell";
+import { useSnackbar } from "@/components/snackbar-provider";
 import type { AdminToken, SettingsSnapshot } from "@/lib/store/settings-store";
 
 export default function SettingsPage() {
   const snack = useSnackbar();
-  const [snapshot, setSnapshot] = React.useState<SettingsSnapshot | null>(null);
+  const [, setSnapshot] = React.useState<SettingsSnapshot | null>(null);
   const [draft, setDraft] = React.useState<SettingsSnapshot | null>(null);
   const [issueDialog, setIssueDialog] = React.useState(false);
 
-  async function refresh() {
+  const refresh = React.useCallback(async () => {
     const res = await fetch("/api/admin/settings");
     const data = await res.json();
     setSnapshot(data);
     setDraft(data);
-  }
-  React.useEffect(() => { refresh(); }, []);
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   async function save(patch: Partial<SettingsSnapshot>) {
     await fetch("/api/admin/settings", {
@@ -30,234 +62,361 @@ export default function SettingsPage() {
 
   if (!draft) {
     return (
-      <AdminShell title="Settings">
-        <div className="p-6 text-on-surface-variant">加载中…</div>
-      </AdminShell>
+      <AppShell title="Settings">
+        <Box sx={{ p: 3, color: "text.secondary" }}>加载中…</Box>
+      </AppShell>
     );
   }
 
   return (
-    <AdminShell title="Settings" breadcrumb={["System"]}>
-      <div className="mx-auto max-w-5xl space-y-6 p-6 pb-24">
-        <Banner tone="info">
-          标红字段需要重启 relay 才会在监听器上生效。
-        </Banner>
+    <AppShell title="Settings" breadcrumb={["System"]}>
+      <Box sx={{ maxWidth: 1080, mx: "auto", p: 3, pb: 12 }}>
+        <Stack spacing={3}>
+          <Alert severity="info">标红字段需要重启 relay 才会在监听器上生效。</Alert>
 
-        <Section title="① Gateway" description="监听地址、CORS、请求体大小">
-          <Switch
-            label="允许 LAN 客户端"
-            supporting="关闭后只接受 127.0.0.1 请求"
-            checked={draft.gateway.allowLanClients}
-            onChange={() => setDraft({ ...draft, gateway: { ...draft.gateway, allowLanClients: !draft.gateway.allowLanClients } })}
-          />
-          <Slider
-            label="请求体上限 (MB)"
-            value={draft.gateway.requestBodyLimitMB}
-            min={1}
-            max={64}
-            valueLabel={`${draft.gateway.requestBodyLimitMB} MB`}
-            onChange={(v) => setDraft({ ...draft, gateway: { ...draft.gateway, requestBodyLimitMB: v } })}
-          />
-          <ChipInput
-            label="CORS origins"
-            values={draft.gateway.corsOrigins}
-            onChange={(v) => setDraft({ ...draft, gateway: { ...draft.gateway, corsOrigins: v } })}
-            placeholder="https://example.com"
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ gateway: draft.gateway })}>保存 Gateway</Button>
-          </div>
-        </Section>
-
-        <Section title="② Upstream · Gemini" description="超时、重试、健康检查">
-          <Slider
-            label="Upstream timeout"
-            value={draft.upstream.timeoutMs / 1000}
-            min={5}
-            max={300}
-            valueLabel={`${draft.upstream.timeoutMs / 1000}s`}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, timeoutMs: v * 1000 } })}
-          />
-          <Slider
-            label="重试次数"
-            value={draft.upstream.retries}
-            min={0}
-            max={5}
-            valueLabel={String(draft.upstream.retries)}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, retries: v } })}
-          />
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">Retry 模式</div>
-            <div className="mt-1">
-              <Segmented
-                value={draft.upstream.retryMode}
-                onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, retryMode: v } })}
-                options={[
-                  { value: "none", label: "None" },
-                  { value: "linear", label: "Linear" },
-                  { value: "exponential", label: "Exponential" },
-                ]}
+          <Section title="① Gateway" description="监听地址、CORS、请求体大小">
+            <FormGroup>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.gateway.allowLanClients}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        gateway: { ...draft.gateway, allowLanClients: !draft.gateway.allowLanClients },
+                      })
+                    }
+                  />
+                }
+                label="允许 LAN 客户端"
               />
-            </div>
-          </div>
-          <Slider
-            label="健康检查间隔"
-            value={draft.upstream.healthProbeIntervalMs / 1000}
-            min={0}
-            max={600}
-            valueLabel={`${draft.upstream.healthProbeIntervalMs / 1000}s`}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, healthProbeIntervalMs: v * 1000 } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ upstream: draft.upstream })}>保存 Upstream</Button>
-          </div>
-        </Section>
+              <Typography variant="caption" sx={{ color: "text.secondary", ml: 6, mt: -0.5 }}>
+                关闭后只接受 127.0.0.1 请求
+              </Typography>
+            </FormGroup>
+            <SliderField
+              label="请求体上限 (MB)"
+              value={draft.gateway.requestBodyLimitMB}
+              min={1}
+              max={64}
+              valueLabel={`${draft.gateway.requestBodyLimitMB} MB`}
+              onChange={(v) =>
+                setDraft({ ...draft, gateway: { ...draft.gateway, requestBodyLimitMB: v } })
+              }
+            />
+            <Autocomplete
+              multiple
+              freeSolo
+              options={[]}
+              value={draft.gateway.corsOrigins}
+              onChange={(_, v) =>
+                setDraft({ ...draft, gateway: { ...draft.gateway, corsOrigins: v } })
+              }
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => {
+                  const { key, ...chipProps } = getTagProps({ index });
+                  return <Chip key={key} {...chipProps} label={option} size="small" />;
+                })
+              }
+              renderInput={(params) => (
+                <TextField {...params} label="CORS origins" placeholder="https://example.com" />
+              )}
+            />
+            <SaveRow onSave={() => save({ gateway: draft.gateway })}>保存 Gateway</SaveRow>
+          </Section>
 
-        <Section title="③ Auth & Tokens" description="Bearer 签发、吊销、限流">
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-m3-label-m text-on-surface-variant">已签发 token</span>
-              <Button icon="add" onClick={() => setIssueDialog(true)}>签发新 token</Button>
-            </div>
-            <TokenTable tokens={draft.adminTokens} onRevoke={async (id) => {
-              await fetch(`/api/admin/tokens?id=${id}`, { method: "DELETE" });
-              refresh();
-            }} />
-          </div>
-        </Section>
+          <Section title="② Upstream · Gemini" description="超时、重试、健康检查">
+            <SliderField
+              label="Upstream timeout"
+              value={draft.upstream.timeoutMs / 1000}
+              min={5}
+              max={300}
+              valueLabel={`${draft.upstream.timeoutMs / 1000}s`}
+              onChange={(v) =>
+                setDraft({ ...draft, upstream: { ...draft.upstream, timeoutMs: v * 1000 } })
+              }
+            />
+            <SliderField
+              label="重试次数"
+              value={draft.upstream.retries}
+              min={0}
+              max={5}
+              valueLabel={String(draft.upstream.retries)}
+              onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, retries: v } })}
+            />
+            <Box>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                Retry 模式
+              </Typography>
+              <Box sx={{ mt: 0.5 }}>
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={draft.upstream.retryMode}
+                  onChange={(_, v) =>
+                    v && setDraft({ ...draft, upstream: { ...draft.upstream, retryMode: v } })
+                  }
+                >
+                  <ToggleButton value="none">None</ToggleButton>
+                  <ToggleButton value="linear">Linear</ToggleButton>
+                  <ToggleButton value="exponential">Exponential</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+            </Box>
+            <SliderField
+              label="健康检查间隔"
+              value={draft.upstream.healthProbeIntervalMs / 1000}
+              min={0}
+              max={600}
+              valueLabel={`${draft.upstream.healthProbeIntervalMs / 1000}s`}
+              onChange={(v) =>
+                setDraft({
+                  ...draft,
+                  upstream: { ...draft.upstream, healthProbeIntervalMs: v * 1000 },
+                })
+              }
+            />
+            <SaveRow onSave={() => save({ upstream: draft.upstream })}>保存 Upstream</SaveRow>
+          </Section>
 
-        <Section title="④ Rate limits" description="全局 / 单 token / 单 IP 节流">
-          <Slider
-            label="Global RPM"
-            value={draft.rateLimits.globalRpm}
-            min={0}
-            max={10000}
-            step={100}
-            valueLabel={draft.rateLimits.globalRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, globalRpm: v } })}
-          />
-          <Slider
-            label="Per-token RPM"
-            value={draft.rateLimits.perTokenRpm}
-            min={0}
-            max={3000}
-            step={10}
-            valueLabel={draft.rateLimits.perTokenRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perTokenRpm: v } })}
-          />
-          <Slider
-            label="最大并发流"
-            value={draft.rateLimits.concurrentStreams}
-            min={1}
-            max={512}
-            valueLabel={String(draft.rateLimits.concurrentStreams)}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, concurrentStreams: v } })}
-          />
-          <Slider
-            label="Per-IP RPM"
-            value={draft.rateLimits.perIpRpm}
-            min={0}
-            max={5000}
-            step={50}
-            valueLabel={draft.rateLimits.perIpRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perIpRpm: v } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ rateLimits: draft.rateLimits })}>保存限流</Button>
-          </div>
-        </Section>
+          <Section title="③ Auth & Tokens" description="Bearer 签发、吊销、限流">
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                已签发 token
+              </Typography>
+              <Button startIcon={<AddIcon />} size="small" onClick={() => setIssueDialog(true)}>
+                签发新 token
+              </Button>
+            </Box>
+            <TokenTable
+              tokens={draft.adminTokens}
+              onRevoke={async (id) => {
+                await fetch(`/api/admin/tokens?id=${id}`, { method: "DELETE" });
+                refresh();
+              }}
+            />
+          </Section>
 
-        <Section title="⑤ Billing mode" description="计费三种来源的开关">
-          <Switch
-            label="试用账户"
-            checked={draft.billing.trialEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, trialEnabled: !draft.billing.trialEnabled } })}
-          />
-          <Switch
-            label="订阅 (StoreKit)"
-            checked={draft.billing.subscriptionEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, subscriptionEnabled: !draft.billing.subscriptionEnabled } })}
-          />
-          <Switch
-            label="离线激活码"
-            checked={draft.billing.offlineEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, offlineEnabled: !draft.billing.offlineEnabled } })}
-          />
-          <Banner tone="info">
-            StoreKit 验签模式：<Badge>{draft.billing.mode}</Badge> · strict 模式预留到 v1.2。
-          </Banner>
-          <div className="flex justify-end">
-            <Button onClick={() => save({ billing: draft.billing })}>保存 Billing</Button>
-          </div>
-        </Section>
+          <Section title="④ Rate limits" description="全局 / 单 token / 单 IP 节流">
+            <SliderField
+              label="Global RPM"
+              value={draft.rateLimits.globalRpm}
+              min={0}
+              max={10000}
+              step={100}
+              valueLabel={draft.rateLimits.globalRpm.toLocaleString()}
+              onChange={(v) =>
+                setDraft({ ...draft, rateLimits: { ...draft.rateLimits, globalRpm: v } })
+              }
+            />
+            <SliderField
+              label="Per-token RPM"
+              value={draft.rateLimits.perTokenRpm}
+              min={0}
+              max={3000}
+              step={10}
+              valueLabel={draft.rateLimits.perTokenRpm.toLocaleString()}
+              onChange={(v) =>
+                setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perTokenRpm: v } })
+              }
+            />
+            <SliderField
+              label="最大并发流"
+              value={draft.rateLimits.concurrentStreams}
+              min={1}
+              max={512}
+              valueLabel={String(draft.rateLimits.concurrentStreams)}
+              onChange={(v) =>
+                setDraft({ ...draft, rateLimits: { ...draft.rateLimits, concurrentStreams: v } })
+              }
+            />
+            <SliderField
+              label="Per-IP RPM"
+              value={draft.rateLimits.perIpRpm}
+              min={0}
+              max={5000}
+              step={50}
+              valueLabel={draft.rateLimits.perIpRpm.toLocaleString()}
+              onChange={(v) =>
+                setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perIpRpm: v } })
+              }
+            />
+            <SaveRow onSave={() => save({ rateLimits: draft.rateLimits })}>保存限流</SaveRow>
+          </Section>
 
-        <Section title="⑥ Observability" description="日志、脱敏、Prometheus">
-          <Slider
-            label="Activity log 大小"
-            value={draft.observability.activityLogSize}
-            min={100}
-            max={5000}
-            step={100}
-            valueLabel={draft.observability.activityLogSize.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, activityLogSize: v } })}
-          />
-          <Slider
-            label="Debug log 大小"
-            value={draft.observability.debugLogSize}
-            min={0}
-            max={2000}
-            step={50}
-            valueLabel={draft.observability.debugLogSize.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, debugLogSize: v } })}
-          />
-          <Switch
-            label="Debug logging"
-            supporting="捕获客户端/上游的 JSON payload（敏感）"
-            checked={draft.observability.debugLoggingEnabled}
-            onChange={() => setDraft({ ...draft, observability: { ...draft.observability, debugLoggingEnabled: !draft.observability.debugLoggingEnabled } })}
-          />
-          <Slider
-            label="日志采样率"
-            value={draft.observability.logSamplingRate * 100}
-            min={1}
-            max={100}
-            valueLabel={`${(draft.observability.logSamplingRate * 100).toFixed(0)}%`}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, logSamplingRate: v / 100 } })}
-          />
-          <Switch
-            label="启用 Prometheus /metrics"
-            checked={draft.observability.prometheusEnabled}
-            onChange={() => setDraft({ ...draft, observability: { ...draft.observability, prometheusEnabled: !draft.observability.prometheusEnabled } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ observability: draft.observability })}>保存 Observability</Button>
-          </div>
-        </Section>
-
-        <Section title="⑦ Localization" description="默认语言与时区">
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">默认语言</div>
-            <div className="mt-1">
-              <Segmented
-                value={draft.localization.defaultLocale}
-                onChange={(v) => setDraft({ ...draft, localization: { ...draft.localization, defaultLocale: v } })}
-                options={[
-                  { value: "zh-Hans", label: "简体中文" },
-                  { value: "en", label: "English" },
-                ]}
+          <Section title="⑤ Billing mode" description="计费三种来源的开关">
+            <FormGroup>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.billing.trialEnabled}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        billing: { ...draft.billing, trialEnabled: !draft.billing.trialEnabled },
+                      })
+                    }
+                  />
+                }
+                label="试用账户"
               />
-            </div>
-          </div>
-          <TextField
-            label="时区"
-            value={draft.localization.timezone}
-            onChange={(e) => setDraft({ ...draft, localization: { ...draft.localization, timezone: e.target.value } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ localization: draft.localization })}>保存 Localization</Button>
-          </div>
-        </Section>
-      </div>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.billing.subscriptionEnabled}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        billing: {
+                          ...draft.billing,
+                          subscriptionEnabled: !draft.billing.subscriptionEnabled,
+                        },
+                      })
+                    }
+                  />
+                }
+                label="订阅 (StoreKit)"
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.billing.offlineEnabled}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        billing: { ...draft.billing, offlineEnabled: !draft.billing.offlineEnabled },
+                      })
+                    }
+                  />
+                }
+                label="离线激活码"
+              />
+            </FormGroup>
+            <Alert severity="info">
+              StoreKit 验签模式：<Chip size="small" label={draft.billing.mode} sx={{ mx: 0.5 }} /> ·
+              strict 模式预留到 v1.2。
+            </Alert>
+            <SaveRow onSave={() => save({ billing: draft.billing })}>保存 Billing</SaveRow>
+          </Section>
+
+          <Section title="⑥ Observability" description="日志、脱敏、Prometheus">
+            <SliderField
+              label="Activity log 大小"
+              value={draft.observability.activityLogSize}
+              min={100}
+              max={5000}
+              step={100}
+              valueLabel={draft.observability.activityLogSize.toLocaleString()}
+              onChange={(v) =>
+                setDraft({ ...draft, observability: { ...draft.observability, activityLogSize: v } })
+              }
+            />
+            <SliderField
+              label="Debug log 大小"
+              value={draft.observability.debugLogSize}
+              min={0}
+              max={2000}
+              step={50}
+              valueLabel={draft.observability.debugLogSize.toLocaleString()}
+              onChange={(v) =>
+                setDraft({ ...draft, observability: { ...draft.observability, debugLogSize: v } })
+              }
+            />
+            <FormGroup>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.observability.debugLoggingEnabled}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        observability: {
+                          ...draft.observability,
+                          debugLoggingEnabled: !draft.observability.debugLoggingEnabled,
+                        },
+                      })
+                    }
+                  />
+                }
+                label="Debug logging"
+              />
+              <Typography variant="caption" sx={{ color: "text.secondary", ml: 6, mt: -0.5 }}>
+                捕获客户端/上游的 JSON payload（敏感）
+              </Typography>
+            </FormGroup>
+            <SliderField
+              label="日志采样率"
+              value={draft.observability.logSamplingRate * 100}
+              min={1}
+              max={100}
+              valueLabel={`${(draft.observability.logSamplingRate * 100).toFixed(0)}%`}
+              onChange={(v) =>
+                setDraft({
+                  ...draft,
+                  observability: { ...draft.observability, logSamplingRate: v / 100 },
+                })
+              }
+            />
+            <FormGroup>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={draft.observability.prometheusEnabled}
+                    onChange={() =>
+                      setDraft({
+                        ...draft,
+                        observability: {
+                          ...draft.observability,
+                          prometheusEnabled: !draft.observability.prometheusEnabled,
+                        },
+                      })
+                    }
+                  />
+                }
+                label="启用 Prometheus /metrics"
+              />
+            </FormGroup>
+            <SaveRow onSave={() => save({ observability: draft.observability })}>
+              保存 Observability
+            </SaveRow>
+          </Section>
+
+          <Section title="⑦ Localization" description="默认语言与时区">
+            <Box>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                默认语言
+              </Typography>
+              <Box sx={{ mt: 0.5 }}>
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={draft.localization.defaultLocale}
+                  onChange={(_, v) =>
+                    v &&
+                    setDraft({ ...draft, localization: { ...draft.localization, defaultLocale: v } })
+                  }
+                >
+                  <ToggleButton value="zh-Hans">简体中文</ToggleButton>
+                  <ToggleButton value="en">English</ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+            </Box>
+            <TextField
+              label="时区"
+              value={draft.localization.timezone}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  localization: { ...draft.localization, timezone: e.target.value },
+                })
+              }
+            />
+            <SaveRow onSave={() => save({ localization: draft.localization })}>
+              保存 Localization
+            </SaveRow>
+          </Section>
+        </Stack>
+      </Box>
 
       {issueDialog && (
         <TokenIssueDialog
@@ -268,94 +427,126 @@ export default function SettingsPage() {
           }}
         />
       )}
-    </AdminShell>
+    </AppShell>
   );
 }
 
-function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Card variant="filled" className="p-6">
-      <div className="mb-4">
-        <CardTitle>{title}</CardTitle>
-        <div className="mt-1 text-m3-body-s text-on-surface-variant">{description}</div>
-      </div>
-      <div className="space-y-4">{children}</div>
+    <Card sx={{ bgcolor: "action.hover" }}>
+      <CardHeader
+        title={title}
+        subheader={description}
+        titleTypographyProps={{ variant: "subtitle1" }}
+        subheaderTypographyProps={{ variant: "caption" }}
+      />
+      <CardContent>
+        <Stack spacing={2}>{children}</Stack>
+      </CardContent>
     </Card>
   );
 }
 
-function ChipInput({
+function SaveRow({ onSave, children }: { onSave: () => void; children: React.ReactNode }) {
+  return (
+    <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+      <Button onClick={onSave}>{children}</Button>
+    </Box>
+  );
+}
+
+function SliderField({
   label,
-  values,
+  value,
+  min,
+  max,
+  step,
+  valueLabel,
   onChange,
-  placeholder,
 }: {
   label: string;
-  values: string[];
-  onChange: (v: string[]) => void;
-  placeholder?: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  valueLabel?: string;
+  onChange: (v: number) => void;
 }) {
-  const [input, setInput] = React.useState("");
   return (
-    <div>
-      <div className="mb-1 text-m3-label-m text-on-surface-variant">{label}</div>
-      <div className="flex flex-wrap gap-2 rounded-m3-xs border border-outline p-2">
-        {values.map((v) => (
-          <Chip key={v} selected variant="input" onRemove={() => onChange(values.filter((x) => x !== v))}>
-            {v}
-          </Chip>
-        ))}
-        <input
-          value={input}
-          placeholder={placeholder}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && input.trim()) {
-              e.preventDefault();
-              onChange([...values, input.trim()]);
-              setInput("");
-            }
-          }}
-          className="min-w-32 flex-1 bg-transparent px-2 text-m3-body-m outline-none"
-        />
-      </div>
-    </div>
+    <Box>
+      <Stack direction="row" spacing={1} alignItems="baseline" justifyContent="space-between">
+        <Typography variant="body2">{label}</Typography>
+        {valueLabel && (
+          <Typography variant="caption" sx={{ color: "text.secondary", fontFamily: "monospace" }}>
+            {valueLabel}
+          </Typography>
+        )}
+      </Stack>
+      <Slider
+        size="small"
+        value={value}
+        min={min}
+        max={max}
+        step={step ?? 1}
+        onChange={(_, v) => onChange(v as number)}
+      />
+    </Box>
   );
 }
 
 function TokenTable({ tokens, onRevoke }: { tokens: AdminToken[]; onRevoke: (id: string) => void }) {
   return (
-    <div className="overflow-hidden rounded-m3-sm border border-outline-variant">
-      <table className="w-full text-left text-m3-body-s">
-        <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-          <tr>
-            <th className="px-3 py-2">Label</th>
-            <th className="px-3 py-2">Scope</th>
-            <th className="px-3 py-2">Prefix</th>
-            <th className="px-3 py-2">创建</th>
-            <th className="px-3 py-2">最近使用</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
+    <TableContainer component={Paper} variant="outlined">
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Label</TableCell>
+            <TableCell>Scope</TableCell>
+            <TableCell>Prefix</TableCell>
+            <TableCell>创建</TableCell>
+            <TableCell>最近使用</TableCell>
+            <TableCell />
+          </TableRow>
+        </TableHead>
+        <TableBody>
           {tokens.length === 0 && (
-            <tr><td colSpan={6} className="px-3 py-4 text-center text-on-surface-variant">还没有签发 token</td></tr>
+            <TableRow>
+              <TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 3 }}>
+                还没有签发 token
+              </TableCell>
+            </TableRow>
           )}
           {tokens.map((t) => (
-            <tr key={t.id} className="border-t border-outline-variant">
-              <td className="px-3 py-2">{t.label}</td>
-              <td className="px-3 py-2"><Badge tone={t.scope === "admin" ? "warn" : "info"}>{t.scope}</Badge></td>
-              <td className="px-3 py-2 font-mono">{t.prefix}</td>
-              <td className="px-3 py-2">{new Date(t.createdAt).toLocaleDateString()}</td>
-              <td className="px-3 py-2">{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString() : "—"}</td>
-              <td className="px-3 py-2 text-right">
-                {t.revoked ? <Badge tone="error">revoked</Badge> : <Button variant="text" onClick={() => onRevoke(t.id)}>吊销</Button>}
-              </td>
-            </tr>
+            <TableRow key={t.id} hover>
+              <TableCell>{t.label}</TableCell>
+              <TableCell>
+                <Chip size="small" color={t.scope === "admin" ? "warning" : "info"} label={t.scope} />
+              </TableCell>
+              <TableCell sx={{ fontFamily: "monospace" }}>{t.prefix}</TableCell>
+              <TableCell>{new Date(t.createdAt).toLocaleDateString()}</TableCell>
+              <TableCell>{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString() : "—"}</TableCell>
+              <TableCell align="right">
+                {t.revoked ? (
+                  <Chip size="small" color="error" label="revoked" />
+                ) : (
+                  <Button variant="text" size="small" onClick={() => onRevoke(t.id)}>
+                    吊销
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
@@ -384,47 +575,75 @@ function TokenIssueDialog({ onClose, onDone }: { onClose: () => void; onDone: ()
   }
 
   return (
-    <Dialog
-      open
-      onClose={issued ? onDone : onClose}
-      title={issued ? "Token 已签发 — 仅显示一次" : "签发 bearer token"}
-      actions={
-        issued ? (
+    <Dialog open onClose={issued ? onDone : onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{issued ? "Token 已签发 — 仅显示一次" : "签发 bearer token"}</DialogTitle>
+      <DialogContent>
+        {issued ? (
+          <Stack spacing={2}>
+            <Alert severity="warning">关闭后无法再次显示，请立即复制保存。</Alert>
+            <Box
+              component="pre"
+              sx={{
+                wordBreak: "break-all",
+                whiteSpace: "pre-wrap",
+                bgcolor: "action.hover",
+                borderRadius: 2,
+                p: 1.5,
+                fontFamily: "monospace",
+                fontSize: "0.875rem",
+              }}
+            >
+              {issued}
+            </Box>
+          </Stack>
+        ) : (
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField label="标签" value={label} onChange={(e) => setLabel(e.target.value)} />
+            <Box>
+              <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                Scope
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                <Chip
+                  label="Admin"
+                  color={scope === "admin" ? "primary" : "default"}
+                  variant={scope === "admin" ? "filled" : "outlined"}
+                  onClick={() => setScope("admin")}
+                />
+                <Chip
+                  label="Client"
+                  color={scope === "client" ? "primary" : "default"}
+                  variant={scope === "client" ? "filled" : "outlined"}
+                  onClick={() => setScope("client")}
+                />
+              </Stack>
+            </Box>
+            <SliderField
+              label="每分钟请求上限"
+              value={rpm}
+              min={0}
+              max={3000}
+              step={10}
+              valueLabel={`${rpm}/min`}
+              onChange={setRpm}
+            />
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        {issued ? (
           <Button onClick={onDone}>完成</Button>
         ) : (
           <>
-            <Button variant="text" onClick={onClose}>取消</Button>
-            <Button onClick={submit} loading={busy} disabled={!label}>签发</Button>
+            <Button variant="text" onClick={onClose}>
+              取消
+            </Button>
+            <Button onClick={submit} disabled={!label || busy}>
+              {busy ? "签发中…" : "签发"}
+            </Button>
           </>
-        )
-      }
-    >
-      {issued ? (
-        <div className="space-y-2">
-          <Banner tone="warn">关闭后无法再次显示，请立即复制保存。</Banner>
-          <pre className="break-all rounded-m3-sm bg-surface-container-high p-3 font-mono text-m3-body-s">{issued}</pre>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <TextField label="标签" value={label} onChange={(e) => setLabel(e.target.value)} />
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">Scope</div>
-            <div className="mt-1 flex gap-2">
-              <Chip selected={scope === "admin"} onClick={() => setScope("admin")}>Admin</Chip>
-              <Chip selected={scope === "client"} onClick={() => setScope("client")}>Client</Chip>
-            </div>
-          </div>
-          <Slider
-            label="每分钟请求上限"
-            value={rpm}
-            min={0}
-            max={3000}
-            step={10}
-            valueLabel={`${rpm}/min`}
-            onChange={setRpm}
-          />
-        </div>
-      )}
+        )}
+      </DialogActions>
     </Dialog>
   );
 }

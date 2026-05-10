@@ -1,7 +1,21 @@
 "use client";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Button, Card, CardContent, CardHeader, CardTitle, TextField, Banner, Icon } from "@/components/m3";
+import Link from "next/link";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import Avatar from "@mui/material/Avatar";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
+import Button from "@mui/material/Button";
+import Alert from "@mui/material/Alert";
+import Typography from "@mui/material/Typography";
+import HubIcon from "@mui/icons-material/Hub";
+import PersonIcon from "@mui/icons-material/Person";
+import LockIcon from "@mui/icons-material/Lock";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,45 +44,72 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-container-low p-6">
-      <Card variant="elevated" className="w-full max-w-md">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <span className="flex h-12 w-12 items-center justify-center rounded-m3-md bg-primary-container text-on-primary-container">
-              <Icon name="hub" size={28} />
-            </span>
-            <div>
-              <CardTitle>AIChat Relay</CardTitle>
-              <div className="text-m3-body-s text-on-surface-variant">管理控制台</div>
-            </div>
-          </div>
-        </CardHeader>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        bgcolor: "background.default",
+        p: 3,
+      }}
+    >
+      <Card sx={{ width: "100%", maxWidth: 440, boxShadow: 4 }}>
+        <CardHeader
+          avatar={
+            <Avatar sx={{ bgcolor: "primary.main", width: 48, height: 48 }}>
+              <HubIcon />
+            </Avatar>
+          }
+          title="AIChat Relay"
+          subheader="管理控制台"
+          titleTypographyProps={{ variant: "h6" }}
+        />
         <CardContent>
-          <form onSubmit={submit} className="flex flex-col gap-4">
-            <TextField
-              label="用户名"
-              leading="person"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              autoFocus
-            />
-            <TextField
-              label="密码"
-              type="password"
-              leading="lock"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-            {error && <Banner tone="error">{error}</Banner>}
-            <Button type="submit" loading={loading} className="w-full">登录</Button>
-            <p className="text-center text-m3-body-s text-on-surface-variant">
-              首次部署？<a href="/setup" className="text-primary hover:underline">前往初始化</a>
-            </p>
-          </form>
+          <Box component="form" onSubmit={submit}>
+            <Stack spacing={2}>
+              <TextField
+                label="用户名"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                autoFocus
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <PersonIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <TextField
+                label="密码"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <LockIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              {error && <Alert severity="error">{error}</Alert>}
+              <Button type="submit" disabled={loading} fullWidth size="large">
+                {loading ? "登录中…" : "登录"}
+              </Button>
+              <Typography variant="body2" align="center" sx={{ color: "text.secondary" }}>
+                首次部署？
+                <Link href="/setup" style={{ color: "var(--mui-palette-primary-main)", marginLeft: 4 }}>
+                  前往初始化
+                </Link>
+              </Typography>
+            </Stack>
+          </Box>
         </CardContent>
       </Card>
-    </div>
+    </Box>
   );
 }
