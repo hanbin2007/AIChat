@@ -1,27 +1,37 @@
-# Relay server setup — chisel + SSH-over-WSS
+# Relay server setup — chisel + SSH-over-WSS (Caddy edition)
 
-Goal: let the sandbox (Claude Code on the web) reach the EC2 box's port 22 over `wss://ai.origenclub.cn/_chisel/`, so the agent can `ssh ubuntu@...` from inside the sandbox even though the sandbox only has HTTPS egress.
+Goal: let the sandbox (Claude Code on the web) reach the EC2 box's port 22 over `wss://ai.origenclub.cn/_chisel/`, so the agent can `ssh ubuntu@…` from inside the sandbox even though the sandbox only has HTTPS egress.
 
-Topology:
+## Server inventory (verified 2026-05-10)
+
+- Ubuntu 24.04 on AWS (`ip-172-31-34-238`, public IP `13.212.1.7`)
+- TLS terminator: **Caddy 2.11.2** (`/etc/caddy/Caddyfile`), Let's Encrypt cert for `ai.origenclub.cn`
+- Backend: `aichat-relay.service` (Next.js) on `127.0.0.1:8787`
+- sshd: stock, port 22
+- No nginx, no docker
+- Port `8080` is free → chisel will land there on loopback
+
+Topology after this change:
 
 ```
-sandbox  ──HTTPS──▶  nginx :443 (ai.origenclub.cn)  ──proxy /_chisel/──▶  chisel server :8080 (loopback)
-   │                                                                                │
-   └───── chisel client opens local :2222 ───── tunnels TCP ─────▶  127.0.0.1:22 (sshd on EC2)
+sandbox  ──HTTPS──▶  Caddy :443 (ai.origenclub.cn)
+                       ├─ /_chisel/*  ──▶  chisel server :8080 (loopback)
+                       │                       └── tunnels TCP ──▶  127.0.0.1:22 (sshd)
+                       └─ everything else  ──▶  Next.js :8787 (aichat-relay)
 ```
 
 ---
 
 ## Step A. Server-side one-time setup (run on EC2)
 
-SSH into the box (`ssh ubuntu@<ec2-host>`) and paste the entire block below into the shell.
+SSH in (`ssh ubuntu@13.212.1.7`) and paste the entire block below.
 
 ```bash
 set -euo pipefail
 
 # 0) sanity
-command -v nginx >/dev/null || { echo "nginx missing"; exit 1; }
-curl -fsS https://ai.origenclub.cn/ -o /dev/null -w "vhost ok: %{http_code}\n" || true
+command -v caddy >/dev/null || { echo "caddy missing"; exit 1; }
+ss -tln | grep -q ':8080 ' && { echo "port 8080 already in use"; exit 1; }
 
 # 1) install chisel 1.10.1
 curl -fsSL https://github.com/jpillora/chisel/releases/download/v1.10.1/chisel_1.10.1_linux_amd64.gz \
@@ -40,10 +50,10 @@ sudo tee /etc/chisel/users.json >/dev/null <<JSON
 JSON
 sudo chmod 0640 /etc/chisel/users.json
 
-# 3) systemd unit — chisel listens on loopback only; nginx terminates TLS
+# 3) systemd unit — chisel listens on loopback only; Caddy fronts TLS
 sudo tee /etc/systemd/system/chisel.service >/dev/null <<'EOF'
 [Unit]
-Description=chisel server (loopback; fronted by nginx /_chisel/)
+Description=chisel server (loopback; fronted by Caddy /_chisel/)
 After=network.target
 
 [Service]
@@ -66,48 +76,74 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now chisel
 sudo systemctl --no-pager status chisel | head -n 12
 
-# 4) nginx snippet — NOT auto-included; you'll wire it manually below
-sudo tee /etc/nginx/snippets/chisel.conf >/dev/null <<'EOF'
-location /_chisel/ {
-    proxy_pass http://127.0.0.1:8080/;
-    proxy_http_version 1.1;
-    proxy_set_header Host              $host;
-    proxy_set_header X-Real-IP         $remote_addr;
-    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade           $http_upgrade;
-    proxy_set_header Connection        "upgrade";
-    proxy_read_timeout                 86400s;
-    proxy_send_timeout                 86400s;
-    proxy_buffering                    off;
+# 4) Caddy patch — back up, then add /_chisel/* matcher in front of the
+#    existing catch-all reverse_proxy.
+sudo cp -n /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.pre-chisel
+
+sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
+ai.origenclub.cn {
+    encode gzip zstd
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    # Older watch / iOS builds (≤ build 6) emit /v1/... without the /api prefix.
+    # Map them onto the Next.js routes at /api/v1/... so existing TestFlight
+    # users keep working until the next ship lands the corrected URLs.
+    @v1NoApiPrefix path /v1 /v1/*
+    rewrite @v1NoApiPrefix /api{uri}
+
+    # SSH-over-WSS bridge for sandbox access (chisel server on loopback).
+    handle_path /_chisel/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:8787 {
+            flush_interval -1
+            header_up X-Forwarded-Proto https
+        }
+    }
+}
+
+http://13.212.1.7 {
+    redir https://ai.origenclub.cn{uri} permanent
 }
 EOF
 
-# 5) print the secret — copy this into the sandbox env as CHISEL_SECRET
+# 5) validate + reload Caddy
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo systemctl reload caddy
+sudo systemctl --no-pager status caddy | head -n 8
+
+# 6) print the secret — copy this into the sandbox env as CHISEL_SECRET
 echo
 echo "============================ COPY THIS ============================"
 echo "CHISEL_SECRET=${SECRET}"
 echo "==================================================================="
 ```
 
-### Then manually wire the snippet into the vhost
-
-```bash
-sudo $EDITOR /etc/nginx/sites-enabled/<your ai.origenclub.cn vhost file>
-# inside the `server { listen 443 ssl; ... }` block, add:
-#     include /etc/nginx/snippets/chisel.conf;
-
-sudo nginx -t && sudo systemctl reload nginx
-```
-
 ### Verify (run on EC2)
 
 ```bash
+# Caddy proxies the GET to chisel; chisel responds with its hello banner.
 curl -i https://ai.origenclub.cn/_chisel/
-# expect: HTTP/1.1 200 OK and body "Hello from chisel ..."
+# expect: HTTP/2 200, body "Hello from chisel ..."
+
+# Sanity: existing relay still reachable
+curl -sI https://ai.origenclub.cn/ | head -n 3
+# expect: HTTP/2 307 location: /setup  (or whatever the relay normally returns)
 ```
 
-If you get a 404, the `include` line landed in the wrong vhost. If you get 502, the systemd unit isn't running — `sudo journalctl -u chisel -n 50`.
+If verify fails:
+
+- 502 on `/_chisel/` → `sudo journalctl -u chisel -n 50`
+- 404 on `/_chisel/` → Caddyfile didn't reload; `sudo caddy validate ...` and `sudo systemctl reload caddy`
+- Existing site broken → restore: `sudo cp /etc/caddy/Caddyfile.bak.pre-chisel /etc/caddy/Caddyfile && sudo systemctl reload caddy`
 
 ---
 
@@ -121,7 +157,8 @@ In Claude Code on the web → Settings → Secrets/Env, add:
 | `SSH_PRIVATE_KEY_B64` | `base64 -w0 < /path/to/your_key` — the private key whose pubkey is in `~ubuntu/.ssh/authorized_keys` on EC2 |
 
 Notes:
-- The transcript will contain whatever you paste, so prefer a relay-only keypair (regeneratable if leaked) over your daily key.
+
+- The transcript will contain whatever you paste, so prefer a relay-only keypair that you can rotate independently of your daily key.
 - The pubkey side must already be in `/home/ubuntu/.ssh/authorized_keys` on EC2 before Step C will work.
 
 ---
@@ -130,22 +167,35 @@ Notes:
 
 Once you say "secrets 好了", I will:
 
-1. Write `scripts/sandbox-tunnel.sh` — starts `chisel client wss://ai.origenclub.cn/_chisel/ 2222:127.0.0.1:22` in the background using `CHISEL_SECRET`.
+1. Write `scripts/sandbox-tunnel.sh` — starts `chisel client https://ai.origenclub.cn/_chisel/ 2222:127.0.0.1:22` in the background, authenticated with `sandbox:$CHISEL_SECRET`.
 2. Decode `SSH_PRIVATE_KEY_B64` into `~/.ssh/id_relay` (chmod 600) and add a `Host rt` block to `~/.ssh/config` pointing at `127.0.0.1:2222` with that key.
 3. Run the tunnel and verify with `ssh rt 'whoami; hostname'`.
 4. Add a "Server access" section to `CLAUDE.md` documenting the bring-up so future sessions can resume in one command.
 
 ---
 
-## Step D. (Optional) Strip back later
+## Step D. Revoke / rotate
 
-If you ever want to revoke sandbox access:
+Revoke (turn off sandbox SSH path entirely):
 
 ```bash
 sudo systemctl disable --now chisel
-sudo rm -f /etc/systemd/system/chisel.service /etc/chisel/users.json /etc/nginx/snippets/chisel.conf
-# remove the `include /etc/nginx/snippets/chisel.conf;` line from the vhost
-sudo nginx -t && sudo systemctl reload nginx
+sudo cp /etc/caddy/Caddyfile.bak.pre-chisel /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+sudo rm -f /etc/systemd/system/chisel.service /etc/chisel/users.json
+sudo systemctl daemon-reload
 ```
 
-Rotating the secret = re-run Step A's section 2 and 5, then `sudo systemctl restart chisel`, then update `CHISEL_SECRET` in the sandbox env.
+Rotate the secret (chisel keeps running):
+
+```bash
+SECRET=$(openssl rand -hex 32)
+sudo tee /etc/chisel/users.json >/dev/null <<JSON
+{ "sandbox:${SECRET}": ["127.0.0.1:22"] }
+JSON
+sudo chmod 0640 /etc/chisel/users.json
+sudo systemctl restart chisel
+echo "new CHISEL_SECRET=${SECRET}"   # update the sandbox env
+```
+
+Rotate the SSH key: regenerate a fresh keypair locally, replace the `sandbox@aichat-relay` line in `~ubuntu/.ssh/authorized_keys` with the new pubkey, and update `SSH_PRIVATE_KEY_B64` in the sandbox env.
