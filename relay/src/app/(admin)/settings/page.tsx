@@ -32,8 +32,8 @@ import TableCell from "@mui/material/TableCell";
 import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteRounded from "@mui/icons-material/DeleteRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { useSnackbar } from "@/components/snackbar-provider";
+import { useSetPageActions } from "@/components/shell/page-meta";
 import type { SettingsSnapshot, AdminToken } from "@/lib/store/settings-store";
 
 export default function SettingsPage() {
@@ -104,26 +104,21 @@ export default function SettingsPage() {
     }
   };
 
+  useSetPageActions(
+    <Tooltip title="刷新">
+      <IconButton aria-label="刷新" onClick={() => void load()}>
+        <RefreshRounded />
+      </IconButton>
+    </Tooltip>,
+    [],
+  );
+
   if (!snap) {
-    return (
-      <AppShell title="设置">
-        <Typography color="text.secondary">加载中…</Typography>
-      </AppShell>
-    );
+    return <Typography color="text.secondary">加载中…</Typography>;
   }
 
   return (
-    <AppShell
-      title="设置"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "设置" }]}
-      actions={
-        <Tooltip title="刷新">
-          <IconButton aria-label="刷新" onClick={() => void load()}>
-            <RefreshRounded />
-          </IconButton>
-        </Tooltip>
-      }
-    >
+    <>
       <Box sx={{ maxWidth: 1080, mx: "auto" }}>
         <Stack spacing={2.5}>
           <Section
@@ -590,7 +585,7 @@ export default function SettingsPage() {
           <Button onClick={() => setIssuedToken(null)}>知道了</Button>
         </DialogActions>
       </Dialog>
-    </AppShell>
+    </>
   );
 }
 

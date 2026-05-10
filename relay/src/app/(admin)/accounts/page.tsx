@@ -22,8 +22,8 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import DeleteRounded from "@mui/icons-material/DeleteRounded";
 import OpenInNewRounded from "@mui/icons-material/OpenInNewRounded";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { AppShell } from "@/components/shell/app-shell";
 import { useSnackbar } from "@/components/snackbar-provider";
+import { useSetPageActions } from "@/components/shell/page-meta";
 import type {
   Account,
   Device,
@@ -375,30 +375,29 @@ export default function AccountsPage() {
     }
   };
 
+  useSetPageActions(
+    <>
+      {tab === "codes" ? (
+        <Button
+          startIcon={<AddRounded />}
+          variant="contained"
+          size="small"
+          onClick={() => setCodeDialog(true)}
+        >
+          生成激活码
+        </Button>
+      ) : null}
+      <Tooltip title="刷新">
+        <IconButton aria-label="刷新" onClick={() => void load()}>
+          <RefreshRounded />
+        </IconButton>
+      </Tooltip>
+    </>,
+    [tab],
+  );
+
   return (
-    <AppShell
-      title="账户"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "账户" }]}
-      actions={
-        <>
-          {tab === "codes" ? (
-            <Button
-              startIcon={<AddRounded />}
-              variant="contained"
-              size="small"
-              onClick={() => setCodeDialog(true)}
-            >
-              生成激活码
-            </Button>
-          ) : null}
-          <Tooltip title="刷新">
-            <IconButton aria-label="刷新" onClick={() => void load()}>
-              <RefreshRounded />
-            </IconButton>
-          </Tooltip>
-        </>
-      }
-    >
+    <>
       <Card>
         <Stack
           direction={{ xs: "column", md: "row" }}
@@ -509,6 +508,6 @@ export default function AccountsPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    </AppShell>
+    </>
   );
 }

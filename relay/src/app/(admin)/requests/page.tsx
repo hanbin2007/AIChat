@@ -22,9 +22,9 @@ import PauseRounded from "@mui/icons-material/PauseRounded";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import CloseRounded from "@mui/icons-material/CloseRounded";
 import { DataGrid, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
-import { AppShell } from "@/components/shell/app-shell";
 import { Markdown } from "@/components/markdown";
 import { useSnackbar } from "@/components/snackbar-provider";
+import { useSetPageActions } from "@/components/shell/page-meta";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { Conversation } from "@/lib/store/conversations";
 
@@ -188,32 +188,31 @@ export default function RequestsPage() {
 
   const liveOrHistory = tab === "live" || tab === "history";
 
+  useSetPageActions(
+    liveOrHistory ? (
+      <>
+        {tab === "live" ? (
+          <Tooltip title={paused ? "恢复实时" : "暂停实时"}>
+            <IconButton
+              aria-label={paused ? "恢复" : "暂停"}
+              onClick={() => setPaused((p) => !p)}
+            >
+              {paused ? <PlayArrowRounded /> : <PauseRounded />}
+            </IconButton>
+          </Tooltip>
+        ) : null}
+        <Tooltip title="刷新">
+          <IconButton aria-label="刷新" onClick={() => void fetchHistory()}>
+            <RefreshRounded />
+          </IconButton>
+        </Tooltip>
+      </>
+    ) : null,
+    [tab, paused, liveOrHistory],
+  );
+
   return (
-    <AppShell
-      title="请求日志"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "请求日志" }]}
-      actions={
-        liveOrHistory ? (
-          <>
-            {tab === "live" ? (
-              <Tooltip title={paused ? "恢复实时" : "暂停实时"}>
-                <IconButton
-                  aria-label={paused ? "恢复" : "暂停"}
-                  onClick={() => setPaused((p) => !p)}
-                >
-                  {paused ? <PlayArrowRounded /> : <PauseRounded />}
-                </IconButton>
-              </Tooltip>
-            ) : null}
-            <Tooltip title="刷新">
-              <IconButton aria-label="刷新" onClick={() => void fetchHistory()}>
-                <RefreshRounded />
-              </IconButton>
-            </Tooltip>
-          </>
-        ) : null
-      }
-    >
+    <>
       <Stack spacing={2}>
         <Card>
           <CardContent>
@@ -441,6 +440,6 @@ export default function RequestsPage() {
           </Box>
         ) : null}
       </Drawer>
-    </AppShell>
+    </>
   );
 }

@@ -5,17 +5,13 @@ import CardContent from "@mui/material/CardContent";
 import { Stack } from "@/components/lib/stack";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import { AppShell } from "@/components/shell/app-shell";
 import { DEFAULT_MODELS } from "@/lib/gemini/models";
 
 export const dynamic = "force-dynamic";
 
 export default function ModelsPage() {
   return (
-    <AppShell
-      title="模型"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "模型" }]}
-    >
+    <>
       <Box
         sx={{
           display: "grid",
@@ -90,6 +86,6 @@ export default function ModelsPage() {
           </Card>
         ))}
       </Box>
-    </AppShell>
+    </>
   );
 }

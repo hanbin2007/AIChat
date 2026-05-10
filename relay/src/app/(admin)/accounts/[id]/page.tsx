@@ -15,7 +15,6 @@ import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import IconButton from "@mui/material/IconButton";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { billingStore } from "@/lib/store/billing-store";
 import type { Account, Device, Key, Grant, UsageRecord } from "@/lib/billing/types";
 
@@ -46,19 +45,7 @@ export default async function AccountDetailPage({
     .sort()[0];
 
   return (
-    <AppShell
-      title={account.displayName ?? "账户详情"}
-      breadcrumb={[
-        { label: "AIChat Relay", href: "/dashboard" },
-        { label: "账户", href: "/accounts" },
-        { label: account.displayName ?? account.accountID },
-      ]}
-      actions={
-        <IconButton aria-label="返回" component={Link} href="/accounts">
-          <ArrowBackRounded />
-        </IconButton>
-      }
-    >
+    <>
       <Stack spacing={3}>
         <Card>
           <CardContent>
@@ -247,7 +234,7 @@ export default async function AccountDetailPage({
           )}
         </Section>
       </Stack>
-    </AppShell>
+    </>
   );
 }
 

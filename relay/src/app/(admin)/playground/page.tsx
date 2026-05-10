@@ -24,8 +24,8 @@ import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import VisibilityOffRounded from "@mui/icons-material/VisibilityOffRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { Markdown } from "@/components/markdown";
+import { useSetPageActions } from "@/components/shell/page-meta";
 import { DEFAULT_MODELS } from "@/lib/gemini/models";
 
 type Intensity = "fast" | "balanced" | "deep" | "extreme";
@@ -180,18 +180,17 @@ export default function PlaygroundPage() {
     }
   }, [draft, model, intensity, search, code, token, system, messages, streaming]);
 
+  useSetPageActions(
+    <Tooltip title={showRaw ? "隐藏原始事件" : "显示原始事件"}>
+      <IconButton aria-label="切换原始事件" onClick={() => setShowRaw((v) => !v)}>
+        {showRaw ? <VisibilityRounded /> : <VisibilityOffRounded />}
+      </IconButton>
+    </Tooltip>,
+    [showRaw],
+  );
+
   return (
-    <AppShell
-      title="Playground"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "Playground" }]}
-      actions={
-        <Tooltip title={showRaw ? "隐藏原始事件" : "显示原始事件"}>
-          <IconButton aria-label="切换原始事件" onClick={() => setShowRaw((v) => !v)}>
-            {showRaw ? <VisibilityRounded /> : <VisibilityOffRounded />}
-          </IconButton>
-        </Tooltip>
-      }
-    >
+    <>
       <Box
         sx={{
           display: "grid",
@@ -391,6 +390,6 @@ export default function PlaygroundPage() {
           </Card>
         ) : null}
       </Box>
-    </AppShell>
+    </>
   );
 }

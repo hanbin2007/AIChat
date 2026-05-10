@@ -16,7 +16,6 @@ import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { Markdown } from "@/components/markdown";
 import { getConversation } from "@/lib/store/conversations";
 
@@ -39,23 +38,7 @@ export default async function ConversationDetailPage({
   const modelMax = Math.max(...modelTotals.values(), 1);
 
   return (
-    <AppShell
-      title={conv.title}
-      breadcrumb={[
-        { label: "AIChat Relay", href: "/dashboard" },
-        { label: "请求日志", href: "/requests" },
-        { label: "对话详情" },
-      ]}
-      actions={
-        <IconButton
-          component={Link}
-          href="/requests"
-          aria-label="返回请求日志"
-        >
-          <ArrowBackRounded />
-        </IconButton>
-      }
-    >
+    <>
       <Stack spacing={3}>
         <Card>
           <CardContent>
@@ -260,7 +243,7 @@ export default async function ConversationDetailPage({
           </Box>
         </Box>
       </Stack>
-    </AppShell>
+    </>
   );
 }
 

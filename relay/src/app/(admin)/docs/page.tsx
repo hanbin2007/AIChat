@@ -5,8 +5,6 @@ import CardHeader from "@mui/material/CardHeader";
 import { Stack } from "@/components/lib/stack";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import { AppShell } from "@/components/shell/app-shell";
-
 interface Endpoint {
   method: string;
   path: string;
@@ -72,10 +70,7 @@ RELAY_BEARER_TOKEN = <在 .env 中配置的 RELAY_BEARER_TOKEN>`;
 
 export default function DocsPage() {
   return (
-    <AppShell
-      title="API 文档"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "API 文档" }]}
-    >
+    <>
       <Box
         sx={{
           display: "grid",
@@ -164,6 +159,6 @@ export default function DocsPage() {
           ))}
         </Stack>
       </Box>
-    </AppShell>
+    </>
   );
 }

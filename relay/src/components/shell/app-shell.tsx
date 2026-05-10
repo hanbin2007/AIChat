@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Box from "@mui/material/Box";
@@ -25,23 +25,39 @@ import { NavIcon } from "./nav-icon";
 import { ColorSchemeToggle } from "./color-scheme-toggle";
 import { CommandPalette } from "./command-palette";
 import { useSnackbar } from "@/components/snackbar-provider";
+import { usePageActions } from "./page-meta";
 
 const RAIL_COLLAPSED = 80;
 const RAIL_EXPANDED = 256;
 
 interface Props {
-  title: string;
-  breadcrumb?: { label: string; href?: string }[];
-  actions?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function AppShell({ title, breadcrumb, actions, children }: Props) {
+export function AppShell({ children }: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const snackbar = useSnackbar();
   const [expanded, setExpanded] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const { actions } = usePageActions();
+
+  const currentItem = useMemo(() => {
+    if (!pathname) return null;
+    return (
+      NAV_ITEMS.find((n) => pathname === n.href || pathname.startsWith(n.href + "/")) ?? null
+    );
+  }, [pathname]);
+
+  const title = currentItem?.label ?? "AIChat Relay";
+
+  const breadcrumb: { label: string; href?: string }[] = useMemo(() => {
+    const trail: { label: string; href?: string }[] = [
+      { label: "AIChat Relay", href: "/dashboard" },
+    ];
+    if (currentItem) trail.push({ label: currentItem.label });
+    return trail;
+  }, [currentItem]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -233,25 +249,23 @@ export function AppShell({ title, breadcrumb, actions, children }: Props) {
         <AppBar position="sticky">
           <Toolbar sx={{ gap: 2, minHeight: { xs: 64 } }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              {breadcrumb && breadcrumb.length > 0 ? (
-                <Breadcrumbs sx={{ mb: 0.5, fontSize: "0.75rem" }}>
-                  {breadcrumb.map((b, i) =>
-                    b.href ? (
-                      <Link
-                        key={i}
-                        href={b.href}
-                        style={{ color: "var(--mui-palette-text-secondary)" }}
-                      >
-                        {b.label}
-                      </Link>
-                    ) : (
-                      <Typography key={i} variant="caption" color="text.secondary">
-                        {b.label}
-                      </Typography>
-                    ),
-                  )}
-                </Breadcrumbs>
-              ) : null}
+              <Breadcrumbs sx={{ mb: 0.5, fontSize: "0.75rem" }}>
+                {breadcrumb.map((b, i) =>
+                  b.href ? (
+                    <Link
+                      key={i}
+                      href={b.href}
+                      style={{ color: "var(--mui-palette-text-secondary)" }}
+                    >
+                      {b.label}
+                    </Link>
+                  ) : (
+                    <Typography key={i} variant="caption" color="text.secondary">
+                      {b.label}
+                    </Typography>
+                  ),
+                )}
+              </Breadcrumbs>
               <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2 }} noWrap>
                 {title}
               </Typography>

@@ -15,7 +15,6 @@ import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { AppShell } from "@/components/shell/app-shell";
 import { useSnackbar } from "@/components/snackbar-provider";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { AuditEntry } from "@/lib/store/audit-log";
@@ -130,10 +129,7 @@ export default function ObservabilityPage() {
   );
 
   return (
-    <AppShell
-      title="可观测性"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "可观测性" }]}
-    >
+    <>
       <Card>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
           <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)}>
@@ -251,7 +247,7 @@ export default function ObservabilityPage() {
           ) : null}
         </Box>
       </Card>
-    </AppShell>
+    </>
   );
 }
 

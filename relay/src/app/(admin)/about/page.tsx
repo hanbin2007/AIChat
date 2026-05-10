@@ -7,7 +7,6 @@ import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
 import Button from "@mui/material/Button";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { configDiagnostics } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -55,10 +54,7 @@ export default function AboutPage() {
   ];
 
   return (
-    <AppShell
-      title="关于"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "关于" }]}
-    >
+    <>
       <Box sx={{ maxWidth: 880, mx: "auto" }}>
         <Stack spacing={3}>
           <Card>
@@ -138,6 +134,6 @@ export default function AboutPage() {
           </Card>
         </Stack>
       </Box>
-    </AppShell>
+    </>
   );
 }

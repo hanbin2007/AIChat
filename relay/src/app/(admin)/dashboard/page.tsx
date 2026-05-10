@@ -12,7 +12,6 @@ import TableBody from "@mui/material/TableBody";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
 import LinearProgress from "@mui/material/LinearProgress";
-import { AppShell } from "@/components/shell/app-shell";
 import { KpiCard } from "@/components/kpi-card";
 import { LaunchChecklist, type ChecklistItem } from "@/components/launch-checklist";
 import { configDiagnostics } from "@/lib/config";
@@ -113,10 +112,7 @@ export default async function DashboardPage() {
   ];
 
   return (
-    <AppShell
-      title="概览"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "概览" }]}
-    >
+    <>
       <Stack spacing={3}>
         <Box
           sx={{
@@ -338,6 +334,6 @@ export default async function DashboardPage() {
           可用额度合计 {formatNumber(totalCredits)} credits
         </Typography>
       </Stack>
-    </AppShell>
+    </>
   );
 }

@@ -28,8 +28,8 @@ import Chip from "@mui/material/Chip";
 import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteRounded from "@mui/icons-material/DeleteRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
-import { AppShell } from "@/components/shell/app-shell";
 import { useSnackbar } from "@/components/snackbar-provider";
+import { useSetPageActions } from "@/components/shell/page-meta";
 import type { MeteringPolicy, Plan, MeteringRate } from "@/lib/billing/types";
 
 type TabKey = "plans" | "policy" | "transactions";
@@ -120,18 +120,17 @@ export default function BillingPage() {
     return { input: inputCredits, output: outputCredits, search: searchCredits, audio: audioCredits, total, usd };
   }, [policy, calcInput, calcOutput, calcSearch, calcAudio]);
 
+  useSetPageActions(
+    <Tooltip title="刷新">
+      <IconButton aria-label="刷新" onClick={() => void load()}>
+        <RefreshRounded />
+      </IconButton>
+    </Tooltip>,
+    [],
+  );
+
   return (
-    <AppShell
-      title="计费工作室"
-      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "计费工作室" }]}
-      actions={
-        <Tooltip title="刷新">
-          <IconButton aria-label="刷新" onClick={() => void load()}>
-            <RefreshRounded />
-          </IconButton>
-        </Tooltip>
-      }
-    >
+    <>
       <Stack spacing={2}>
         {dirty ? (
           <Alert
@@ -443,7 +442,7 @@ export default function BillingPage() {
           </Box>
         </Card>
       </Stack>
-    </AppShell>
+    </>
   );
 }
 
