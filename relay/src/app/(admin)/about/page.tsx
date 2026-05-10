@@ -1,77 +1,143 @@
-import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/m3";
-import { config, configDiagnostics } from "@/lib/config";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import Button from "@mui/material/Button";
+import DownloadRounded from "@mui/icons-material/DownloadRounded";
+import { AppShell } from "@/components/shell/app-shell";
+import { configDiagnostics } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 export default function AboutPage() {
   const diag = configDiagnostics();
+
+  const fields: Array<{ label: string; value: string | React.ReactNode }> = [
+    { label: "Node 版本", value: process.version },
+    { label: "进程端口", value: String(diag.port) },
+    { label: "数据目录", value: diag.dataDir },
+    { label: "计费模式", value: diag.billingMode },
+    {
+      label: "Gemini API Key",
+      value: diag.geminiConfigured ? (
+        <Chip size="small" label="已配置" color="success" />
+      ) : (
+        <Chip size="small" label="未配置" color="error" />
+      ),
+    },
+    {
+      label: "Bearer Token",
+      value: diag.bearerConfigured ? (
+        <Chip size="small" label="已配置" color="success" />
+      ) : (
+        <Chip size="small" label="未配置" color="error" />
+      ),
+    },
+    {
+      label: "Session Secret",
+      value: diag.sessionSecretConfigured ? (
+        <Chip size="small" label="已配置" color="success" />
+      ) : (
+        <Chip size="small" label="未配置" color="error" />
+      ),
+    },
+    {
+      label: "管理员",
+      value: diag.adminConfigured ? (
+        <Chip size="small" label="已配置" color="success" />
+      ) : (
+        <Chip size="small" label="未配置" color="error" />
+      ),
+    },
+  ];
+
   return (
-    <AdminShell title="About" breadcrumb={["System"]}>
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
-        <Card variant="elevated" className="p-6">
-          <CardTitle>AIChat Relay</CardTitle>
-          <p className="mt-2 text-m3-body-m text-on-surface-variant">
-            企业级 Next.js 中继网关。与 macOS AIChat Relay 在路径、SSE 事件名、Gemini 请求变换上完全兼容；
-            在此之上提供 Material Design 3 管理控制台、计费状态机、可视化策略编辑器，以及会话级对话重建。
-          </p>
-        </Card>
+    <AppShell
+      title="关于"
+      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "关于" }]}
+    >
+      <Box sx={{ maxWidth: 880, mx: "auto" }}>
+        <Stack spacing={3}>
+          <Card>
+            <CardContent>
+              <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
+                AIChat Relay
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                AIChat 的中继网关：托管 Gemini API Key、按 Bearer Token 网闸、
+                按 credits 计量、SSE 转发与对话还原。Wire-compatible 于 macOS AIChat Relay。
+              </Typography>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>部署信息</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-1 gap-3 md:grid-cols-2 text-m3-body-m">
-              <Info label="版本" value="1.0.0" />
-              <Info label="Node" value={process.version} />
-              <Info label="监听端口" value={String(config.port)} />
-              <Info label="数据目录" value={config.dataDir} />
-              <Info label="Billing 模式" value={diag.billingMode} />
-              <Info label="Gemini key" value={diag.geminiConfigured ? "已配置" : "未配置"} />
-              <Info label="Bearer token" value={diag.bearerConfigured ? "已配置" : "未配置"} />
-              <Info label="Session secret" value={diag.sessionSecretConfigured ? "已配置" : "未配置"} />
-            </dl>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader title="部署信息" />
+            <CardContent>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                  rowGap: 1.5,
+                  columnGap: 3,
+                }}
+              >
+                {fields.map((f) => (
+                  <Stack key={f.label} direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="body2" color="text.secondary">
+                      {f.label}
+                    </Typography>
+                    {typeof f.value === "string" ? (
+                      <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                        {f.value}
+                      </Typography>
+                    ) : (
+                      f.value
+                    )}
+                  </Stack>
+                ))}
+              </Box>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>诊断与支持</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <a
-              href="/api/admin/requests"
-              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
-            >
-              下载 requests JSON
-            </a>
-            <a
-              href="/api/admin/audit"
-              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
-            >
-              下载 audit JSON
-            </a>
-            <a
-              href="/api/health"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
-            >
-              /api/health
-            </a>
-          </CardContent>
-        </Card>
-      </div>
-    </AdminShell>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-m3-label-m text-on-surface-variant">{label}</dt>
-      <dd className="mt-1 font-mono">{value}</dd>
-    </div>
+          <Card>
+            <CardHeader title="诊断下载" />
+            <CardContent>
+              <Stack direction="row" spacing={1.5} flexWrap="wrap" sx={{ gap: 1.5 }}>
+                <Button
+                  startIcon={<DownloadRounded />}
+                  variant="outlined"
+                  component="a"
+                  href="/api/admin/requests"
+                  download="relay-requests.json"
+                >
+                  请求日志
+                </Button>
+                <Button
+                  startIcon={<DownloadRounded />}
+                  variant="outlined"
+                  component="a"
+                  href="/api/admin/audit"
+                  download="relay-audit.json"
+                >
+                  审计日志
+                </Button>
+                <Button
+                  startIcon={<DownloadRounded />}
+                  variant="outlined"
+                  component="a"
+                  href="/api/admin/metrics/prometheus"
+                  download="relay-metrics.txt"
+                >
+                  Prometheus 指标
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Stack>
+      </Box>
+    </AppShell>
   );
 }

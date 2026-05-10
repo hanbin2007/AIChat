@@ -1,9 +1,38 @@
 "use client";
-import * as React from "react";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Card, CardContent, Chip, Tabs, Icon, IconButton, TextField, Button, Dialog, useSnackbar } from "@/components/m3";
-import type { Account, Device, Key, ActivationCode, PairingToken } from "@/lib/billing/types";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import { Stack } from "@/components/lib/stack";
+import Tabs from "@mui/material/Tabs";
+import Tab from "@mui/material/Tab";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import TextField from "@mui/material/TextField";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Typography from "@mui/material/Typography";
+import AddRounded from "@mui/icons-material/AddRounded";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import DeleteRounded from "@mui/icons-material/DeleteRounded";
+import OpenInNewRounded from "@mui/icons-material/OpenInNewRounded";
+import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import { AppShell } from "@/components/shell/app-shell";
+import { useSnackbar } from "@/components/snackbar-provider";
+import type {
+  Account,
+  Device,
+  Key,
+  ActivationCode,
+  PairingToken,
+} from "@/lib/billing/types";
+
+type TabKey = "accounts" | "devices" | "keys" | "codes" | "pairings";
 
 interface BillingData {
   accounts: Account[];
@@ -13,407 +42,473 @@ interface BillingData {
   pairingTokens: PairingToken[];
 }
 
-type Tab = "accounts" | "devices" | "keys" | "codes" | "pairing";
-
 export default function AccountsPage() {
-  const snack = useSnackbar();
-  const [tab, setTab] = React.useState<Tab>("accounts");
-  const [data, setData] = React.useState<BillingData | null>(null);
-  const [query, setQuery] = React.useState("");
-  const [grantAccount, setGrantAccount] = React.useState<Account | null>(null);
-  const [codeDialog, setCodeDialog] = React.useState(false);
+  const snackbar = useSnackbar();
+  const [tab, setTab] = useState<TabKey>("accounts");
+  const [data, setData] = useState<BillingData | null>(null);
+  const [search, setSearch] = useState("");
+  const [codeDialog, setCodeDialog] = useState(false);
+  const [codeForm, setCodeForm] = useState({ count: 1, credits: 100, note: "" });
+  const [busy, setBusy] = useState(false);
 
-  async function refresh() {
+  const load = useCallback(async () => {
     const res = await fetch("/api/admin/billing");
-    setData(await res.json());
-  }
-  React.useEffect(() => { refresh(); }, []);
+    if (!res.ok) {
+      snackbar.push({ message: "拉取计费数据失败", severity: "error" });
+      return;
+    }
+    const json = (await res.json()) as BillingData;
+    setData(json);
+  }, [snackbar]);
 
-  const q = query.toLowerCase();
-  const accounts = (data?.accounts ?? []).filter((a) =>
-    !q || a.accountID.includes(q) || (a.displayName ?? "").toLowerCase().includes(q),
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const counts = {
+    accounts: data?.accounts.length ?? 0,
+    devices: data?.devices.length ?? 0,
+    keys: data?.keys.length ?? 0,
+    codes: data?.activationCodes.length ?? 0,
+    pairings: data?.pairingTokens.length ?? 0,
+  };
+
+  const filterRows = <T,>(rows: T[], match: (row: T) => string): T[] => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => match(r).toLowerCase().includes(q));
+  };
+
+  const accountCols = useMemo<GridColDef<Account>[]>(
+    () => [
+      {
+        field: "displayName",
+        headerName: "名称",
+        flex: 1.4,
+        minWidth: 220,
+        renderCell: (p) => (
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {p.row.displayName ?? "（未命名）"}
+            </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontFamily: "var(--font-mono)" }}
+            >
+              {p.row.accountID}
+            </Typography>
+          </Box>
+        ),
+      },
+      {
+        field: "state",
+        headerName: "状态",
+        width: 110,
+        renderCell: (p) => <Chip size="small" label={p.row.state} />,
+      },
+      { field: "source", headerName: "来源", width: 140 },
+      {
+        field: "creditBalance",
+        headerName: "余额",
+        width: 110,
+        renderCell: (p) => (
+          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+            {p.row.creditBalance}
+          </Typography>
+        ),
+      },
+      {
+        field: "creditExpiresAt",
+        headerName: "到期",
+        width: 160,
+        valueGetter: (_v, row) =>
+          row.creditExpiresAt ? new Date(row.creditExpiresAt).toLocaleDateString("zh-Hans") : "—",
+      },
+      {
+        field: "lastUsageAt",
+        headerName: "最近使用",
+        width: 160,
+        valueGetter: (_v, row) =>
+          row.lastUsageAt ? new Date(row.lastUsageAt).toLocaleString("zh-Hans") : "—",
+      },
+      {
+        field: "actions",
+        headerName: " ",
+        width: 80,
+        sortable: false,
+        renderCell: (p) => (
+          <Tooltip title="查看详情">
+            <IconButton
+              aria-label="查看详情"
+              size="small"
+              component={Link}
+              href={`/accounts/${p.row.accountID}`}
+            >
+              <OpenInNewRounded fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ),
+      },
+    ],
+    [],
   );
-  const devices = (data?.devices ?? []).filter((d) =>
-    !q || d.deviceID.toLowerCase().includes(q) || (d.alias ?? "").toLowerCase().includes(q),
+
+  const deviceCols = useMemo<GridColDef<Device>[]>(
+    () => [
+      { field: "platform", headerName: "平台", width: 110 },
+      {
+        field: "alias",
+        headerName: "设备",
+        flex: 1,
+        minWidth: 180,
+        renderCell: (p) => (
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {p.row.alias ?? "—"}
+            </Typography>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontFamily: "var(--font-mono)" }}
+            >
+              {p.row.deviceID}
+            </Typography>
+          </Box>
+        ),
+      },
+      {
+        field: "accountID",
+        headerName: "所属账户",
+        flex: 1,
+        minWidth: 180,
+        renderCell: (p) => (
+          <Box
+            component={Link}
+            href={`/accounts/${p.row.accountID}`}
+            sx={{ fontFamily: "var(--font-mono)", color: "primary.main" }}
+          >
+            {p.row.accountID}
+          </Box>
+        ),
+      },
+      {
+        field: "lastSeenAt",
+        headerName: "最近上线",
+        width: 160,
+        valueGetter: (_v, row) =>
+          row.lastSeenAt ? new Date(row.lastSeenAt).toLocaleString("zh-Hans") : "—",
+      },
+    ],
+    [],
   );
-  const keys = (data?.keys ?? []).filter((k) =>
-    !q || k.keyValue.toLowerCase().includes(q) || (k.note ?? "").toLowerCase().includes(q),
+
+  const keyCols = useMemo<GridColDef<Key>[]>(
+    () => [
+      {
+        field: "keyValue",
+        headerName: "Key",
+        flex: 1.2,
+        minWidth: 200,
+        renderCell: (p) => (
+          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+            {p.row.keyValue.slice(0, 8)}…
+          </Typography>
+        ),
+      },
+      {
+        field: "accountID",
+        headerName: "所属账户",
+        flex: 1,
+        minWidth: 180,
+        renderCell: (p) => (
+          <Box
+            component={Link}
+            href={`/accounts/${p.row.accountID}`}
+            sx={{ fontFamily: "var(--font-mono)", color: "primary.main" }}
+          >
+            {p.row.accountID}
+          </Box>
+        ),
+      },
+      {
+        field: "state",
+        headerName: "状态",
+        width: 110,
+        renderCell: (p) => <Chip size="small" label={p.row.state} />,
+      },
+      { field: "source", headerName: "来源", width: 140 },
+      {
+        field: "issuedAt",
+        headerName: "签发于",
+        width: 160,
+        valueGetter: (_v, row) => new Date(row.issuedAt).toLocaleString("zh-Hans"),
+      },
+    ],
+    [],
   );
-  const codes = (data?.activationCodes ?? []).filter((c) =>
-    !q || c.code.toLowerCase().includes(q),
+
+  const revokeCode = useCallback(
+    async (code: string) => {
+      if (!confirm(`确定要撤销激活码 ${code} 吗？`)) return;
+      const res = await fetch(`/api/admin/billing/activation-codes/${code}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        snackbar.push({ message: "已撤销", severity: "success" });
+        void load();
+      } else {
+        snackbar.push({ message: "撤销失败", severity: "error" });
+      }
+    },
+    [snackbar, load],
   );
 
-  async function revokeCode(code: string) {
-    if (!confirm(`吊销激活码 ${code}？`)) return;
-    await fetch(`/api/admin/billing/activation-codes/${encodeURIComponent(code)}`, { method: "DELETE" });
-    snack.push({ message: "激活码已吊销" });
-    refresh();
-  }
-  async function revokeToken(token: string) {
-    if (!confirm("吊销配对码？")) return;
-    await fetch(`/api/admin/billing/pairing/${encodeURIComponent(token)}`, { method: "DELETE" });
-    snack.push({ message: "配对码已吊销" });
-    refresh();
-  }
-  async function unbindDevice(id: string) {
-    if (!confirm("解绑设备会同时吊销其 key。继续？")) return;
-    await fetch(`/api/admin/billing/device?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    snack.push({ message: "设备已解绑" });
-    refresh();
-  }
-
-  return (
-    <AdminShell title="Accounts" breadcrumb={["Billing"]}>
-      <div className="space-y-4 p-6">
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "accounts", label: `账户 (${data?.accounts.length ?? 0})` },
-            { value: "devices", label: `设备 (${data?.devices.length ?? 0})` },
-            { value: "keys", label: `Keys (${data?.keys.length ?? 0})` },
-            { value: "codes", label: `激活码 (${data?.activationCodes.length ?? 0})` },
-            { value: "pairing", label: `配对 (${data?.pairingTokens.length ?? 0})` },
-          ]}
-        />
-        <div className="flex items-center gap-3">
-          <div className="flex-1 max-w-md">
-            <TextField leading="search" placeholder="搜索" value={query} onChange={(e) => setQuery(e.target.value)} variant="filled" />
-          </div>
-          {tab === "codes" && <Button icon="add" onClick={() => setCodeDialog(true)}>生成激活码</Button>}
-        </div>
-
-        <Card>
-          <CardContent className="p-0">
-            {tab === "accounts" && <AccountTable accounts={accounts} onGrant={setGrantAccount} />}
-            {tab === "devices" && <DeviceTable devices={devices} onUnbind={unbindDevice} />}
-            {tab === "keys" && <KeyTable keys={keys} />}
-            {tab === "codes" && <CodeTable codes={codes} onRevoke={revokeCode} />}
-            {tab === "pairing" && <PairingTable tokens={data?.pairingTokens ?? []} onRevoke={revokeToken} />}
-          </CardContent>
-        </Card>
-      </div>
-
-      {grantAccount && (
-        <GrantDialog
-          account={grantAccount}
-          onClose={() => setGrantAccount(null)}
-          onDone={() => {
-            setGrantAccount(null);
-            refresh();
-            snack.push({ message: "额度已发放" });
-          }}
-        />
-      )}
-      {codeDialog && (
-        <ActivationCodeDialog
-          onClose={() => setCodeDialog(false)}
-          onDone={() => {
-            setCodeDialog(false);
-            refresh();
-            snack.push({ message: "激活码已生成" });
-          }}
-        />
-      )}
-    </AdminShell>
+  const codeCols = useMemo<GridColDef<ActivationCode>[]>(
+    () => [
+      {
+        field: "code",
+        headerName: "激活码",
+        flex: 1,
+        minWidth: 180,
+        renderCell: (p) => (
+          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+            {p.row.code}
+          </Typography>
+        ),
+      },
+      { field: "plan", headerName: "套餐", width: 140, valueGetter: (_v, row) => row.plan ?? "—" },
+      {
+        field: "credits",
+        headerName: "Credits",
+        width: 100,
+      },
+      {
+        field: "state",
+        headerName: "状态",
+        width: 110,
+        renderCell: (p) => <Chip size="small" label={p.row.state} />,
+      },
+      {
+        field: "expiresAt",
+        headerName: "过期",
+        width: 160,
+        valueGetter: (_v, row) =>
+          row.expiresAt ? new Date(row.expiresAt).toLocaleString("zh-Hans") : "—",
+      },
+      { field: "note", headerName: "备注", flex: 1 },
+      {
+        field: "actions",
+        headerName: " ",
+        width: 80,
+        sortable: false,
+        renderCell: (p) =>
+          p.row.state === "unused" ? (
+            <Tooltip title="撤销">
+              <IconButton
+                aria-label="撤销激活码"
+                size="small"
+                onClick={() => void revokeCode(p.row.code)}
+              >
+                <DeleteRounded fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : null,
+      },
+    ],
+    [revokeCode],
   );
-}
 
-function AccountTable({ accounts, onGrant }: { accounts: Account[]; onGrant: (a: Account) => void }) {
-  if (accounts.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有账户</div>;
-  return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">名称</th>
-          <th className="px-3 py-2">状态</th>
-          <th className="px-3 py-2">来源</th>
-          <th className="px-3 py-2">余额</th>
-          <th className="px-3 py-2">到期</th>
-          <th className="px-3 py-2">最近使用</th>
-          <th className="px-3 py-2 w-24"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {accounts.map((a) => (
-          <tr key={a.accountID} className="border-t border-outline-variant">
-            <td className="px-3 py-2">
-              <Link href={`/accounts/${a.accountID}`} className="text-primary hover:underline">
-                {a.displayName ?? a.accountID.slice(0, 8)}
-              </Link>
-              <div className="font-mono text-m3-label-s text-on-surface-variant">{a.accountID}</div>
-            </td>
-            <td className="px-3 py-2">
-              <Badge tone={a.state === "active" ? "success" : a.state === "paused" ? "warn" : "error"}>
-                {a.state}
-              </Badge>
-            </td>
-            <td className="px-3 py-2">{a.source}</td>
-            <td className="px-3 py-2">{a.creditBalance.toLocaleString()}</td>
-            <td className="px-3 py-2">{a.creditExpiresAt ? new Date(a.creditExpiresAt).toLocaleDateString() : "—"}</td>
-            <td className="px-3 py-2">{a.lastUsageAt ? new Date(a.lastUsageAt).toLocaleString() : "—"}</td>
-            <td className="px-3 py-2 text-right">
-              <IconButton icon="add_card" onClick={() => onGrant(a)} aria-label="发额度" />
-              <Link href={`/accounts/${a.accountID}`} aria-label="详情">
-                <IconButton icon="arrow_forward" aria-label="详情" />
-              </Link>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+  const pairingCols = useMemo<GridColDef<PairingToken>[]>(
+    () => [
+      {
+        field: "token",
+        headerName: "Token",
+        flex: 1,
+        minWidth: 200,
+        renderCell: (p) => (
+          <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+            {p.row.token.slice(0, 12)}…
+          </Typography>
+        ),
+      },
+      {
+        field: "accountID",
+        headerName: "账户",
+        flex: 1,
+        minWidth: 180,
+      },
+      {
+        field: "issuedBy",
+        headerName: "由设备",
+        flex: 1,
+        minWidth: 180,
+      },
+      {
+        field: "expiresAt",
+        headerName: "过期",
+        width: 200,
+        valueGetter: (_v, row) => new Date(row.expiresAt).toLocaleString("zh-Hans"),
+      },
+    ],
+    [],
   );
-}
 
-function DeviceTable({ devices, onUnbind }: { devices: Device[]; onUnbind: (id: string) => void }) {
-  if (devices.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有设备</div>;
-  return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">设备</th>
-          <th className="px-3 py-2">平台</th>
-          <th className="px-3 py-2">账户</th>
-          <th className="px-3 py-2">Key</th>
-          <th className="px-3 py-2">最近</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {devices.map((d) => (
-          <tr key={d.deviceID} className="border-t border-outline-variant">
-            <td className="px-3 py-2">
-              <div className="font-medium">{d.alias ?? d.deviceID.slice(0, 10)}</div>
-              <div className="font-mono text-m3-label-s text-on-surface-variant">{d.deviceID}</div>
-            </td>
-            <td className="px-3 py-2">
-              <span className="inline-flex items-center gap-1">
-                <Icon name={d.platform === "watch" ? "watch" : d.platform === "iPhone" ? "phone_iphone" : "computer"} size={18} />
-                {d.platform}
-              </span>
-            </td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">
-              <Link className="text-primary hover:underline" href={`/accounts/${d.accountID}`}>{d.accountID.slice(0, 8)}</Link>
-            </td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{d.keyID?.slice(0, 8) ?? "—"}</td>
-            <td className="px-3 py-2">{d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "—"}</td>
-            <td className="px-3 py-2">
-              <IconButton icon="link_off" size="sm" onClick={() => onUnbind(d.deviceID)} aria-label="解绑" />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function KeyTable({ keys }: { keys: Key[] }) {
-  const [reveal, setReveal] = React.useState(false);
-  if (keys.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有 Key</div>;
-  return (
-    <>
-      <div className="flex items-center justify-end gap-2 px-3 py-2">
-        <Chip selected={reveal} onClick={() => setReveal((v) => !v)} icon="visibility">
-          {reveal ? "隐藏" : "显示"}明文
-        </Chip>
-      </div>
-      <table className="w-full text-left text-m3-body-s">
-        <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-          <tr>
-            <th className="px-3 py-2">Key</th>
-            <th className="px-3 py-2">账户</th>
-            <th className="px-3 py-2">状态</th>
-            <th className="px-3 py-2">来源</th>
-            <th className="px-3 py-2">发放时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k.keyID} className="border-t border-outline-variant">
-              <td className="px-3 py-2 font-mono">{reveal ? k.keyValue : `${k.keyValue.slice(0, 8)}••••`}</td>
-              <td className="px-3 py-2 font-mono text-m3-label-s">
-                <Link href={`/accounts/${k.accountID}`} className="text-primary hover:underline">{k.accountID.slice(0, 8)}</Link>
-              </td>
-              <td className="px-3 py-2">
-                <Badge tone={k.state === "active" ? "success" : k.state === "paused" ? "warn" : "error"}>
-                  {k.state}
-                </Badge>
-              </td>
-              <td className="px-3 py-2">{k.source}</td>
-              <td className="px-3 py-2">{new Date(k.issuedAt).toLocaleDateString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
-function CodeTable({ codes, onRevoke }: { codes: ActivationCode[]; onRevoke: (code: string) => void }) {
-  if (codes.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有激活码</div>;
-  return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">激活码</th>
-          <th className="px-3 py-2">Plan</th>
-          <th className="px-3 py-2">Credits</th>
-          <th className="px-3 py-2">到期</th>
-          <th className="px-3 py-2">状态</th>
-          <th className="px-3 py-2">备注</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {codes.map((c) => (
-          <tr key={c.code} className="border-t border-outline-variant">
-            <td className="px-3 py-2 font-mono">{c.code}</td>
-            <td className="px-3 py-2">{c.plan ?? "—"}</td>
-            <td className="px-3 py-2">{c.credits.toLocaleString()}</td>
-            <td className="px-3 py-2">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}</td>
-            <td className="px-3 py-2">
-              <Badge tone={c.state === "unused" ? "info" : c.state === "redeemed" ? "success" : "error"}>
-                {c.state}
-              </Badge>
-            </td>
-            <td className="px-3 py-2 text-on-surface-variant">{c.note ?? "—"}</td>
-            <td className="px-3 py-2">
-              {c.state === "unused" && <IconButton icon="block" size="sm" onClick={() => onRevoke(c.code)} aria-label="吊销" />}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function PairingTable({ tokens, onRevoke }: { tokens: PairingToken[]; onRevoke: (token: string) => void }) {
-  if (tokens.length === 0) return <div className="py-8 text-center text-on-surface-variant">没有配对码</div>;
-  return (
-    <table className="w-full text-left text-m3-body-s">
-      <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-        <tr>
-          <th className="px-3 py-2">Token</th>
-          <th className="px-3 py-2">账户</th>
-          <th className="px-3 py-2">发起设备</th>
-          <th className="px-3 py-2">过期</th>
-          <th className="px-3 py-2 w-10"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {tokens.map((t) => (
-          <tr key={t.token} className="border-t border-outline-variant">
-            <td className="px-3 py-2 font-mono">{t.token}</td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{t.accountID.slice(0, 8)}</td>
-            <td className="px-3 py-2 font-mono text-m3-label-s">{t.issuedBy.slice(0, 10)}</td>
-            <td className="px-3 py-2">{new Date(t.expiresAt).toLocaleString()}</td>
-            <td className="px-3 py-2">
-              <IconButton icon="block" size="sm" onClick={() => onRevoke(t.token)} aria-label="吊销" />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function GrantDialog({
-  account,
-  onClose,
-  onDone,
-}: {
-  account: Account;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [credits, setCredits] = React.useState(1000);
-  const [source, setSource] = React.useState<"subscription" | "trial" | "offlineManual">("subscription");
-  const [note, setNote] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  async function submit() {
+  const submitCode = async () => {
     setBusy(true);
-    await fetch("/api/admin/billing/grant", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountID: account.accountID, credits, source, note }),
-    });
-    setBusy(false);
-    onDone();
-  }
+    try {
+      const res = await fetch("/api/admin/billing/activation-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(codeForm),
+      });
+      if (res.ok) {
+        snackbar.push({ message: `已生成 ${codeForm.count} 个激活码`, severity: "success" });
+        setCodeDialog(false);
+        void load();
+      } else {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        snackbar.push({ message: data.message ?? "生成失败", severity: "error" });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="发放额度"
+    <AppShell
+      title="账户"
+      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "账户" }]}
       actions={
         <>
-          <Button variant="text" onClick={onClose}>取消</Button>
-          <Button onClick={submit} loading={busy}>发放</Button>
+          {tab === "codes" ? (
+            <Button
+              startIcon={<AddRounded />}
+              variant="contained"
+              size="small"
+              onClick={() => setCodeDialog(true)}
+            >
+              生成激活码
+            </Button>
+          ) : null}
+          <Tooltip title="刷新">
+            <IconButton aria-label="刷新" onClick={() => void load()}>
+              <RefreshRounded />
+            </IconButton>
+          </Tooltip>
         </>
       }
     >
-      <div className="space-y-3">
-        <div className="text-m3-body-s">账户：{account.displayName ?? account.accountID}</div>
-        <TextField
-          label="Credits"
-          type="number"
-          value={credits}
-          onChange={(e) => setCredits(Number(e.target.value) || 0)}
-        />
-        <div>
-          <div className="text-m3-label-m text-on-surface-variant">来源</div>
-          <div className="mt-1 flex gap-2">
-            {(["subscription", "trial", "offlineManual"] as const).map((s) => (
-              <Chip key={s} selected={source === s} onClick={() => setSource(s)}>
-                {s}
-              </Chip>
-            ))}
-          </div>
-        </div>
-        <TextField label="备注（可选）" value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
-    </Dialog>
-  );
-}
+      <Card>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ md: "center" }}
+          sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}
+        >
+          <Tabs
+            value={tab}
+            onChange={(_e, v: TabKey) => setTab(v)}
+            variant="scrollable"
+            sx={{ flex: 1 }}
+          >
+            <Tab value="accounts" label={`账户 (${counts.accounts})`} />
+            <Tab value="devices" label={`设备 (${counts.devices})`} />
+            <Tab value="keys" label={`Keys (${counts.keys})`} />
+            <Tab value="codes" label={`激活码 (${counts.codes})`} />
+            <Tab value="pairings" label={`配对 (${counts.pairings})`} />
+          </Tabs>
+          <TextField
+            size="small"
+            placeholder="搜索…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ minWidth: 240 }}
+          />
+        </Stack>
 
-function ActivationCodeDialog({
-  onClose,
-  onDone,
-}: {
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [count, setCount] = React.useState(10);
-  const [credits, setCredits] = React.useState(10000);
-  const [plan, setPlan] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  async function submit() {
-    setBusy(true);
-    await fetch("/api/admin/billing/activation-codes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ count, credits, plan: plan || undefined }),
-    });
-    setBusy(false);
-    onDone();
-  }
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="批量生成激活码"
-      actions={
-        <>
-          <Button variant="text" onClick={onClose}>取消</Button>
-          <Button onClick={submit} loading={busy}>生成</Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <TextField label="数量" type="number" value={count} onChange={(e) => setCount(Number(e.target.value) || 0)} />
-        <TextField label="每个 credits" type="number" value={credits} onChange={(e) => setCredits(Number(e.target.value) || 0)} />
-        <TextField label="Plan ID（可选）" value={plan} onChange={(e) => setPlan(e.target.value)} />
-      </div>
-    </Dialog>
+        <Box sx={{ height: 600 }}>
+          {tab === "accounts" ? (
+            <DataGrid<Account>
+              rows={filterRows(data?.accounts ?? [], (r) => `${r.displayName ?? ""} ${r.accountID}`)}
+              columns={accountCols}
+              getRowId={(r) => r.accountID}
+              density="compact"
+              sx={{ border: "none" }}
+            />
+          ) : null}
+          {tab === "devices" ? (
+            <DataGrid<Device>
+              rows={filterRows(data?.devices ?? [], (r) => `${r.alias ?? ""} ${r.deviceID} ${r.accountID}`)}
+              columns={deviceCols}
+              getRowId={(r) => r.deviceID}
+              density="compact"
+              sx={{ border: "none" }}
+            />
+          ) : null}
+          {tab === "keys" ? (
+            <DataGrid<Key>
+              rows={filterRows(data?.keys ?? [], (r) => `${r.keyValue} ${r.accountID}`)}
+              columns={keyCols}
+              getRowId={(r) => r.keyID}
+              density="compact"
+              sx={{ border: "none" }}
+            />
+          ) : null}
+          {tab === "codes" ? (
+            <DataGrid<ActivationCode>
+              rows={filterRows(data?.activationCodes ?? [], (r) => `${r.code} ${r.note ?? ""}`)}
+              columns={codeCols}
+              getRowId={(r) => r.code}
+              density="compact"
+              sx={{ border: "none" }}
+            />
+          ) : null}
+          {tab === "pairings" ? (
+            <DataGrid<PairingToken>
+              rows={filterRows(data?.pairingTokens ?? [], (r) => `${r.token} ${r.accountID}`)}
+              columns={pairingCols}
+              getRowId={(r) => r.token}
+              density="compact"
+              sx={{ border: "none" }}
+            />
+          ) : null}
+        </Box>
+      </Card>
+
+      <Dialog open={codeDialog} onClose={() => setCodeDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>生成激活码</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="数量"
+              type="number"
+              value={codeForm.count}
+              onChange={(e) => setCodeForm({ ...codeForm, count: Number(e.target.value) })}
+              slotProps={{ htmlInput: { min: 1, max: 100 } }}
+            />
+            <TextField
+              label="Credits"
+              type="number"
+              value={codeForm.credits}
+              onChange={(e) => setCodeForm({ ...codeForm, credits: Number(e.target.value) })}
+            />
+            <TextField
+              label="备注（可选）"
+              value={codeForm.note}
+              onChange={(e) => setCodeForm({ ...codeForm, note: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCodeDialog(false)} disabled={busy}>
+            取消
+          </Button>
+          <Button variant="contained" onClick={submitCode} disabled={busy}>
+            {busy ? "生成中…" : "生成"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </AppShell>
   );
 }

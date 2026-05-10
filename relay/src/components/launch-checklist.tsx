@@ -1,67 +1,105 @@
 "use client";
-import * as React from "react";
+
 import Link from "next/link";
-import { Card, Icon } from "@/components/m3";
-import { cn } from "@/lib/cn";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
+import Avatar from "@mui/material/Avatar";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import CheckRounded from "@mui/icons-material/CheckRounded";
+import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
+import FlagRounded from "@mui/icons-material/FlagRounded";
 
 export interface ChecklistItem {
   id: string;
   label: string;
-  description: string;
+  helper?: string;
   done: boolean;
   href?: string;
 }
 
-export function LaunchChecklist({ items }: { items: ChecklistItem[] }) {
-  const allDone = items.every((i) => i.done);
+interface Props {
+  items: ChecklistItem[];
+}
+
+export function LaunchChecklist({ items }: Props) {
+  const doneCount = items.filter((i) => i.done).length;
+  const allDone = doneCount === items.length;
+  const Icon = allDone ? CheckCircleRounded : FlagRounded;
+
   return (
-    <Card variant="filled" className="p-5">
-      <div className="mb-4 flex items-center gap-3">
-        <span
-          className={cn(
-            "flex h-10 w-10 items-center justify-center rounded-full",
-            allDone ? "bg-secondary-container text-on-secondary-container" : "bg-tertiary-container text-on-tertiary-container",
-          )}
-        >
-          <Icon name={allDone ? "check_circle" : "flag"} size={22} filled />
-        </span>
-        <div>
-          <div className="text-m3-title-m font-medium">
-            {allDone ? "Ready to serve" : "启动清单"}
-          </div>
-          <div className="text-m3-body-s text-on-surface-variant">
-            {allDone ? "所有关键配置已就绪" : `完成 ${items.filter((i) => i.done).length}/${items.length} 项即可正式上线`}
-          </div>
-        </div>
-      </div>
-      <ol className="relative space-y-2">
-        {items.map((item, i) => (
-          <li key={item.id}>
-            <Link
-              href={item.href ?? "#"}
-              className="state-layer flex items-start gap-3 rounded-m3-sm px-2 py-2"
-            >
-              <span
-                className={cn(
-                  "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-m3-label-m",
-                  item.done
-                    ? "bg-secondary-container text-on-secondary-container"
-                    : "bg-surface-container-highest text-on-surface-variant",
-                )}
+    <Card>
+      <CardHeader
+        avatar={
+          <Avatar
+            sx={{
+              bgcolor: allDone ? "success.main" : "primary.main",
+              color: "primary.contrastText",
+            }}
+          >
+            <Icon />
+          </Avatar>
+        }
+        title={
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            就绪清单
+          </Typography>
+        }
+        subheader={
+          <Typography variant="caption" color="text.secondary">
+            {doneCount} / {items.length} 已完成
+          </Typography>
+        }
+      />
+      <CardContent sx={{ pt: 0 }}>
+        <List disablePadding>
+          {items.map((item, i) => (
+            <ListItem key={item.id} disablePadding>
+              <ListItemButton
+                component={item.href ? Link : "div"}
+                href={item.href ?? "#"}
+                sx={{ borderRadius: 1, py: 1 }}
               >
-                {item.done ? <Icon name="check" size={14} /> : i + 1}
-              </span>
-              <div className="flex-1">
-                <div className="text-m3-title-s">{item.label}</div>
-                <div className="text-m3-body-s text-on-surface-variant">{item.description}</div>
-              </div>
-              {item.href && !item.done && (
-                <Icon name="arrow_forward" size={18} className="text-on-surface-variant" />
-              )}
-            </Link>
-          </li>
-        ))}
-      </ol>
+                <ListItemIcon sx={{ minWidth: 44 }}>
+                  <Avatar
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      fontSize: 14,
+                      bgcolor: item.done ? "success.main" : "action.hover",
+                      color: item.done ? "primary.contrastText" : "text.primary",
+                    }}
+                  >
+                    {item.done ? <CheckRounded fontSize="small" /> : i + 1}
+                  </Avatar>
+                </ListItemIcon>
+                <ListItemText
+                  primary={
+                    <Stack direction="row" spacing={1} alignItems="baseline">
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {item.label}
+                      </Typography>
+                    </Stack>
+                  }
+                  secondary={
+                    item.helper ? (
+                      <Typography variant="caption" color="text.secondary">
+                        {item.helper}
+                      </Typography>
+                    ) : undefined
+                  }
+                />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      </CardContent>
     </Card>
   );
 }

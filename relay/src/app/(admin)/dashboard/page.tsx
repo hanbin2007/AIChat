@@ -1,233 +1,343 @@
 import Link from "next/link";
-import { AdminShell } from "@/components/admin-shell";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableBody from "@mui/material/TableBody";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import LinearProgress from "@mui/material/LinearProgress";
+import { AppShell } from "@/components/shell/app-shell";
 import { KpiCard } from "@/components/kpi-card";
-import { LaunchChecklist } from "@/components/launch-checklist";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Icon } from "@/components/m3";
-import { config, configDiagnostics } from "@/lib/config";
+import { LaunchChecklist, type ChecklistItem } from "@/components/launch-checklist";
+import { configDiagnostics } from "@/lib/config";
 import { billingStore } from "@/lib/store/billing-store";
 import { requestLog } from "@/lib/store/request-log";
 import { metrics } from "@/lib/observability/metrics";
 
 export const dynamic = "force-dynamic";
 
+function formatNumber(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+function formatPercent(n: number): string {
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s 前`;
+  if (s < 3600) return `${Math.floor(s / 60)}m 前`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h 前`;
+  return `${Math.floor(s / 86400)}d 前`;
+}
+
+function levelTone(level: string): "default" | "success" | "warning" | "error" | "info" {
+  if (level === "error") return "error";
+  if (level === "warning") return "warning";
+  if (level === "success") return "success";
+  return "info";
+}
+
 export default async function DashboardPage() {
-  const diag = configDiagnostics();
   const billing = await billingStore().listAll();
   const activity = await requestLog().listActivity();
-  const now = Date.now();
-  const last24h = activity.filter((a) => now - new Date(a.timestamp).getTime() < 86400_000);
-  const errors24h = last24h.filter((a) => a.level === "error").length;
-  const reqPerHour = bucketByHour(last24h.map((a) => a.timestamp));
-  const totalCredits = billing.accounts.reduce((s, a) => s + a.creditBalance, 0);
-  const inputTokens = last24h.reduce((s, a) => s + (a.inputTokens ?? 0), 0);
-  const outputTokens = last24h.reduce((s, a) => s + (a.outputTokens ?? 0), 0);
+  const diag = configDiagnostics();
   const snapshot = metrics().snapshot();
 
-  const checklist = [
+  const now = Date.now();
+  const last24h = activity.filter((a) => now - new Date(a.timestamp).getTime() < 86_400_000);
+  const errorCount = last24h.filter((a) => a.level === "error").length;
+  const inputTokens = last24h.reduce((s, a) => s + (a.inputTokens ?? 0), 0);
+  const outputTokens = last24h.reduce((s, a) => s + (a.outputTokens ?? 0), 0);
+  const totalCredits = billing.accounts.reduce((s, a) => s + a.creditBalance, 0);
+
+  const byModel = new Map<string, { requests: number; credits: number }>();
+  for (const a of last24h) {
+    if (!a.modelID) continue;
+    const prev = byModel.get(a.modelID) ?? { requests: 0, credits: 0 };
+    prev.requests += 1;
+    prev.credits += a.settledCredits ?? a.reservedCredits ?? 0;
+    byModel.set(a.modelID, prev);
+  }
+  const topModels = Array.from(byModel.entries())
+    .map(([modelID, v]) => ({ modelID, ...v }))
+    .sort((a, b) => b.credits - a.credits)
+    .slice(0, 5);
+  const topModelMax = topModels[0]?.credits ?? 0;
+
+  const sparkBuckets = 24;
+  const buckets = new Array(sparkBuckets).fill(0);
+  for (const a of last24h) {
+    const age = (now - new Date(a.timestamp).getTime()) / 3_600_000;
+    const idx = sparkBuckets - 1 - Math.min(sparkBuckets - 1, Math.floor(age));
+    if (idx >= 0) buckets[idx] += 1;
+  }
+
+  const checklist: ChecklistItem[] = [
     {
       id: "gemini",
-      label: "Gemini API key 已配置",
-      description: diag.geminiConfigured ? "已在启动环境中注入" : "在 .env 中设置 GEMINI_API_KEY",
+      label: "上游 Gemini API Key",
+      helper: diag.geminiConfigured ? "已配置" : "请在 .env 中设置 GEMINI_API_KEY",
       done: diag.geminiConfigured,
-      href: "/settings",
     },
     {
       id: "bearer",
-      label: "Relay bearer token 已签发",
-      description: diag.bearerConfigured ? "RELAY_BEARER_TOKEN 生效中" : "缺少 RELAY_BEARER_TOKEN；客户端将被拒绝",
+      label: "客户端 Bearer Token",
+      helper: diag.bearerConfigured ? "已配置" : "请设置 RELAY_BEARER_TOKEN",
       done: diag.bearerConfigured,
-      href: "/settings",
     },
     {
-      id: "listener",
-      label: "Listener 在线",
-      description: `正在 0.0.0.0:${config.port} 接受请求`,
-      done: true,
+      id: "session",
+      label: "会话签名密钥",
+      helper: diag.sessionSecretConfigured ? "已配置" : "请设置 RELAY_SESSION_SECRET",
+      done: diag.sessionSecretConfigured,
     },
     {
       id: "traffic",
-      label: "首笔流量已到达",
-      description: activity.length > 0 ? `已处理 ${activity.length} 次请求` : "等待客户端第一次调用",
+      label: "首条客户端流量",
+      helper: activity.length > 0 ? "已收到流量" : "等待客户端首次连接…",
       done: activity.length > 0,
       href: "/requests",
     },
   ];
 
-  const topModels = last24h.reduce<Record<string, { requests: number; credits: number }>>((acc, a) => {
-    if (!a.modelID) return acc;
-    acc[a.modelID] ??= { requests: 0, credits: 0 };
-    acc[a.modelID].requests += 1;
-    acc[a.modelID].credits += a.settledCredits ?? a.reservedCredits ?? 0;
-    return acc;
-  }, {});
-
-  const topModelEntries = Object.entries(topModels)
-    .sort((a, b) => b[1].credits - a[1].credits)
-    .slice(0, 5);
-
   return (
-    <AdminShell title="Dashboard" breadcrumb={["Relay"]}>
-      <div className="space-y-6 p-6">
-        <LaunchChecklist items={checklist} />
+    <AppShell
+      title="概览"
+      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "概览" }]}
+    >
+      <Stack spacing={3}>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", lg: "1fr 2fr" },
+            gap: 3,
+          }}
+        >
+          <LaunchChecklist items={checklist} />
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" },
+              gap: 2,
+            }}
+          >
+            <KpiCard
+              label="24h 请求"
+              value={formatNumber(last24h.length)}
+              helper={`累计 ${formatNumber(activity.length)}`}
+              sparkline={buckets}
+            />
+            <KpiCard
+              label="Token 入 / 出"
+              value={`${formatNumber(inputTokens)}/${formatNumber(outputTokens)}`}
+              helper="24 小时累计"
+            />
+            <KpiCard
+              label="延迟 p50/p95"
+              value={`${Math.round(snapshot.p50Latency)}/${Math.round(snapshot.p95Latency)}ms`}
+              helper="最近请求延迟"
+            />
+            <KpiCard
+              label="错误率"
+              value={formatPercent(last24h.length ? errorCount / last24h.length : 0)}
+              delta={
+                last24h.length && errorCount / last24h.length > 0.05
+                  ? { tone: "negative", text: "高于阈值" }
+                  : { tone: "neutral", text: "正常" }
+              }
+              helper={`${errorCount} 条错误`}
+            />
+          </Box>
+        </Box>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            label="24h 请求数"
-            value={last24h.length.toLocaleString()}
-            helper={`${billing.accounts.length} 个账户 · ${billing.keys.filter((k) => k.state === "active").length} 把活跃 key`}
-            spark={reqPerHour}
-          />
-          <KpiCard
-            label="Token in / out"
-            value={`${formatNumber(inputTokens)} / ${formatNumber(outputTokens)}`}
-            helper="24 小时累计"
-          />
-          <KpiCard
-            label="延迟 p50 / p95"
-            value={`${Math.round(snapshot.p50Latency)}ms / ${Math.round(snapshot.p95Latency)}ms`}
-            helper="仅统计 /chat/stream"
-          />
-          <KpiCard
-            label="错误率"
-            value={`${last24h.length ? ((errors24h / last24h.length) * 100).toFixed(1) : "0.0"}%`}
-            tone={errors24h === 0 ? "positive" : "negative"}
-            helper={`错误 ${errors24h} / ${last24h.length}`}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>系统状态</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Status label="Gemini API key" ok={diag.geminiConfigured} />
-              <Status label="Bearer token" ok={diag.bearerConfigured} />
-              <Status label="Session secret" ok={diag.sessionSecretConfigured} />
-              <Status label="Listener" ok={true} detail={`0.0.0.0:${config.port}`} />
-              <Status label="数据目录" ok={true} detail={diag.dataDir} />
-              <Status label="Billing mode" ok={true} detail={diag.billingMode} />
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", lg: "2fr 1fr" },
+            gap: 3,
+          }}
+        >
+          <Card>
+            <CardHeader title="系统状态" />
+            <CardContent>
+              <Stack spacing={1.5}>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">账户总数</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                    {billing.accounts.length}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">激活密钥</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                    {billing.keys.filter((k) => k.state === "active").length}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">绑定设备</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                    {billing.devices.length}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">未使用激活码</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                    {billing.activationCodes.filter((c) => c.state === "unused").length}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">数据目录</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontFamily: "var(--font-mono)", color: "text.secondary" }}
+                  >
+                    {diag.dataDir}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" justifyContent="space-between">
+                  <Typography variant="body2">计费模式</Typography>
+                  <Chip
+                    size="small"
+                    label={diag.billingMode}
+                    color={diag.billingMode === "strict" ? "primary" : "default"}
+                  />
+                </Stack>
+              </Stack>
             </CardContent>
           </Card>
+
           <Card>
-            <CardHeader>
-              <CardTitle>Top Models (24h)</CardTitle>
-            </CardHeader>
+            <CardHeader title="模型用量 24h" subheader="按结算 credits 排序" />
             <CardContent>
-              {topModelEntries.length === 0 ? (
-                <div className="py-6 text-center text-m3-body-m text-on-surface-variant">
-                  <Icon name="bar_chart" size={32} className="opacity-50" />
-                  <div className="mt-2">等待第一次请求</div>
-                </div>
+              {topModels.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  暂无数据
+                </Typography>
               ) : (
-                <ul className="space-y-3">
-                  {topModelEntries.map(([model, v]) => (
-                    <li key={model} className="flex items-center gap-3">
-                      <Icon name="neurology" size={20} className="text-on-surface-variant" />
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate text-m3-body-m">{model}</div>
-                        <div className="text-m3-body-s text-on-surface-variant">{v.requests} 次</div>
-                      </div>
-                      <Badge tone="info">{formatNumber(v.credits)} credits</Badge>
-                    </li>
+                <Stack spacing={1.5}>
+                  {topModels.map((m) => (
+                    <Box key={m.modelID}>
+                      <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "var(--font-mono)" }}
+                          noWrap
+                        >
+                          {m.modelID}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "var(--font-mono)" }}
+                        >
+                          {formatNumber(m.credits)}
+                        </Typography>
+                      </Stack>
+                      <LinearProgress
+                        variant="determinate"
+                        value={topModelMax > 0 ? (m.credits / topModelMax) * 100 : 0}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        {m.requests} 次请求
+                      </Typography>
+                    </Box>
                   ))}
-                </ul>
+                </Stack>
               )}
             </CardContent>
           </Card>
-        </div>
+        </Box>
 
         <Card>
-          <CardHeader>
-            <div className="flex items-baseline justify-between">
-              <CardTitle>最近活动</CardTitle>
-              <Link href="/requests" className="text-m3-label-l text-primary hover:underline">
+          <CardHeader
+            title="最近活动"
+            action={
+              <Typography
+                component={Link}
+                href="/requests"
+                variant="body2"
+                sx={{ color: "primary.main", textDecoration: "none", fontWeight: 600 }}
+              >
                 查看全部 →
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {activity.length === 0 ? (
-              <div className="py-8 text-center text-m3-body-m text-on-surface-variant">
-                尚无记录
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-m3-sm border border-outline-variant">
-                <table className="w-full text-left text-m3-body-s">
-                  <thead className="bg-surface-container-low">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">时间</th>
-                      <th className="px-3 py-2 font-medium">端点</th>
-                      <th className="px-3 py-2 font-medium">状态</th>
-                      <th className="px-3 py-2 font-medium">延迟</th>
-                      <th className="px-3 py-2 font-medium">模型</th>
-                      <th className="px-3 py-2 font-medium">Credits</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activity.slice(0, 10).map((a) => (
-                      <tr key={a.id} className="border-t border-outline-variant">
-                        <td className="px-3 py-2 text-on-surface-variant">
-                          {new Date(a.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className="px-3 py-2 font-mono">{a.path}</td>
-                        <td className="px-3 py-2">
-                          <Badge tone={a.level === "error" ? "error" : a.level === "warning" ? "warn" : "success"}>
-                            {a.statusCode ?? "—"}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2">{a.latencyMs ?? 0}ms</td>
-                        <td className="px-3 py-2">{a.modelID ?? "—"}</td>
-                        <td className="px-3 py-2">{a.settledCredits ?? a.reservedCredits ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+              </Typography>
+            }
+          />
+          <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>时间</TableCell>
+                  <TableCell>等级</TableCell>
+                  <TableCell>路径</TableCell>
+                  <TableCell>状态</TableCell>
+                  <TableCell>账户</TableCell>
+                  <TableCell align="right">延迟</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {activity.slice(0, 10).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ textAlign: "center", py: 3 }}
+                      >
+                        暂无活动
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  activity.slice(0, 10).map((row) => (
+                    <TableRow key={row.id} hover>
+                      <TableCell sx={{ color: "text.secondary" }}>
+                        {relTime(row.timestamp)}
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={row.level} color={levelTone(row.level)} />
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: "var(--font-mono)", fontSize: "0.8125rem" }}>
+                        {row.method ? `${row.method} ` : ""}
+                        {row.path ?? row.message}
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: "var(--font-mono)" }}>
+                        {row.statusCode ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Typography
+                          variant="body2"
+                          sx={{ fontFamily: "var(--font-mono)" }}
+                          noWrap
+                        >
+                          {row.accountName ?? row.accountID ?? "—"}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontFamily: "var(--font-mono)" }}>
+                        {row.latencyMs != null ? `${row.latencyMs}ms` : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
 
-        <div className="text-center text-m3-body-s text-on-surface-variant">
-          总额度：{totalCredits.toLocaleString()} credits
-        </div>
-      </div>
-    </AdminShell>
+        <Typography variant="caption" color="text.secondary">
+          可用额度合计 {formatNumber(totalCredits)} credits
+        </Typography>
+      </Stack>
+    </AppShell>
   );
-}
-
-function Status({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <Icon
-        name={ok ? "check_circle" : "cancel"}
-        filled
-        size={22}
-        className={ok ? "text-primary" : "text-error"}
-      />
-      <div className="flex-1">
-        <div className="text-m3-body-m">{label}</div>
-        {detail && <div className="text-m3-body-s text-on-surface-variant">{detail}</div>}
-      </div>
-      <Badge tone={ok ? "success" : "error"}>{ok ? "OK" : "Missing"}</Badge>
-    </div>
-  );
-}
-
-function bucketByHour(timestamps: string[]): number[] {
-  const buckets = new Array(24).fill(0);
-  const now = Date.now();
-  for (const t of timestamps) {
-    const age = now - new Date(t).getTime();
-    const hour = Math.floor(age / 3600_000);
-    if (hour >= 0 && hour < 24) buckets[23 - hour] += 1;
-  }
-  return buckets;
-}
-
-function formatNumber(n: number): string {
-  if (n > 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n > 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n > 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toLocaleString();
 }

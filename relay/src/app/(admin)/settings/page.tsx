@@ -1,430 +1,659 @@
 "use client";
-import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Banner, Card, CardContent, CardHeader, CardTitle, Chip, Switch, TextField, Slider, Segmented, Button, Icon, Badge, Dialog, useSnackbar } from "@/components/m3";
-import type { AdminToken, SettingsSnapshot } from "@/lib/store/settings-store";
+
+import { useCallback, useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import Switch from "@mui/material/Switch";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Slider from "@mui/material/Slider";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import TextField from "@mui/material/TextField";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import ToggleButton from "@mui/material/ToggleButton";
+import Autocomplete from "@mui/material/Autocomplete";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Chip from "@mui/material/Chip";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
+import Table from "@mui/material/Table";
+import TableHead from "@mui/material/TableHead";
+import TableBody from "@mui/material/TableBody";
+import TableRow from "@mui/material/TableRow";
+import TableCell from "@mui/material/TableCell";
+import AddRounded from "@mui/icons-material/AddRounded";
+import DeleteRounded from "@mui/icons-material/DeleteRounded";
+import RefreshRounded from "@mui/icons-material/RefreshRounded";
+import { AppShell } from "@/components/shell/app-shell";
+import { useSnackbar } from "@/components/snackbar-provider";
+import type { SettingsSnapshot, AdminToken } from "@/lib/store/settings-store";
 
 export default function SettingsPage() {
-  const snack = useSnackbar();
-  const [snapshot, setSnapshot] = React.useState<SettingsSnapshot | null>(null);
-  const [draft, setDraft] = React.useState<SettingsSnapshot | null>(null);
-  const [issueDialog, setIssueDialog] = React.useState(false);
+  const snackbar = useSnackbar();
+  const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
+  const [tokenDialog, setTokenDialog] = useState(false);
+  const [tokenForm, setTokenForm] = useState({
+    label: "",
+    scope: "client" as "admin" | "client",
+    rpmLimit: 60,
+  });
+  const [issuedToken, setIssuedToken] = useState<AdminToken | null>(null);
 
-  async function refresh() {
+  const load = useCallback(async () => {
     const res = await fetch("/api/admin/settings");
-    const data = await res.json();
-    setSnapshot(data);
-    setDraft(data);
-  }
-  React.useEffect(() => { refresh(); }, []);
+    if (!res.ok) {
+      snackbar.push({ message: "拉取设置失败", severity: "error" });
+      return;
+    }
+    const data = (await res.json()) as SettingsSnapshot;
+    setSnap(data);
+  }, [snackbar]);
 
-  async function save(patch: Partial<SettingsSnapshot>) {
-    await fetch("/api/admin/settings", {
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const patch = async (slice: Partial<SettingsSnapshot>) => {
+    const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
+      body: JSON.stringify(slice),
     });
-    snack.push({ message: "已保存" });
-    refresh();
-  }
+    if (res.ok) {
+      snackbar.push({ message: "已保存", severity: "success" });
+      void load();
+    } else {
+      snackbar.push({ message: "保存失败", severity: "error" });
+    }
+  };
 
-  if (!draft) {
+  const issueToken = async () => {
+    const res = await fetch("/api/admin/tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(tokenForm),
+    });
+    if (res.ok) {
+      const token = (await res.json()) as AdminToken;
+      setIssuedToken(token);
+      setTokenDialog(false);
+      void load();
+    } else {
+      snackbar.push({ message: "签发失败", severity: "error" });
+    }
+  };
+
+  const revokeToken = async (id: string) => {
+    if (!confirm("确定要撤销此 token 吗？")) return;
+    const res = await fetch(`/api/admin/tokens?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      snackbar.push({ message: "已撤销", severity: "success" });
+      void load();
+    } else {
+      snackbar.push({ message: "撤销失败", severity: "error" });
+    }
+  };
+
+  if (!snap) {
     return (
-      <AdminShell title="Settings">
-        <div className="p-6 text-on-surface-variant">加载中…</div>
-      </AdminShell>
+      <AppShell title="设置">
+        <Typography color="text.secondary">加载中…</Typography>
+      </AppShell>
     );
   }
 
   return (
-    <AdminShell title="Settings" breadcrumb={["System"]}>
-      <div className="mx-auto max-w-5xl space-y-6 p-6 pb-24">
-        <Banner tone="info">
-          标红字段需要重启 relay 才会在监听器上生效。
-        </Banner>
+    <AppShell
+      title="设置"
+      breadcrumb={[{ label: "AIChat Relay", href: "/dashboard" }, { label: "设置" }]}
+      actions={
+        <Tooltip title="刷新">
+          <IconButton aria-label="刷新" onClick={() => void load()}>
+            <RefreshRounded />
+          </IconButton>
+        </Tooltip>
+      }
+    >
+      <Box sx={{ maxWidth: 1080, mx: "auto" }}>
+        <Stack spacing={2.5}>
+          <Section
+            title="网关 (Gateway)"
+            onSave={() => void patch({ gateway: snap.gateway })}
+          >
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.gateway.allowLanClients}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      gateway: { ...snap.gateway, allowLanClients: e.target.checked },
+                    })
+                  }
+                />
+              }
+              label="允许 LAN 客户端"
+            />
+            <SliderField
+              label={`请求体上限 · ${snap.gateway.requestBodyLimitMB} MB`}
+              value={snap.gateway.requestBodyLimitMB}
+              min={1}
+              max={64}
+              step={1}
+              onChange={(v) =>
+                setSnap({
+                  ...snap,
+                  gateway: { ...snap.gateway, requestBodyLimitMB: v },
+                })
+              }
+            />
+            <Autocomplete
+              multiple
+              freeSolo
+              options={[]}
+              value={snap.gateway.corsOrigins}
+              onChange={(_e, v) =>
+                setSnap({
+                  ...snap,
+                  gateway: { ...snap.gateway, corsOrigins: v as string[] },
+                })
+              }
+              renderInput={(params) => (
+                <TextField {...params} label="CORS 允许来源" size="small" />
+              )}
+            />
+          </Section>
 
-        <Section title="① Gateway" description="监听地址、CORS、请求体大小">
-          <Switch
-            label="允许 LAN 客户端"
-            supporting="关闭后只接受 127.0.0.1 请求"
-            checked={draft.gateway.allowLanClients}
-            onChange={() => setDraft({ ...draft, gateway: { ...draft.gateway, allowLanClients: !draft.gateway.allowLanClients } })}
-          />
-          <Slider
-            label="请求体上限 (MB)"
-            value={draft.gateway.requestBodyLimitMB}
-            min={1}
-            max={64}
-            valueLabel={`${draft.gateway.requestBodyLimitMB} MB`}
-            onChange={(v) => setDraft({ ...draft, gateway: { ...draft.gateway, requestBodyLimitMB: v } })}
-          />
-          <ChipInput
-            label="CORS origins"
-            values={draft.gateway.corsOrigins}
-            onChange={(v) => setDraft({ ...draft, gateway: { ...draft.gateway, corsOrigins: v } })}
-            placeholder="https://example.com"
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ gateway: draft.gateway })}>保存 Gateway</Button>
-          </div>
-        </Section>
+          <Section
+            title="上游 · Gemini"
+            onSave={() => void patch({ upstream: snap.upstream })}
+          >
+            <SliderField
+              label={`超时 · ${(snap.upstream.timeoutMs / 1000).toFixed(0)}s`}
+              value={snap.upstream.timeoutMs / 1000}
+              min={5}
+              max={120}
+              step={1}
+              onChange={(v) =>
+                setSnap({ ...snap, upstream: { ...snap.upstream, timeoutMs: v * 1000 } })
+              }
+            />
+            <SliderField
+              label={`重试次数 · ${snap.upstream.retries}`}
+              value={snap.upstream.retries}
+              min={0}
+              max={5}
+              step={1}
+              onChange={(v) => setSnap({ ...snap, upstream: { ...snap.upstream, retries: v } })}
+            />
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                重试模式
+              </Typography>
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={snap.upstream.retryMode}
+                onChange={(_e, v) => {
+                  if (v)
+                    setSnap({
+                      ...snap,
+                      upstream: { ...snap.upstream, retryMode: v },
+                    });
+                }}
+                sx={{ display: "block", mt: 0.5 }}
+              >
+                <ToggleButton value="none">none</ToggleButton>
+                <ToggleButton value="linear">linear</ToggleButton>
+                <ToggleButton value="exponential">exponential</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+            <SliderField
+              label={`健康探测间隔 · ${(snap.upstream.healthProbeIntervalMs / 1000).toFixed(0)}s`}
+              value={snap.upstream.healthProbeIntervalMs / 1000}
+              min={5}
+              max={300}
+              step={5}
+              onChange={(v) =>
+                setSnap({
+                  ...snap,
+                  upstream: { ...snap.upstream, healthProbeIntervalMs: v * 1000 },
+                })
+              }
+            />
+          </Section>
 
-        <Section title="② Upstream · Gemini" description="超时、重试、健康检查">
-          <Slider
-            label="Upstream timeout"
-            value={draft.upstream.timeoutMs / 1000}
-            min={5}
-            max={300}
-            valueLabel={`${draft.upstream.timeoutMs / 1000}s`}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, timeoutMs: v * 1000 } })}
-          />
-          <Slider
-            label="重试次数"
-            value={draft.upstream.retries}
-            min={0}
-            max={5}
-            valueLabel={String(draft.upstream.retries)}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, retries: v } })}
-          />
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">Retry 模式</div>
-            <div className="mt-1">
-              <Segmented
-                value={draft.upstream.retryMode}
-                onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, retryMode: v } })}
-                options={[
-                  { value: "none", label: "None" },
-                  { value: "linear", label: "Linear" },
-                  { value: "exponential", label: "Exponential" },
-                ]}
+          <Section title="认证 & Tokens" onSave={null}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="body2" color="text.secondary">
+                {snap.adminTokens.length} 个 token
+              </Typography>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<AddRounded />}
+                onClick={() => setTokenDialog(true)}
+              >
+                签发新 token
+              </Button>
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>名称</TableCell>
+                  <TableCell>Scope</TableCell>
+                  <TableCell>前缀</TableCell>
+                  <TableCell align="right">RPM</TableCell>
+                  <TableCell>状态</TableCell>
+                  <TableCell>签发于</TableCell>
+                  <TableCell> </TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {snap.adminTokens.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ textAlign: "center", py: 2 }}
+                      >
+                        无 token
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  snap.adminTokens.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell>{t.label}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={t.scope} />
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: "var(--font-mono)" }}>{t.prefix}…</TableCell>
+                      <TableCell align="right">{t.rpmLimit ?? "—"}</TableCell>
+                      <TableCell>
+                        {t.revoked ? (
+                          <Chip size="small" label="已撤销" color="error" />
+                        ) : (
+                          <Chip size="small" label="活跃" color="success" />
+                        )}
+                      </TableCell>
+                      <TableCell>{new Date(t.createdAt).toLocaleString("zh-Hans")}</TableCell>
+                      <TableCell>
+                        {!t.revoked ? (
+                          <IconButton
+                            aria-label="撤销"
+                            size="small"
+                            onClick={() => void revokeToken(t.id)}
+                          >
+                            <DeleteRounded fontSize="small" />
+                          </IconButton>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Section>
+
+          <Section
+            title="速率限制"
+            onSave={() => void patch({ rateLimits: snap.rateLimits })}
+          >
+            <SliderField
+              label={`全局 RPM · ${snap.rateLimits.globalRpm}`}
+              value={snap.rateLimits.globalRpm}
+              min={10}
+              max={5000}
+              step={10}
+              onChange={(v) =>
+                setSnap({ ...snap, rateLimits: { ...snap.rateLimits, globalRpm: v } })
+              }
+            />
+            <SliderField
+              label={`单 token RPM · ${snap.rateLimits.perTokenRpm}`}
+              value={snap.rateLimits.perTokenRpm}
+              min={10}
+              max={1000}
+              step={10}
+              onChange={(v) =>
+                setSnap({ ...snap, rateLimits: { ...snap.rateLimits, perTokenRpm: v } })
+              }
+            />
+            <SliderField
+              label={`并发流上限 · ${snap.rateLimits.concurrentStreams}`}
+              value={snap.rateLimits.concurrentStreams}
+              min={1}
+              max={200}
+              step={1}
+              onChange={(v) =>
+                setSnap({ ...snap, rateLimits: { ...snap.rateLimits, concurrentStreams: v } })
+              }
+            />
+            <SliderField
+              label={`单 IP RPM · ${snap.rateLimits.perIpRpm}`}
+              value={snap.rateLimits.perIpRpm}
+              min={5}
+              max={500}
+              step={5}
+              onChange={(v) =>
+                setSnap({ ...snap, rateLimits: { ...snap.rateLimits, perIpRpm: v } })
+              }
+            />
+          </Section>
+
+          <Section title="计费模式" onSave={() => void patch({ billing: snap.billing })}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.billing.trialEnabled}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      billing: { ...snap.billing, trialEnabled: e.target.checked },
+                    })
+                  }
+                />
+              }
+              label="启用试用"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.billing.subscriptionEnabled}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      billing: { ...snap.billing, subscriptionEnabled: e.target.checked },
+                    })
+                  }
+                />
+              }
+              label="启用订阅"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.billing.offlineEnabled}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      billing: { ...snap.billing, offlineEnabled: e.target.checked },
+                    })
+                  }
+                />
+              }
+              label="启用离线激活"
+            />
+            <Alert severity="info">
+              当前 StoreKit 验签模式：
+              <Box component="code" sx={{ fontFamily: "var(--font-mono)", ml: 1 }}>
+                {snap.billing.mode}
+              </Box>
+            </Alert>
+          </Section>
+
+          <Section
+            title="可观测性"
+            onSave={() => void patch({ observability: snap.observability })}
+          >
+            <SliderField
+              label={`活动日志容量 · ${snap.observability.activityLogSize}`}
+              value={snap.observability.activityLogSize}
+              min={100}
+              max={5000}
+              step={100}
+              onChange={(v) =>
+                setSnap({
+                  ...snap,
+                  observability: { ...snap.observability, activityLogSize: v },
+                })
+              }
+            />
+            <SliderField
+              label={`调试日志容量 · ${snap.observability.debugLogSize}`}
+              value={snap.observability.debugLogSize}
+              min={100}
+              max={5000}
+              step={100}
+              onChange={(v) =>
+                setSnap({
+                  ...snap,
+                  observability: { ...snap.observability, debugLogSize: v },
+                })
+              }
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.observability.debugLoggingEnabled}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      observability: {
+                        ...snap.observability,
+                        debugLoggingEnabled: e.target.checked,
+                      },
+                    })
+                  }
+                />
+              }
+              label="开启调试日志"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={snap.observability.prometheusEnabled}
+                  onChange={(e) =>
+                    setSnap({
+                      ...snap,
+                      observability: {
+                        ...snap.observability,
+                        prometheusEnabled: e.target.checked,
+                      },
+                    })
+                  }
+                />
+              }
+              label="开放 Prometheus 端点"
+            />
+          </Section>
+
+          <Section
+            title="本地化"
+            onSave={() => void patch({ localization: snap.localization })}
+          >
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                默认语言
+              </Typography>
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={snap.localization.defaultLocale}
+                onChange={(_e, v) => {
+                  if (v)
+                    setSnap({
+                      ...snap,
+                      localization: { ...snap.localization, defaultLocale: v },
+                    });
+                }}
+                sx={{ display: "block", mt: 0.5 }}
+              >
+                <ToggleButton value="zh-Hans">zh-Hans</ToggleButton>
+                <ToggleButton value="en">en</ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+            <TextField
+              label="时区"
+              size="small"
+              value={snap.localization.timezone}
+              onChange={(e) =>
+                setSnap({
+                  ...snap,
+                  localization: { ...snap.localization, timezone: e.target.value },
+                })
+              }
+            />
+          </Section>
+        </Stack>
+      </Box>
+
+      <Dialog open={tokenDialog} onClose={() => setTokenDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>签发新 token</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="名称"
+              value={tokenForm.label}
+              onChange={(e) => setTokenForm({ ...tokenForm, label: e.target.value })}
+            />
+            <ToggleButtonGroup
+              exclusive
+              value={tokenForm.scope}
+              onChange={(_e, v) => {
+                if (v) setTokenForm({ ...tokenForm, scope: v });
+              }}
+            >
+              <ToggleButton value="admin">admin</ToggleButton>
+              <ToggleButton value="client">client</ToggleButton>
+            </ToggleButtonGroup>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                RPM 限制 · {tokenForm.rpmLimit}
+              </Typography>
+              <Slider
+                value={tokenForm.rpmLimit}
+                min={1}
+                max={1000}
+                step={5}
+                onChange={(_e, v) =>
+                  setTokenForm({ ...tokenForm, rpmLimit: typeof v === "number" ? v : v[0] })
+                }
               />
-            </div>
-          </div>
-          <Slider
-            label="健康检查间隔"
-            value={draft.upstream.healthProbeIntervalMs / 1000}
-            min={0}
-            max={600}
-            valueLabel={`${draft.upstream.healthProbeIntervalMs / 1000}s`}
-            onChange={(v) => setDraft({ ...draft, upstream: { ...draft.upstream, healthProbeIntervalMs: v * 1000 } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ upstream: draft.upstream })}>保存 Upstream</Button>
-          </div>
-        </Section>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTokenDialog(false)}>取消</Button>
+          <Button variant="contained" onClick={issueToken} disabled={!tokenForm.label}>
+            签发
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-        <Section title="③ Auth & Tokens" description="Bearer 签发、吊销、限流">
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-m3-label-m text-on-surface-variant">已签发 token</span>
-              <Button icon="add" onClick={() => setIssueDialog(true)}>签发新 token</Button>
-            </div>
-            <TokenTable tokens={draft.adminTokens} onRevoke={async (id) => {
-              await fetch(`/api/admin/tokens?id=${id}`, { method: "DELETE" });
-              refresh();
-            }} />
-          </div>
-        </Section>
-
-        <Section title="④ Rate limits" description="全局 / 单 token / 单 IP 节流">
-          <Slider
-            label="Global RPM"
-            value={draft.rateLimits.globalRpm}
-            min={0}
-            max={10000}
-            step={100}
-            valueLabel={draft.rateLimits.globalRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, globalRpm: v } })}
-          />
-          <Slider
-            label="Per-token RPM"
-            value={draft.rateLimits.perTokenRpm}
-            min={0}
-            max={3000}
-            step={10}
-            valueLabel={draft.rateLimits.perTokenRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perTokenRpm: v } })}
-          />
-          <Slider
-            label="最大并发流"
-            value={draft.rateLimits.concurrentStreams}
-            min={1}
-            max={512}
-            valueLabel={String(draft.rateLimits.concurrentStreams)}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, concurrentStreams: v } })}
-          />
-          <Slider
-            label="Per-IP RPM"
-            value={draft.rateLimits.perIpRpm}
-            min={0}
-            max={5000}
-            step={50}
-            valueLabel={draft.rateLimits.perIpRpm.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, rateLimits: { ...draft.rateLimits, perIpRpm: v } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ rateLimits: draft.rateLimits })}>保存限流</Button>
-          </div>
-        </Section>
-
-        <Section title="⑤ Billing mode" description="计费三种来源的开关">
-          <Switch
-            label="试用账户"
-            checked={draft.billing.trialEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, trialEnabled: !draft.billing.trialEnabled } })}
-          />
-          <Switch
-            label="订阅 (StoreKit)"
-            checked={draft.billing.subscriptionEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, subscriptionEnabled: !draft.billing.subscriptionEnabled } })}
-          />
-          <Switch
-            label="离线激活码"
-            checked={draft.billing.offlineEnabled}
-            onChange={() => setDraft({ ...draft, billing: { ...draft.billing, offlineEnabled: !draft.billing.offlineEnabled } })}
-          />
-          <Banner tone="info">
-            StoreKit 验签模式：<Badge>{draft.billing.mode}</Badge> · strict 模式预留到 v1.2。
-          </Banner>
-          <div className="flex justify-end">
-            <Button onClick={() => save({ billing: draft.billing })}>保存 Billing</Button>
-          </div>
-        </Section>
-
-        <Section title="⑥ Observability" description="日志、脱敏、Prometheus">
-          <Slider
-            label="Activity log 大小"
-            value={draft.observability.activityLogSize}
-            min={100}
-            max={5000}
-            step={100}
-            valueLabel={draft.observability.activityLogSize.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, activityLogSize: v } })}
-          />
-          <Slider
-            label="Debug log 大小"
-            value={draft.observability.debugLogSize}
-            min={0}
-            max={2000}
-            step={50}
-            valueLabel={draft.observability.debugLogSize.toLocaleString()}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, debugLogSize: v } })}
-          />
-          <Switch
-            label="Debug logging"
-            supporting="捕获客户端/上游的 JSON payload（敏感）"
-            checked={draft.observability.debugLoggingEnabled}
-            onChange={() => setDraft({ ...draft, observability: { ...draft.observability, debugLoggingEnabled: !draft.observability.debugLoggingEnabled } })}
-          />
-          <Slider
-            label="日志采样率"
-            value={draft.observability.logSamplingRate * 100}
-            min={1}
-            max={100}
-            valueLabel={`${(draft.observability.logSamplingRate * 100).toFixed(0)}%`}
-            onChange={(v) => setDraft({ ...draft, observability: { ...draft.observability, logSamplingRate: v / 100 } })}
-          />
-          <Switch
-            label="启用 Prometheus /metrics"
-            checked={draft.observability.prometheusEnabled}
-            onChange={() => setDraft({ ...draft, observability: { ...draft.observability, prometheusEnabled: !draft.observability.prometheusEnabled } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ observability: draft.observability })}>保存 Observability</Button>
-          </div>
-        </Section>
-
-        <Section title="⑦ Localization" description="默认语言与时区">
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">默认语言</div>
-            <div className="mt-1">
-              <Segmented
-                value={draft.localization.defaultLocale}
-                onChange={(v) => setDraft({ ...draft, localization: { ...draft.localization, defaultLocale: v } })}
-                options={[
-                  { value: "zh-Hans", label: "简体中文" },
-                  { value: "en", label: "English" },
-                ]}
-              />
-            </div>
-          </div>
-          <TextField
-            label="时区"
-            value={draft.localization.timezone}
-            onChange={(e) => setDraft({ ...draft, localization: { ...draft.localization, timezone: e.target.value } })}
-          />
-          <div className="flex justify-end">
-            <Button onClick={() => save({ localization: draft.localization })}>保存 Localization</Button>
-          </div>
-        </Section>
-      </div>
-
-      {issueDialog && (
-        <TokenIssueDialog
-          onClose={() => setIssueDialog(false)}
-          onDone={() => {
-            setIssueDialog(false);
-            refresh();
-          }}
-        />
-      )}
-    </AdminShell>
+      <Dialog
+        open={Boolean(issuedToken)}
+        onClose={() => setIssuedToken(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>新 token 已签发</DialogTitle>
+        <DialogContent>
+          {issuedToken ? (
+            <Stack spacing={2}>
+              <Alert severity="warning">
+                <AlertTitle>请立即复制保存</AlertTitle>
+                此 token 仅在本次显示，离开后无法再次查看
+              </Alert>
+              <Box
+                component="pre"
+                sx={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "0.8125rem",
+                  bgcolor: "action.hover",
+                  p: 2,
+                  borderRadius: 1,
+                  m: 0,
+                  overflowX: "auto",
+                  wordBreak: "break-all",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {issuedToken.value}
+              </Box>
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIssuedToken(null)}>知道了</Button>
+        </DialogActions>
+      </Dialog>
+    </AppShell>
   );
 }
 
-function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  onSave,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onSave: (() => void) | null;
+}) {
   return (
-    <Card variant="filled" className="p-6">
-      <div className="mb-4">
-        <CardTitle>{title}</CardTitle>
-        <div className="mt-1 text-m3-body-s text-on-surface-variant">{description}</div>
-      </div>
-      <div className="space-y-4">{children}</div>
+    <Card sx={{ bgcolor: "action.hover" }}>
+      <CardHeader
+        title={
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            {title}
+          </Typography>
+        }
+        action={
+          onSave ? (
+            <Button size="small" variant="contained" onClick={onSave}>
+              保存
+            </Button>
+          ) : null
+        }
+      />
+      <CardContent>
+        <Stack spacing={2}>{children}</Stack>
+      </CardContent>
     </Card>
   );
 }
 
-function ChipInput({
+function SliderField({
   label,
-  values,
+  value,
+  min,
+  max,
+  step,
   onChange,
-  placeholder,
 }: {
   label: string;
-  values: string[];
-  onChange: (v: string[]) => void;
-  placeholder?: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
 }) {
-  const [input, setInput] = React.useState("");
   return (
-    <div>
-      <div className="mb-1 text-m3-label-m text-on-surface-variant">{label}</div>
-      <div className="flex flex-wrap gap-2 rounded-m3-xs border border-outline p-2">
-        {values.map((v) => (
-          <Chip key={v} selected variant="input" onRemove={() => onChange(values.filter((x) => x !== v))}>
-            {v}
-          </Chip>
-        ))}
-        <input
-          value={input}
-          placeholder={placeholder}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && input.trim()) {
-              e.preventDefault();
-              onChange([...values, input.trim()]);
-              setInput("");
-            }
-          }}
-          className="min-w-32 flex-1 bg-transparent px-2 text-m3-body-m outline-none"
-        />
-      </div>
-    </div>
-  );
-}
-
-function TokenTable({ tokens, onRevoke }: { tokens: AdminToken[]; onRevoke: (id: string) => void }) {
-  return (
-    <div className="overflow-hidden rounded-m3-sm border border-outline-variant">
-      <table className="w-full text-left text-m3-body-s">
-        <thead className="bg-surface-container-low text-m3-label-m text-on-surface-variant">
-          <tr>
-            <th className="px-3 py-2">Label</th>
-            <th className="px-3 py-2">Scope</th>
-            <th className="px-3 py-2">Prefix</th>
-            <th className="px-3 py-2">创建</th>
-            <th className="px-3 py-2">最近使用</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {tokens.length === 0 && (
-            <tr><td colSpan={6} className="px-3 py-4 text-center text-on-surface-variant">还没有签发 token</td></tr>
-          )}
-          {tokens.map((t) => (
-            <tr key={t.id} className="border-t border-outline-variant">
-              <td className="px-3 py-2">{t.label}</td>
-              <td className="px-3 py-2"><Badge tone={t.scope === "admin" ? "warn" : "info"}>{t.scope}</Badge></td>
-              <td className="px-3 py-2 font-mono">{t.prefix}</td>
-              <td className="px-3 py-2">{new Date(t.createdAt).toLocaleDateString()}</td>
-              <td className="px-3 py-2">{t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString() : "—"}</td>
-              <td className="px-3 py-2 text-right">
-                {t.revoked ? <Badge tone="error">revoked</Badge> : <Button variant="text" onClick={() => onRevoke(t.id)}>吊销</Button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TokenIssueDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const snack = useSnackbar();
-  const [label, setLabel] = React.useState("");
-  const [scope, setScope] = React.useState<"admin" | "client">("client");
-  const [rpm, setRpm] = React.useState(300);
-  const [issued, setIssued] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
-
-  async function submit() {
-    setBusy(true);
-    const res = await fetch("/api/admin/tokens", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label, scope, rpmLimit: rpm }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (!res.ok) {
-      snack.push({ message: data.message ?? "失败" });
-      return;
-    }
-    setIssued(data.value as string);
-  }
-
-  return (
-    <Dialog
-      open
-      onClose={issued ? onDone : onClose}
-      title={issued ? "Token 已签发 — 仅显示一次" : "签发 bearer token"}
-      actions={
-        issued ? (
-          <Button onClick={onDone}>完成</Button>
-        ) : (
-          <>
-            <Button variant="text" onClick={onClose}>取消</Button>
-            <Button onClick={submit} loading={busy} disabled={!label}>签发</Button>
-          </>
-        )
-      }
-    >
-      {issued ? (
-        <div className="space-y-2">
-          <Banner tone="warn">关闭后无法再次显示，请立即复制保存。</Banner>
-          <pre className="break-all rounded-m3-sm bg-surface-container-high p-3 font-mono text-m3-body-s">{issued}</pre>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <TextField label="标签" value={label} onChange={(e) => setLabel(e.target.value)} />
-          <div>
-            <div className="text-m3-label-m text-on-surface-variant">Scope</div>
-            <div className="mt-1 flex gap-2">
-              <Chip selected={scope === "admin"} onClick={() => setScope("admin")}>Admin</Chip>
-              <Chip selected={scope === "client"} onClick={() => setScope("client")}>Client</Chip>
-            </div>
-          </div>
-          <Slider
-            label="每分钟请求上限"
-            value={rpm}
-            min={0}
-            max={3000}
-            step={10}
-            valueLabel={`${rpm}/min`}
-            onChange={setRpm}
-          />
-        </div>
-      )}
-    </Dialog>
+    <Box>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Slider
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(_e, v) => onChange(typeof v === "number" ? v : v[0])}
+        size="small"
+      />
+    </Box>
   );
 }
