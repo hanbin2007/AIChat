@@ -196,6 +196,63 @@ describe("GET /api/admin/conversations/[id]", () => {
     expect(body.conversation.id).toBe("conv-aa");
     expect(body.conversation.turns.length).toBe(1);
   });
+
+  it("rebuilds a 3-turn cumulative-history conversation with correct per-turn user text", async () => {
+    // End-to-end regression guard: simulate a real watch session where every
+    // request carries the full prior history. The rebuilt conversation must
+    // expose u1/u2/u3 across the three turns (not three copies of u1).
+    await signIn();
+    const base = new Date("2026-04-10T00:00:00Z").getTime();
+    const turns = [
+      { messages: [{ role: "user", text: "u1" }], answer: "a1" },
+      { messages: [
+        { role: "user", text: "u1" },
+        { role: "assistant", text: "a1" },
+        { role: "user", text: "u2" },
+      ], answer: "a2" },
+      { messages: [
+        { role: "user", text: "u1" },
+        { role: "assistant", text: "a1" },
+        { role: "user", text: "u2" },
+        { role: "assistant", text: "a2" },
+        { role: "user", text: "u3" },
+      ], answer: "a3" },
+    ];
+    for (let i = 0; i < turns.length; i++) {
+      await requestLog().recordActivity({
+        id: `multi_${i}`,
+        timestamp: new Date(base + (i + 1) * 1000).toISOString(),
+        level: "success",
+        category: "completed",
+        message: "ok",
+        path: "/api/v1/chat/stream",
+        conversationID: "multi-route",
+        deviceID: "watch-A",
+        requestBody: { messages: turns[i].messages },
+        events: [
+          { type: "answer_delta_merged", data: { text: turns[i].answer }, at: new Date().toISOString() },
+        ],
+      });
+    }
+    const res = await conversationDetail(
+      makeRequest({ url: "http://t/conv/multi-route" }),
+      { params: Promise.resolve({ id: "multi-route" }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      conversation: {
+        id: string;
+        title: string;
+        turnCount: number;
+        turns: { userText?: string; assistantText?: string }[];
+      };
+    };
+    expect(body.conversation.id).toBe("multi-route");
+    expect(body.conversation.turnCount).toBe(3);
+    expect(body.conversation.title).toBe("u1");
+    expect(body.conversation.turns.map((t) => t.userText)).toEqual(["u1", "u2", "u3"]);
+    expect(body.conversation.turns.map((t) => t.assistantText)).toEqual(["a1", "a2", "a3"]);
+  });
 });
 
 describe("GET /api/admin/requests/stream", () => {

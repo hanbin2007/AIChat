@@ -1,7 +1,7 @@
 /**
  * Rebuild "conversations" from the request log. A conversation is identified
  * by the `x-aichat-conversation-id` header when present, else by the SHA-1
- * of `device + first 3 normalised user messages`.
+ * of `device + first user message`.
  *
  * Messages inside each turn are reconstructed from the original request body
  * (messages[] array) and, for the final assistant turn, from the merged
@@ -59,17 +59,30 @@ function firstLine(text: string | undefined, max = 60): string {
   return `${line.slice(0, max - 1)}…`;
 }
 
+// The watch sends the full history every turn; the new user input for this
+// turn is the LAST user message in messages[], not the first.
 function messagePreview(messages: Record<string, unknown>[]): string {
-  const first = messages.find((m) => (m.role ?? "user") === "user") ?? messages[0];
-  return typeof first?.text === "string" ? first.text : "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if ((m?.role ?? "user") === "user" && typeof m?.text === "string") return m.text;
+  }
+  const fallback = messages[0];
+  return typeof fallback?.text === "string" ? fallback.text : "";
 }
 
+// Auto-key fingerprints by (deviceID, first user message) — the only piece of
+// the request body stable across every turn. Slicing the cumulative history
+// (e.g. first 3 messages) shatters one real conversation across multiple
+// buckets as it grows.
 function conversationKey(entry: ActivityEntry): string {
   if (entry.conversationID) return entry.conversationID;
   const body = (entry.requestBody as Record<string, unknown> | undefined) ?? {};
   const messages = Array.isArray(body.messages) ? (body.messages as Record<string, unknown>[]) : [];
-  const fingerprint = messages.slice(0, 3).map((m) => String(m.text ?? "")).join("");
-  const h = createHash("sha1").update(`${entry.deviceID ?? ""}|${fingerprint}`).digest("hex");
+  const firstUser = messages.find((m) => (m?.role ?? "user") === "user") as
+    | Record<string, unknown>
+    | undefined;
+  const seed = typeof firstUser?.text === "string" ? firstUser.text : "";
+  const h = createHash("sha1").update(`${entry.deviceID ?? ""}|${seed}`).digest("hex");
   return `auto-${h.slice(0, 16)}`;
 }
 
@@ -154,6 +167,14 @@ export async function listConversations(opts: {
     byKey.set(key, next);
   }
 
+  for (const conv of byKey.values()) {
+    conv.turns.sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+    conv.firstAt = conv.turns[0]?.timestamp ?? conv.firstAt;
+    conv.lastAt = conv.turns[conv.turns.length - 1]?.timestamp ?? conv.lastAt;
+    // Title reflects the chronologically-first turn, even if records arrived
+    // out of order.
+    conv.title = firstLine(conv.turns[0]?.userText);
+  }
   let list = Array.from(byKey.values()).sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1));
 
   if (opts.accountID) list = list.filter((c) => c.accountID === opts.accountID);
