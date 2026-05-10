@@ -3,6 +3,7 @@ import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/admin-shell";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Icon, IconButton, Switch, Button } from "@/components/m3";
+import { Markdown } from "@/components/markdown";
 import type { Conversation } from "@/lib/store/conversations";
 import { cn } from "@/lib/cn";
 
@@ -157,20 +158,19 @@ function Bubble({
 }: {
   role: "user" | "assistant" | "error";
   reveal: boolean;
-  children: React.ReactNode;
+  children: string;
 }) {
-  const content = reveal ? children : typeof children === "string" ? redactHints(children) : children;
   return (
     <div className={cn("flex", role === "user" ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
+          "max-w-[640px] rounded-m3-lg px-4 py-3 text-m3-body-m",
           role === "user" && "rounded-br-m3-xs bg-primary-container text-on-primary-container",
           role === "assistant" && "rounded-bl-m3-xs bg-surface-container text-on-surface",
           role === "error" && "rounded-bl-m3-xs bg-error-container text-on-error-container",
         )}
       >
-        {content}
+        {reveal ? <Markdown text={children} /> : <span>{redactHints(children)}</span>}
       </div>
     </div>
   );
@@ -189,8 +189,8 @@ function ThoughtBlock({ text, reveal }: { text: string; reveal: boolean }) {
           💭 Thought · {text.length.toLocaleString()} chars
         </button>
         {open && (
-          <div className="mt-2 whitespace-pre-wrap italic">
-            {reveal ? text : redactHints(text)}
+          <div className="mt-2 italic">
+            {reveal ? <Markdown text={text} /> : <span>{redactHints(text)}</span>}
           </div>
         )}
       </div>
@@ -198,10 +198,8 @@ function ThoughtBlock({ text, reveal }: { text: string; reveal: boolean }) {
   );
 }
 
-function redactHints(text: React.ReactNode): string {
-  const str = typeof text === "string" ? text : "";
-  const chars = str.length;
-  return `[${chars.toLocaleString()} chars redacted — click Reveal to show]`;
+function redactHints(text: string): string {
+  return `[${text.length.toLocaleString()} chars redacted — click Reveal to show]`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

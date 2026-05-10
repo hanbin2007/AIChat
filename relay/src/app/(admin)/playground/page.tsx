@@ -2,6 +2,7 @@
 import * as React from "react";
 import { AdminShell } from "@/components/admin-shell";
 import { Button, Card, CardContent, CardHeader, CardTitle, Chip, Icon, IconButton, Segmented, Slider, Switch, TextField } from "@/components/m3";
+import { Markdown } from "@/components/markdown";
 import { cn } from "@/lib/cn";
 
 type Intensity = "fast" | "balanced" | "deep" | "extreme";
@@ -166,7 +167,7 @@ export default function PlaygroundPage() {
               <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
                 <div
                   className={cn(
-                    "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
+                    "max-w-[640px] rounded-m3-lg px-4 py-3 text-m3-body-m",
                     m.role === "user"
                       ? "rounded-br-m3-xs bg-primary-container text-on-primary-container"
                       : "rounded-bl-m3-xs bg-surface-container text-on-surface",
@@ -177,10 +178,16 @@ export default function PlaygroundPage() {
                       <summary className="cursor-pointer text-m3-label-m">
                         💭 Thought · {m.thought.length} chars
                       </summary>
-                      <div className="mt-1 whitespace-pre-wrap">{m.thought}</div>
+                      <div className="mt-1">
+                        <Markdown text={m.thought} />
+                      </div>
                     </details>
                   )}
-                  {m.text || (m.role === "assistant" && streaming ? "…" : "")}
+                  {m.text ? (
+                    <Markdown text={m.text} />
+                  ) : m.role === "assistant" && streaming ? (
+                    <span>…</span>
+                  ) : null}
                   {m.finishReason && m.finishReason !== "STOP" && (
                     <div className="mt-2 text-m3-label-m text-on-surface-variant">
                       finishReason: {m.finishReason}
