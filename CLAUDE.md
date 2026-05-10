@@ -98,3 +98,18 @@ UI tests are intended to use environment variable `AIChat_UI_TEST_SCENARIO` to b
 4. `ui-screenshots.yml` calls `python3 .claude/routines/scripts/asc.py artifacts --run "$RUN_ID"` to fetch the bundle via the ASC API, uploads PNGs as a workflow artifact, and posts (or updates) a single PR comment marked `<!-- ui-screenshots-bot:run=<id> -->`.
 
 No screenshot attachment in the test ⇒ no visual review surface for the UI change.
+
+## Relay server access (`ai.origenclub.cn`)
+
+The production relay (`aichat-relay.service`, Next.js on `127.0.0.1:8787` behind Caddy 2.11.2) lives on an EC2 box (`ip-172-31-34-238`, public IP `13.212.1.7`, Ubuntu 24.04). The sandbox can SSH to it through a chisel WebSocket tunnel terminated at `wss://ai.origenclub.cn/_chisel/`.
+
+Bring-up in a fresh sandbox session — requires two secrets in env (`CHISEL_SECRET`, `SSH_PRIVATE_KEY_B64`):
+
+```bash
+bash scripts/sandbox-tunnel.sh
+ssh rt 'whoami; hostname'   # → ubuntu@ip-172-31-34-238
+```
+
+`scripts/sandbox-tunnel.sh` installs the chisel client + openssh-client if missing, drops the private key into `~/.ssh/id_relay`, writes a `Host rt` stanza to `~/.ssh/config`, and runs `chisel client` in the background (log: `~/.cache/sandbox-tunnel/chisel.log`, pid: `~/.cache/sandbox-tunnel/chisel.pid`). Subsequent invocations kill any prior client and reconnect.
+
+Server-side bring-up (one-time, on the EC2 box) is `scripts/server-setup-chisel.sh` — installs chisel 1.10.1 as a `DynamicUser=yes` systemd unit (`/etc/systemd/system/chisel.service`) listening on `127.0.0.1:8080`, drops `users.json` via `LoadCredential=`, and patches `/etc/caddy/Caddyfile` to add `handle_path /_chisel/* { reverse_proxy 127.0.0.1:8080 }` ahead of the existing catch-all `reverse_proxy 127.0.0.1:8787`. See `docs/relay-server-setup.md` for the full topology, verification, and revoke/rotate steps.
