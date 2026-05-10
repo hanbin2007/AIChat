@@ -4,9 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Material Symbols Rounded — loaded from Google Fonts. Falls back silently
-   if the network blocks it; icon glyphs degrade to text. */
-@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&family=Roboto+Flex:opsz,wght@8..144,300..700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap");
+/* Google Fonts (Material Symbols Rounded, Roboto Flex/Mono, Noto Sans SC) are
+   loaded via <link> in src/app/layout.tsx — a CSS @import here would land
+   after the @tailwind expansions and the browser would silently drop it. */
 
 @layer base {
   html,
