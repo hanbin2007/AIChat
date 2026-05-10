@@ -20,12 +20,20 @@ export default defineConfig({
     testTimeout: 15_000,
     hookTimeout: 10_000,
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    exclude: ["**/node_modules/**", "tests/e2e/**"],
     environmentMatchGlobs: [["tests/ui/**", "happy-dom"]],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/lib/**/*.ts", "src/components/m3/**/*.tsx"],
-      exclude: ["src/lib/gemini/models.ts"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/lib/gemini/models.ts",
+        "src/app/**/layout.tsx",
+        "src/app/**/loading.tsx",
+        "src/app/**/error.tsx",
+        "src/app/globals.css",
+      ],
     },
   },
 });
