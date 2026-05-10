@@ -143,13 +143,21 @@ sudo systemctl --no-pager status caddy | head -n 6 || true
 # --- 6) verify ----------------------------------------------------------------
 log "verifying chisel reachable via Caddy"
 sleep 1
-if curl -fsS --max-time 5 https://ai.origenclub.cn/_chisel/ | head -c 80 | grep -qi chisel; then
-    echo
-    log "OK: /_chisel/ returns chisel hello banner"
+# chisel server returns "Not found" (404, content-length 9) for non-WebSocket
+# HTTP GETs. We confirm routing by checking that the response via Caddy is
+# byte-identical to the direct loopback response.
+direct=$(curl -sS --max-time 3 http://127.0.0.1:8080/ 2>/dev/null || echo CURL_FAIL)
+proxied=$(curl -sS --max-time 5 https://ai.origenclub.cn/_chisel/ 2>/dev/null || echo CURL_FAIL)
+if [ "$direct" = "Not found" ] && [ "$proxied" = "Not found" ]; then
+    log "OK: chisel responds 'Not found' both directly and via Caddy → tunnel path is live"
+elif [ "$direct" = "Not found" ]; then
+    warn "chisel ok on loopback, but Caddy /_chisel/ returned: $proxied"
+    warn "→ check that the Caddyfile has handle_path /_chisel/* and was reloaded"
 else
-    warn "verify failed — got:"
-    curl -i --max-time 5 https://ai.origenclub.cn/_chisel/ | head -n 12 || true
-    warn "check: sudo journalctl -u chisel -n 50 ; sudo journalctl -u caddy -n 50"
+    warn "chisel itself isn't responding on 127.0.0.1:8080:"
+    warn "  direct  = $direct"
+    warn "  proxied = $proxied"
+    warn "  sudo journalctl -u chisel -n 50"
 fi
 
 log "verifying main site still serves Next.js relay"
