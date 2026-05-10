@@ -194,3 +194,23 @@ sudo systemctl daemon-reload
 | Sandbox env shows secrets blank | secrets added after this session started | start a new Claude Code on the web session; secrets only inject at sandbox boot |
 
 Full topology + manual fallback in `docs/relay-server-setup.md`.
+
+## Next.js relay testing
+
+**All tests for the Next.js relay run in the sandbox. Never run tests on the EC2 box** — the production host is not a test runner. If the sandbox is missing a dependency (Node version, system package, browser binary for Playwright, etc.), install it in the sandbox; do not work around it by SSHing to EC2.
+
+Required test layers for the Next.js relay project (all three must exist and pass):
+
+- **Unit tests** (`tests/unit/**`) — pure functions, utility modules, and route handlers exercised in isolation.
+- **Integration tests** (`tests/api/**`, `tests/ui/**`) — API routes exercised end-to-end against in-process Next.js handlers (including SSE streaming contracts `answer_delta` / `thought_delta` and billing/auth middleware), plus React component trees rendered under happy-dom.
+- **E2E tests** (`tests/e2e/**/*.e2e.test.ts`) — HTTP flows against a real `next start` process. Boot is owned by `tests/e2e/global-setup.ts`; use `npm run test:e2e`.
+
+```bash
+cd relay
+npm test              # unit + integration (vitest)
+npm run test:coverage # unit + integration with coverage
+npm run test:e2e      # E2E only (requires `npm run build` first)
+npm run test:all      # both, in series
+```
+
+**Coverage floor: the whole Next.js project must report >70% line coverage.** Server-rendered `page.tsx` files under `src/app/` are excluded from the vitest scope because they only run inside the Next runtime; they are covered by the E2E suite which renders each admin page over HTTP. The threshold (`coverage.thresholds`) is enforced in `vitest.config.ts`, so `npm run test:coverage` fails if any of lines/statements/functions/branches falls below 70%.

@@ -30,6 +30,7 @@ import WatchIcon from "@mui/icons-material/Watch";
 import PhoneIphoneIcon from "@mui/icons-material/PhoneIphone";
 import ComputerIcon from "@mui/icons-material/Computer";
 import { AppShell } from "@/components/shell/app-shell";
+import { Markdown } from "@/components/markdown";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { Conversation } from "@/lib/store/conversations";
 
@@ -437,7 +438,7 @@ function DetailDrawer({ entry, onClose }: { entry: ActivityEntry | null; onClose
                         fontSize: "0.875rem",
                       }}
                     >
-                      {entry.responseSummary}
+                      <Markdown text={entry.responseSummary} />
                     </Box>
                   </Box>
                 )}

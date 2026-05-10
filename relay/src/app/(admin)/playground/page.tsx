@@ -26,6 +26,7 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import TravelExploreIcon from "@mui/icons-material/TravelExplore";
 import CodeIcon from "@mui/icons-material/Code";
 import { AppShell } from "@/components/shell/app-shell";
+import { Markdown } from "@/components/markdown";
 
 type Intensity = "fast" | "balanced" | "deep" | "extreme";
 
@@ -239,7 +240,6 @@ export default function PlaygroundPage() {
                   <Box
                     sx={{
                       maxWidth: 640,
-                      whiteSpace: "pre-wrap",
                       px: 2,
                       py: 1.5,
                       borderRadius: 2,
@@ -247,6 +247,7 @@ export default function PlaygroundPage() {
                       color: m.role === "user" ? "primary.contrastText" : "text.primary",
                       borderBottomRightRadius: m.role === "user" ? 4 : 16,
                       borderBottomLeftRadius: m.role === "user" ? 16 : 4,
+                      fontSize: "0.875rem",
                     }}
                   >
                     {m.thought && m.role === "assistant" && (
@@ -265,26 +266,28 @@ export default function PlaygroundPage() {
                           </Typography>
                         </AccordionSummary>
                         <AccordionDetails sx={{ px: 0, pb: 0 }}>
-                          <Typography
-                            variant="caption"
-                            component="div"
+                          <Box
                             sx={{
-                              whiteSpace: "pre-wrap",
                               fontStyle: "italic",
                               color: "text.secondary",
                               borderLeft: 2,
                               borderColor: "divider",
                               pl: 1,
+                              fontSize: "0.75rem",
                             }}
                           >
-                            {m.thought}
-                          </Typography>
+                            <Markdown text={m.thought} />
+                          </Box>
                         </AccordionDetails>
                       </Accordion>
                     )}
-                    <Typography variant="body2" component="div" sx={{ whiteSpace: "pre-wrap" }}>
-                      {m.text || (m.role === "assistant" && streaming ? "…" : "")}
-                    </Typography>
+                    {m.text ? (
+                      <Markdown text={m.text} />
+                    ) : m.role === "assistant" && streaming ? (
+                      <Typography variant="body2" component="div">
+                        …
+                      </Typography>
+                    ) : null}
                     {m.finishReason && m.finishReason !== "STOP" && (
                       <Typography variant="caption" sx={{ display: "block", mt: 1, color: "text.secondary" }}>
                         finishReason: {m.finishReason}

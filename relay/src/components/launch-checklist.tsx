@@ -57,7 +57,6 @@ export function LaunchChecklist({ items }: { items: ChecklistItem[] }) {
               <ListItemButton
                 component={Link}
                 href={item.href ?? "#"}
-                disabled={!item.href}
                 sx={{ borderRadius: 2, alignItems: "flex-start", py: 1 }}
               >
                 <ListItemIcon sx={{ minWidth: 36, mt: 0.25 }}>

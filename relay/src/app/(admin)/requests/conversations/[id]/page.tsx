@@ -25,6 +25,7 @@ import ReplayIcon from "@mui/icons-material/Replay";
 import DownloadIcon from "@mui/icons-material/Download";
 import FlagIcon from "@mui/icons-material/Flag";
 import { AppShell } from "@/components/shell/app-shell";
+import { Markdown } from "@/components/markdown";
 import type { Conversation } from "@/lib/store/conversations";
 
 export default function ConversationPage() {
@@ -238,13 +239,8 @@ function Bubble({
 }: {
   role: "user" | "assistant" | "error";
   reveal: boolean;
-  children: React.ReactNode;
+  children: string;
 }) {
-  const content = reveal
-    ? children
-    : typeof children === "string"
-      ? redactHints(children)
-      : children;
   const bg =
     role === "user"
       ? "primary.main"
@@ -262,7 +258,6 @@ function Bubble({
       <Box
         sx={{
           maxWidth: 640,
-          whiteSpace: "pre-wrap",
           px: 2,
           py: 1.5,
           borderRadius: 2,
@@ -270,9 +265,10 @@ function Bubble({
           color: fg,
           borderBottomRightRadius: role === "user" ? 4 : 16,
           borderBottomLeftRadius: role === "user" ? 16 : 4,
+          fontSize: "0.875rem",
         }}
       >
-        {content}
+        {reveal ? <Markdown text={children} /> : <Typography variant="body2">{redactHints(children)}</Typography>}
       </Box>
     </Box>
   );
@@ -300,23 +296,17 @@ function ThoughtBlock({ text, reveal }: { text: string; reveal: boolean }) {
           </Typography>
         </AccordionSummary>
         <AccordionDetails>
-          <Typography
-            variant="caption"
-            component="div"
-            sx={{ whiteSpace: "pre-wrap", fontStyle: "italic", color: "text.secondary" }}
-          >
-            {reveal ? text : redactHints(text)}
-          </Typography>
+          <Box sx={{ fontStyle: "italic", color: "text.secondary", fontSize: "0.75rem" }}>
+            {reveal ? <Markdown text={text} /> : <Typography variant="caption">{redactHints(text)}</Typography>}
+          </Box>
         </AccordionDetails>
       </Accordion>
     </Box>
   );
 }
 
-function redactHints(text: React.ReactNode): string {
-  const str = typeof text === "string" ? text : "";
-  const chars = str.length;
-  return `[${chars.toLocaleString()} chars redacted — click Reveal to show]`;
+function redactHints(text: string): string {
+  return `[${text.length.toLocaleString()} chars redacted — click Reveal to show]`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
