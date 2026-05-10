@@ -3,6 +3,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/admin-shell";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Chip, Segmented, TextField, Icon, IconButton } from "@/components/m3";
+import { Markdown } from "@/components/markdown";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { Conversation } from "@/lib/store/conversations";
 import { cn } from "@/lib/cn";
@@ -290,6 +291,7 @@ function DetailDrawer({ entry, onClose }: { entry: ActivityEntry; onClose: () =>
               <InfoRow label="account" value={entry.accountID ?? "—"} />
               <InfoRow label="device" value={entry.deviceID ?? "—"} />
               <InfoRow label="model" value={entry.modelID ?? "—"} />
+              <MessagesPreview body={entry.requestBody} />
               <CodeBlock content={JSON.stringify(entry.requestBody ?? null, null, 2)} />
             </div>
           )}
@@ -304,10 +306,33 @@ function DetailDrawer({ entry, onClose }: { entry: ActivityEntry; onClose: () =>
                 <div>
                   <div className="text-m3-label-m text-on-surface-variant">response preview</div>
                   <div className="mt-1 rounded-m3-sm bg-surface-container-high p-3 text-m3-body-m">
-                    {entry.responseSummary}
+                    <Markdown text={entry.responseSummary} />
                   </div>
                 </div>
               )}
+              {(entry.events ?? []).map((ev, i) => {
+                if (ev.type !== "answer_delta_merged" && ev.type !== "thought_delta_merged") return null;
+                const text = (ev.data as { text?: string } | null)?.text ?? "";
+                if (!text) return null;
+                const isThought = ev.type === "thought_delta_merged";
+                return (
+                  <div key={`merged-${i}`}>
+                    <div className="text-m3-label-m text-on-surface-variant">
+                      {isThought ? "thought (rendered)" : "answer (rendered)"}
+                    </div>
+                    <div
+                      className={cn(
+                        "mt-1 rounded-m3-sm p-3 text-m3-body-m",
+                        isThought
+                          ? "border-l-2 border-tertiary bg-surface-container-lowest italic text-on-surface-variant"
+                          : "bg-surface-container-high",
+                      )}
+                    >
+                      <Markdown text={text} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           {tab === "stream" && (
@@ -326,6 +351,45 @@ function DetailDrawer({ entry, onClose }: { entry: ActivityEntry; onClose: () =>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface ChatMessage {
+  role?: string;
+  text?: string;
+}
+
+function MessagesPreview({ body }: { body: unknown }) {
+  const obj = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const messages = Array.isArray(obj?.messages) ? (obj!.messages as ChatMessage[]) : null;
+  if (!messages || messages.length === 0) return null;
+  return (
+    <div>
+      <div className="text-m3-label-m text-on-surface-variant">messages (rendered)</div>
+      <ul className="mt-1 space-y-2">
+        {messages.map((m, i) => {
+          const role = m.role ?? "user";
+          const text = typeof m.text === "string" ? m.text : "";
+          if (!text) return null;
+          return (
+            <li
+              key={i}
+              className={cn(
+                "rounded-m3-sm p-3 text-m3-body-m",
+                role === "user"
+                  ? "bg-primary-container text-on-primary-container"
+                  : role === "assistant"
+                    ? "bg-surface-container text-on-surface"
+                    : "border border-outline-variant bg-surface-container-low text-on-surface-variant",
+              )}
+            >
+              <div className="mb-1 text-m3-label-s opacity-70">{role}</div>
+              <Markdown text={text} />
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
