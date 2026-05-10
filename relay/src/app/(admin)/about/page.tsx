@@ -1,5 +1,5 @@
 import { AdminShell } from "@/components/admin-shell";
-import { Card, CardContent, CardHeader, CardTitle, Button } from "@/components/m3";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/m3";
 import { config, configDiagnostics } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -40,15 +40,26 @@ export default function AboutPage() {
             <CardTitle>诊断与支持</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/requests")}>
+            <a
+              href="/api/admin/requests"
+              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
+            >
               下载 requests JSON
-            </Button>
-            <Button variant="outlined" icon="download" onClick={() => (window.location.href = "/api/admin/audit")}>
+            </a>
+            <a
+              href="/api/admin/audit"
+              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
+            >
               下载 audit JSON
-            </Button>
-            <Button variant="outlined" icon="health_and_safety" onClick={() => window.open("/api/health", "_blank")}>
+            </a>
+            <a
+              href="/api/health"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-m3-md border border-outline px-4 py-2 text-m3-label-l text-primary hover:border-primary"
+            >
               /api/health
-            </Button>
+            </a>
           </CardContent>
         </Card>
       </div>

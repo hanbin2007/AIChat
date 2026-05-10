@@ -201,8 +201,16 @@ Full topology + manual fallback in `docs/relay-server-setup.md`.
 
 Required test layers for the Next.js relay project (all three must exist and pass):
 
-- **Unit tests** — pure functions, route handlers in isolation, utility modules.
-- **Integration tests** — API routes exercised end-to-end against an in-process server, including SSE streaming contracts (`answer_delta` / `thought_delta`) and billing/auth middleware.
-- **E2E tests** — full browser/HTTP flows against a locally booted relay (e.g. Playwright or equivalent).
+- **Unit tests** (`tests/unit/**`) — pure functions, utility modules, and route handlers exercised in isolation.
+- **Integration tests** (`tests/api/**`, `tests/ui/**`) — API routes exercised end-to-end against in-process Next.js handlers (including SSE streaming contracts `answer_delta` / `thought_delta` and billing/auth middleware), plus React component trees rendered under happy-dom.
+- **E2E tests** (`tests/e2e/**/*.e2e.test.ts`) — HTTP flows against a real `next start` process. Boot is owned by `tests/e2e/global-setup.ts`; use `npm run test:e2e`.
 
-**Coverage floor: the whole Next.js project must report >70% line coverage.** CI must fail if coverage drops below the threshold; do not ship changes that bring coverage under 70%.
+```bash
+cd relay
+npm test              # unit + integration (vitest)
+npm run test:coverage # unit + integration with coverage
+npm run test:e2e      # E2E only (requires `npm run build` first)
+npm run test:all      # both, in series
+```
+
+**Coverage floor: the whole Next.js project must report >70% line coverage.** Server-rendered `page.tsx` files under `src/app/` are excluded from the vitest scope because they only run inside the Next runtime; they are covered by the E2E suite which renders each admin page over HTTP. The threshold (`coverage.thresholds`) is enforced in `vitest.config.ts`, so `npm run test:coverage` fails if any of lines/statements/functions/branches falls below 70%.
