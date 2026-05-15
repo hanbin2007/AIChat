@@ -37,8 +37,14 @@ private struct CompanionToolSettingsDraft: Equatable {
 
 struct CompanionConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let conversationID: UUID
+    /// Optional "new conversation" callback. Provided by `CompanionRootView`
+    /// so the detail toolbar can offer a quick-new-chat button on iPad —
+    /// where the user can collapse the sidebar via the system chevron and
+    /// the list-toolbar `+` would otherwise become unreachable.
+    var onCreateConversation: (() -> Void)? = nil
 
     @StateObject private var voiceRecorder = VoiceRecorder()
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
@@ -62,6 +68,10 @@ struct CompanionConversationDetailView: View {
     @State private var toolSettingsDraft: CompanionToolSettingsDraft?
     @State private var initialHistoryLoadTask: Task<Void, Never>?
     @State private var streamingRenderResumeTask: Task<Void, Never>?
+    /// Width of the composer's action row, sampled via PreferenceKey so the
+    /// voice button can collapse into the TextField on narrow screens
+    /// (iPhone mini / landscape <380pt). Zero until first layout.
+    @State private var composerMeasuredWidth: CGFloat = 0
 
     private let bottomAnchorID = "conversation-bottom-anchor"
 
@@ -87,6 +97,22 @@ struct CompanionConversationDetailView: View {
         .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "对话")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // iPad regular: also expose a "new conversation" entry in the
+            // detail toolbar, since the user can collapse the sidebar via
+            // the system chevron and the list-toolbar `+` would otherwise
+            // disappear with it.
+            if shouldShowDetailNewConversationButton {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onCreateConversation?()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("新建会话")
+                    .accessibilityIdentifier("conversation.detail.new")
+                }
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     isShowingSettings = true
@@ -132,8 +158,40 @@ struct CompanionConversationDetailView: View {
             streamingRenderResumeTask?.cancel()
             streamingRenderResumeTask = nil
         }
+        #if DEBUG
+        .task(id: conversationID) {
+            await triggerUITestStreamingScenarioIfNeeded()
+        }
+        #endif
         .accessibilityIdentifier("companion.conversation.detail")
     }
+
+    private var shouldShowDetailNewConversationButton: Bool {
+        horizontalSizeClass == .regular
+            && chatStore.isReadOnlyMode == false
+            && onCreateConversation != nil
+    }
+
+    #if DEBUG
+    /// Drives the `companion_streaming_fade_in` UI test scenario from the
+    /// detail view's `.task` lifecycle so the retry kicks off after the view
+    /// has actually mounted (not from a free-floating `Task` spawned in
+    /// `App.init`, which on Cloud iOS sims sometimes fired before the
+    /// `StreamingAssistantBodyView` had subscribed to the pacer — leaving the
+    /// initial chunks stranded).
+    private func triggerUITestStreamingScenarioIfNeeded() async {
+        let env = ProcessInfo.processInfo.environment
+        guard env["AIChat_UI_TEST_SCENARIO"] == "companion_streaming_fade_in",
+              let conversation = chatStore.conversation(id: conversationID),
+              conversation.messages.last?.status == .failed,
+              chatStore.isSending(conversationID: conversationID) == false
+        else {
+            return
+        }
+
+        await chatStore.retryLatestReply(in: conversationID)
+    }
+    #endif
 
     private func conversationContent(_ conversation: ConversationThread) -> some View {
         let streamingMessageID = currentStreamingMessageID(in: conversation)
@@ -170,6 +228,7 @@ struct CompanionConversationDetailView: View {
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
                                 forceExpandedContent: latestMessageID == message.id,
+                                streamingPacer: chatStore.streamingPacer,
                                 onPinMessage: { messageID, convoID, scope in
                                     await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
                                 }
@@ -511,10 +570,6 @@ struct CompanionConversationDetailView: View {
             isSending == false &&
             isTranscribing == false &&
             voiceRecorder.isInteractive
-        let voiceButtonLabel =
-            voiceRecorder.isRecording ?
-            (voiceCaptureMode == .directSend ? "停止并发送" : "停止并转录") :
-            "语音"
         let voiceButtonDisabled =
             voiceRecorder.isRecording == false &&
             (isSending || isTranscribing || voiceRecorder.isPreparing)
@@ -585,77 +640,13 @@ struct CompanionConversationDetailView: View {
                     )
                 }
 
-                TextField("Ask Gemini", text: draftTextBinding(), axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .lineLimit(1...5)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .tint(.cyan)
-                    .focused($isDraftFieldFocused)
-                    .disabled(voiceRecorder.isRecording || isTranscribing)
-
-                HStack(spacing: 10) {
-                    Button {
-                        handleVoiceButtonTap()
-                    } label: {
-                        Label(voiceButtonLabel, systemImage: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(voiceRecorder.isRecording ? .red : .white)
-                    .disabled(voiceButtonDisabled)
-                    .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.45)
-                            .onEnded { _ in
-                                handleVoiceButtonLongPress()
-                            }
-                    )
-
-                    Button(action: presentToolSettings) {
-                        HStack(spacing: 6) {
-                            ForEach(toolButtonSymbols(for: aiConfiguration), id: \.self) { symbolName in
-                                Image(systemName: symbolName)
-                            }
-
-                            Text("工具/图片")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(toolButtonTint(for: aiConfiguration))
-                    .disabled(voiceRecorder.isRecording || isTranscribing)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
-                    .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
-                    .accessibilityIdentifier("conversation.tool-entry")
-
-                    Button {
-                        if canRestorePreviousMessage {
-                            restorePreviousUserMessage()
-                        } else {
-                            sendCurrentDraft()
-                        }
-                    } label: {
-                        Label(
-                            canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "发送",
-                            systemImage: canRestorePreviousMessage ? "arrow.uturn.backward.circle.fill" : "arrow.up.circle.fill"
-                        )
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cyan)
-                    .disabled((sendEnabled || canRestorePreviousMessage) == false)
-                }
+                composerInputRow(
+                    aiConfiguration: aiConfiguration,
+                    voiceButtonDisabled: voiceButtonDisabled,
+                    sendEnabled: sendEnabled,
+                    canRestorePreviousMessage: canRestorePreviousMessage,
+                    isTranscribing: isTranscribing
+                )
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -672,6 +663,191 @@ struct CompanionConversationDetailView: View {
                     .fill(Color.white.opacity(0.08))
                     .frame(height: 1)
             }
+    }
+
+    /// Composer input row: TextField with an inline tool-entry "+" plus a
+    /// circular voice and send button. On narrow screens (~iPhone mini /
+    /// landscape <380pt) the voice button collapses into the TextField's
+    /// trailing accessory area so the send button still has full breathing
+    /// room. Replaces the previous three equal-width labelled buttons that
+    /// drowned the primary "send" action and forced excessive composer
+    /// height (issue #31).
+    @ViewBuilder
+    private func composerInputRow(
+        aiConfiguration: ConversationAIConfiguration,
+        voiceButtonDisabled: Bool,
+        sendEnabled: Bool,
+        canRestorePreviousMessage: Bool,
+        isTranscribing: Bool
+    ) -> some View {
+        let isNarrow = composerMeasuredWidth > 0 && composerMeasuredWidth < 380
+        let toolsDisabled = voiceRecorder.isRecording || isTranscribing
+
+        HStack(alignment: .bottom, spacing: 8) {
+            // TextField "pill" with always-visible tool entry, plus voice on
+            // narrow screens.
+            HStack(alignment: .bottom, spacing: 6) {
+                TextField("Ask Gemini", text: draftTextBinding(), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .lineLimit(1...5)
+                    .tint(.cyan)
+                    .focused($isDraftFieldFocused)
+                    .disabled(voiceRecorder.isRecording || isTranscribing)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                composerToolButton(aiConfiguration: aiConfiguration, disabled: toolsDisabled)
+
+                if isNarrow {
+                    composerVoiceButton(
+                        disabled: voiceButtonDisabled,
+                        compact: true
+                    )
+                }
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+
+            if isNarrow == false {
+                composerVoiceButton(
+                    disabled: voiceButtonDisabled,
+                    compact: false
+                )
+            }
+
+            composerSendButton(
+                sendEnabled: sendEnabled,
+                canRestorePreviousMessage: canRestorePreviousMessage
+            )
+        }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(
+                        key: CompanionComposerWidthKey.self,
+                        value: proxy.size.width
+                    )
+            }
+        )
+        .onPreferenceChange(CompanionComposerWidthKey.self) { width in
+            composerMeasuredWidth = width
+        }
+    }
+
+    // The toolbar's `conversation.settings.open` button uses plain
+    // `Button { ... } label: { Image(...) }` + `.accessibilityIdentifier`
+    // and is reliably findable on iOS 26 (its query passes in every recent
+    // build). The earlier `Button + .buttonStyle(.plain)` and
+    // `Image + .onTapGesture` patterns both dropped the identifier on Cloud
+    // sims (builds #44–#50). Match the working toolbar pattern: default
+    // button style, no `.accessibilityElement(children:)`, no manual
+    // `.isButton` trait. We pull the visual styling into a custom
+    // ButtonStyle so the rounded icon look survives default-style chrome.
+    @ViewBuilder
+    private func composerToolButton(
+        aiConfiguration: ConversationAIConfiguration,
+        disabled: Bool
+    ) -> some View {
+        Button {
+            presentToolSettings()
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 26, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(toolButtonTint(for: aiConfiguration))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(CompanionTransparentButtonStyle())
+        .opacity(disabled ? 0.4 : 1.0)
+        .disabled(disabled)
+        .accessibilityLabel(toolButtonAccessibilityLabel(for: aiConfiguration))
+        .accessibilityValue(toolButtonAccessibilityValue(for: aiConfiguration))
+        .accessibilityIdentifier("conversation.tool-entry")
+    }
+
+    @ViewBuilder
+    private func composerVoiceButton(disabled: Bool, compact: Bool) -> some View {
+        let isRecording = voiceRecorder.isRecording
+        let iconName = isRecording ? "stop.fill" : "waveform.badge.mic"
+        let label =
+            isRecording ?
+            (voiceCaptureMode == .directSend ? "停止并发送" : "停止并转录") :
+            "开始录音"
+        let dimension: CGFloat = compact ? 36 : 44
+
+        Button {
+            handleVoiceButtonTap()
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(isRecording ? Color.red.opacity(0.85) : Color.white.opacity(0.08))
+                Image(systemName: iconName)
+                    .font(.system(size: compact ? 16 : 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: dimension, height: dimension)
+            .contentShape(Circle())
+        }
+        .buttonStyle(CompanionTransparentButtonStyle())
+        .opacity(disabled ? 0.4 : 1.0)
+        .disabled(disabled)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    guard disabled == false else { return }
+                    handleVoiceButtonLongPress()
+                }
+        )
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("conversation.voice-button")
+    }
+
+    @ViewBuilder
+    private func composerSendButton(
+        sendEnabled: Bool,
+        canRestorePreviousMessage: Bool
+    ) -> some View {
+        let iconName = canRestorePreviousMessage ?
+            "arrow.uturn.backward.circle.fill" :
+            "arrow.up.circle.fill"
+        let label = canRestorePreviousMessage ?
+            L10n.tr("conversation.restore_previous_message") :
+            "发送"
+        let isEnabled = sendEnabled || canRestorePreviousMessage
+
+        Button {
+            if canRestorePreviousMessage {
+                restorePreviousUserMessage()
+            } else {
+                sendCurrentDraft()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(isEnabled ? Color.cyan : Color.white.opacity(0.10))
+                Image(systemName: iconName)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+        }
+        .buttonStyle(CompanionTransparentButtonStyle())
+        .opacity(isEnabled ? 1.0 : 0.6)
+        .disabled(isEnabled == false)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("conversation.send-button")
     }
 
     private var conversationToolSheet: some View {
@@ -1431,6 +1607,26 @@ private struct CompanionDraftAttachmentCard: View {
                 expandsHorizontally: true
             )
         }
+    }
+}
+
+private struct CompanionComposerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Strips Button chrome (no border, no tint) without using
+/// `.buttonStyle(.plain)`, which on iOS 26 also strips the explicit
+/// `.accessibilityIdentifier` from XCUITest's `descendants(matching:)` query.
+/// Custom ButtonStyle keeps the visual transparent AND keeps the identifier
+/// surfaceable.
+private struct CompanionTransparentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1.0)
     }
 }
 #endif

@@ -10,6 +10,89 @@
 #if os(watchOS)
 import SwiftUI
 
+/// Inline row variant of `RelayStatusDot` used in the conversation list.
+/// Same connectivity content, but rendered at list-row scale and tappable
+/// across the full row width (not just a 44pt hitbox in the toolbar). The
+/// dot lived in the navigation toolbar trailing slot until users reported
+/// that the watchOS system status indicator (mic / charging / AOD glyph)
+/// covered both it and the adjacent `+` button.
+struct RelayStatusRow: View {
+    @EnvironmentObject private var chatStore: ChatStore
+    @State private var isShowingDetail = false
+
+    var body: some View {
+        Button {
+            isShowingDetail = true
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color(for: chatStore.relayConnectionStatus))
+                    .frame(width: 8, height: 8)
+                Text(headerTitle)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLabel(for: chatStore.relayConnectionStatus)))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("relay-status-row")
+        .sheet(isPresented: $isShowingDetail) {
+            RelayStatusDetailSheet(isPresented: $isShowingDetail)
+                .environmentObject(chatStore)
+        }
+    }
+
+    private var headerTitle: String {
+        switch chatStore.relayConnectionStatus {
+        case .unknown:
+            return "Relay · Unknown"
+        case .connecting:
+            return "Relay · Connecting"
+        case .online:
+            return "Relay · Online"
+        case .offline:
+            return "Relay · Offline"
+        }
+    }
+
+    private func color(for status: RelayConnectionStatus) -> Color {
+        switch status {
+        case .online:
+            return .green
+        case .connecting, .unknown:
+            return .yellow
+        case .offline:
+            return .red
+        }
+    }
+
+    private func accessibilityLabel(for status: RelayConnectionStatus) -> String {
+        switch status {
+        case .unknown:
+            return "Relay status unknown"
+        case .connecting:
+            return "Relay connecting"
+        case .online:
+            return "Relay online"
+        case .offline(let reason):
+            return "Relay offline: \(reason)"
+        }
+    }
+}
+
 struct RelayStatusDot: View {
     @EnvironmentObject private var chatStore: ChatStore
     @State private var isShowingDetail = false

@@ -216,6 +216,7 @@ struct ChatBubbleView: View, Equatable {
                     fallbackThoughtSummary: renderedThoughtSummary,
                     forceExpandedContent: forceExpandedContent,
                     isLatestReplyAnchorTarget: isLatestReplyAnchorTarget,
+                    suspendRender: suspendStreamingRender,
                     thoughtSummaryToggleAccessibilityIdentifier: thoughtSummaryToggleAccessibilityIdentifier,
                     thoughtSummaryStateAccessibilityIdentifier: thoughtSummaryStateAccessibilityIdentifier,
                     messageBodyAccessibilityIdentifier: messageBodyAccessibilityIdentifier,
@@ -247,14 +248,6 @@ struct ChatBubbleView: View, Equatable {
 
                     messageTextContent
                 }
-            }
-
-            if isStreamingAssistant {
-                StreamingReplyStatusView(
-                    title: isStreamingPaused ? "Pause" : "Replying",
-                    animatesTrack: suspendStreamingRender == false,
-                    isPaused: isStreamingPaused
-                )
             }
 
             HStack(spacing: 6) {
@@ -724,7 +717,7 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
 /// Observes `StreamingTextPacer` directly so that per-token reveals only
 /// invalidate this small subtree — the enclosing `ChatBubbleView` does not
 /// subscribe. This is the counterpart to the removed 120ms flush throttle:
-/// visible text now arrives frame-by-frame at ~30Hz from the pacer rather
+/// visible text now arrives frame-by-frame at ~15Hz from the pacer rather
 /// than in 120ms chunks through `@Published conversations`.
 ///
 /// `fallbackText` / `fallbackThoughtSummary` cover the multi-stream case:
@@ -741,6 +734,11 @@ private struct StreamingAssistantBodyView: View {
     let fallbackThoughtSummary: String?
     let forceExpandedContent: Bool
     let isLatestReplyAnchorTarget: Bool
+    /// True while the parent has paused live render (e.g. detail view scrolled
+    /// away from the bottom). Drives the cursor-blink freeze in
+    /// `StreamingFadeInTextView` so we don't waste GPU on an off-screen
+    /// indicator.
+    let suspendRender: Bool
     let thoughtSummaryToggleAccessibilityIdentifier: String
     let thoughtSummaryStateAccessibilityIdentifier: String
     let messageBodyAccessibilityIdentifier: String
@@ -791,253 +789,119 @@ private struct StreamingAssistantBodyView: View {
                     )
                 }
 
-                MessageBodyTextView(
+                StreamingFadeInTextView(
                     text: revealedText,
-                    forceExpanded: forceExpandedContent,
-                    accessibilityIdentifier: messageBodyAccessibilityIdentifier,
-                    expandButtonAccessibilityIdentifier: expandButtonAccessibilityIdentifier
+                    suspendRender: suspendRender,
+                    accessibilityIdentifier: messageBodyAccessibilityIdentifier
                 )
             }
         }
     }
 }
 
-private struct StreamingReplyStatusView: View {
-    let title: String
-    let animatesTrack: Bool
-    let isPaused: Bool
+/// Renders the streaming reveal as a single `Text` whose trailing characters
+/// fade up from low opacity to full as new chunks arrive. A blinking cursor
+/// is appended at the end of the text. When `suspendRender` is true (parent
+/// scrolled away / off-screen) the cursor freezes so we don't burn animation
+/// budget on a hidden indicator.
+///
+/// Implementation notes:
+/// - The fade is per-character via `Text` concatenation, but only the last
+///   `trailingFadeWindow` characters split into individual `Text` operands.
+///   Older text stays as one composed `Text`, so cost is O(window) regardless
+///   of message length.
+/// - We use `.foregroundStyle(.white.opacity(...))` rather than rebuilding an
+///   AttributedString so SwiftUI can interpolate Color smoothly between text
+///   updates without us owning a TimelineView.
+/// - Streaming-time render is plain `Text` (matches the pre-existing
+///   `MessageBodyTextView` path); markdown formatting kicks back in once the
+///   message finalizes and the bubble re-renders through
+///   `AssistantMessageMarkdownView`.
+private struct StreamingFadeInTextView: View {
+    let text: String
+    let suspendRender: Bool
+    let accessibilityIdentifier: String
 
-    private let trackHeight: CGFloat = 5
+    @State private var cursorOpacity: Double = 1.0
 
-    private var statusTint: Color {
-        isPaused ? Color.gray.opacity(0.88) : Color.cyan.opacity(0.92)
-    }
-
-    private var highlightTint: Color {
-        isPaused ? Color.white.opacity(0.82) : Color.white.opacity(0.95)
-    }
+    private static let trailingFadeWindow = 6
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusTint)
-                    .frame(width: 6, height: 6)
-
-                Text(title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.84))
-            }
-
-            GeometryReader { proxy in
-                let trackWidth = max(proxy.size.width, 1)
-                let leadingCoreWidth = max(trackWidth * 0.22, 18)
-                let trailingCoreWidth = max(trackWidth * 0.12, 12)
-
-                if animatesTrack {
-                    StreamingTrackAnimator(
-                        trackWidth: trackWidth,
-                        leadingCoreWidth: leadingCoreWidth,
-                        trailingCoreWidth: trailingCoreWidth,
-                        statusTint: statusTint,
-                        highlightTint: highlightTint,
-                        trackHeight: trackHeight
-                    )
+        // NOTE: Don't apply `.accessibilityElement(children: .ignore)` here —
+        // it strips the underlying `staticText` trait that XCUITest needs to
+        // find the streaming bubble via `app.staticTexts[...]`. The composed
+        // `Text` already defaults to a single staticText element; we just
+        // override its label so the cursor glyph isn't read aloud.
+        (composedText() + cursorText())
+            .font(.body)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(text)
+            .accessibilityIdentifier(accessibilityIdentifier)
+            .accessibilityValue("streaming")
+            .onAppear { startCursorAnimationIfNeeded() }
+            .compatibleOnChange(of: suspendRender) { suspended in
+                if suspended {
+                    freezeCursor()
                 } else {
-                    statusTrack(
-                        trackWidth: trackWidth,
-                        leadingCoreWidth: leadingCoreWidth,
-                        trailingCoreWidth: trailingCoreWidth,
-                        leadingOffset: trackWidth * 0.32,
-                        trailingOffset: trackWidth * 0.18,
-                        glowOpacity: 0.7
-                    )
+                    startCursorAnimationIfNeeded()
                 }
             }
-            .frame(height: trackHeight)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 2)
     }
 
-    private func statusTrack(
-        trackWidth: CGFloat,
-        leadingCoreWidth: CGFloat,
-        trailingCoreWidth: CGFloat,
-        leadingOffset: CGFloat,
-        trailingOffset: CGFloat,
-        glowOpacity: Double
-    ) -> some View {
-        let glowWidth = min(trackWidth * 0.56, 72)
-
-        return ZStack(alignment: .leading) {
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.05),
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.06)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.clear,
-                            statusTint.opacity(0.08),
-                            statusTint.opacity(0.42),
-                            highlightTint.opacity(0.90),
-                            statusTint.opacity(0.26),
-                            Color.clear
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: glowWidth)
-                .offset(x: leadingOffset - glowWidth * 0.24)
-                .opacity(glowOpacity)
-                #if os(watchOS)
-                .opacity(0.7)
-                #else
-                .blur(radius: 7)
-                #endif
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            statusTint.opacity(0.14),
-                            statusTint.opacity(0.65),
-                            highlightTint.opacity(0.95)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: leadingCoreWidth)
-                .offset(x: leadingOffset)
-                .shadow(color: statusTint.opacity(0.28), radius: 8, y: 0)
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            statusTint.opacity(0.08),
-                            statusTint.opacity(0.34),
-                            highlightTint.opacity(0.32)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: trailingCoreWidth)
-                .offset(x: trailingOffset)
+    private func composedText() -> Text {
+        guard text.isEmpty == false else {
+            return Text("")
         }
-        .clipShape(Capsule(style: .continuous))
+
+        let chars = Array(text)
+        let count = chars.count
+        let window = min(Self.trailingFadeWindow, count)
+        let stableEnd = count - window
+
+        var result: Text
+        if stableEnd > 0 {
+            result = Text(String(chars[0..<stableEnd]))
+                .foregroundStyle(.white)
+        } else {
+            result = Text("")
+        }
+
+        // Newest character (last in fade window) is most transparent;
+        // oldest character in the window is fully opaque. As new chars
+        // arrive, prior "newest" chars slide left into higher-opacity
+        // positions — visually a soft trailing edge that "lifts" each
+        // new chunk into place.
+        let denom = Double(max(window - 1, 1))
+        for i in 0..<window {
+            // i = 0 → oldest in window → alpha 1.0 (opaque)
+            // i = window-1 → newest char → alpha 0.4 (most transparent)
+            let alpha = 1.0 - 0.6 * Double(i) / denom
+            result = result + Text(String(chars[stableEnd + i]))
+                .foregroundStyle(.white.opacity(alpha))
+        }
+
+        return result
     }
-}
 
-/// Uses a repeating SwiftUI animation instead of 30fps TimelineView to drive
-/// the streaming glow track — cheaper on watchOS where TimelineView + blur
-/// consumes significant GPU budget.
-private struct StreamingTrackAnimator: View {
-    let trackWidth: CGFloat
-    let leadingCoreWidth: CGFloat
-    let trailingCoreWidth: CGFloat
-    let statusTint: Color
-    let highlightTint: Color
-    let trackHeight: CGFloat
+    private func cursorText() -> Text {
+        Text(" ▍")
+            .font(.body.weight(.thin))
+            .foregroundStyle(Color.cyan.opacity(cursorOpacity))
+    }
 
-    @State private var phase: CGFloat = 0
-
-    var body: some View {
-        let travel = max(trackWidth - leadingCoreWidth, 0)
-        let glowOffset = travel * phase
-        let glowWidth = min(trackWidth * 0.56, 72)
-
-        ZStack(alignment: .leading) {
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.05),
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.06)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.clear,
-                            statusTint.opacity(0.08),
-                            statusTint.opacity(0.42),
-                            highlightTint.opacity(0.90),
-                            statusTint.opacity(0.26),
-                            Color.clear
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: glowWidth)
-                .offset(x: glowOffset - glowWidth * 0.24)
-                .opacity(0.96)
-                #if os(watchOS)
-                .opacity(0.7)
-                #else
-                .blur(radius: 7)
-                #endif
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            statusTint.opacity(0.14),
-                            statusTint.opacity(0.65),
-                            highlightTint.opacity(0.95)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: leadingCoreWidth)
-                .offset(x: glowOffset)
-                .shadow(color: statusTint.opacity(0.28), radius: 8, y: 0)
-
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            statusTint.opacity(0.08),
-                            statusTint.opacity(0.34),
-                            highlightTint.opacity(0.32)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(width: trailingCoreWidth)
-                .offset(x: max(glowOffset - trackWidth * 0.18, 0))
+    private func startCursorAnimationIfNeeded() {
+        guard suspendRender == false else { return }
+        cursorOpacity = 1.0
+        withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
+            cursorOpacity = 0.25
         }
-        .clipShape(Capsule(style: .continuous))
-        .onAppear {
-            withAnimation(
-                .easeInOut(duration: 1.65)
-                .repeatForever(autoreverses: true)
-            ) {
-                phase = 1
-            }
+    }
+
+    private func freezeCursor() {
+        withAnimation(.linear(duration: 0.15)) {
+            cursorOpacity = 0.35
         }
     }
 }

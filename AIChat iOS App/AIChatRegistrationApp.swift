@@ -70,8 +70,10 @@ struct AIChatRegistrationApp: App {
                     await chatStore.refreshRemoteSyncState()
                 }
             }
+            .preferredColorScheme(.dark)
             #else
             OfflineActivationKeygenView()
+                .preferredColorScheme(.dark)
             #endif
         }
     }
@@ -126,6 +128,58 @@ private struct CompanionUITestBootstrap {
                 },
                 initialConversationID: conversation.id,
                 launchDestination: .conversationDetail(conversation.id)
+            )
+        case "companion_streaming_fade_in":
+            // Visual demo for issue #22. The retry that drives the slow
+            // streaming service runs from TWO places:
+            //   1. A delayed `Task` here in App.init (1.5s) — covers the
+            //      case where SwiftUI delays calling `.task` (rare on iOS,
+            //      observed once on iPhone 14 Pro Cloud sims).
+            //   2. `CompanionConversationDetailView.task(id:)` — covers the
+            //      case where this `Task` fires before the bubble has
+            //      subscribed to the pacer.
+            // Both call sites guard on `messages.last?.status == .failed`
+            // so whichever fires first wins; the other becomes a no-op.
+            let conversation = streamingFadeInConversation()
+            let store = MainActor.assumeIsolated {
+                ChatStore.previewStore(
+                    conversations: [conversation],
+                    aiService: CompanionStreamingFadeInService()
+                )
+            }
+
+            Task { @MainActor [weak store] in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let store else { return }
+                guard store.conversation(id: conversation.id)?.messages.last?.status == .failed else {
+                    return
+                }
+                await store.retryLatestReply(in: conversation.id)
+            }
+
+            return CompanionUITestBootstrap(
+                store: store,
+                initialConversationID: conversation.id,
+                launchDestination: .conversationDetail(conversation.id)
+            )
+        case "companion_compact_delete_pops":
+            // Regression scenario for issue #32. Two conversations; the UI
+            // test deletes the open one and asserts that the post-delete
+            // reconciler (in `CompanionRootView`) does NOT auto-jump into
+            // the neighbor on iPhone.
+            //
+            // Critical: launchDestination is `.root`, not `.conversationDetail`.
+            // The conversationDetail path mounts the detail view directly
+            // (NavigationStack root) and bypasses `CompanionRootView`'s
+            // `reconcileSelection`, so the issue #32 fix would never get
+            // exercised on that path.
+            let pair = compactDeletePair()
+            return CompanionUITestBootstrap(
+                store: MainActor.assumeIsolated {
+                    ChatStore.previewStore(conversations: pair)
+                },
+                initialConversationID: pair[0].id,
+                launchDestination: .root
             )
         default:
             return nil
@@ -210,7 +264,98 @@ private struct CompanionUITestBootstrap {
         )
     }
 
+    private static func streamingFadeInConversation() -> ConversationThread {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000431") ?? UUID()
+        // The store needs a previously-streamed assistant reply that
+        // `retryLatestReply` can resurrect. The user message becomes the
+        // prompt that the slow streaming service will answer.
+        return ConversationThread(
+            id: conversationID,
+            title: "Companion Streaming Fade In",
+            messages: [
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000432") ?? UUID(),
+                    role: .user,
+                    text: "演示一下流式渐入动画。"
+                ),
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000433") ?? UUID(),
+                    role: .assistant,
+                    text: "（占位回复，UI 测试启动后会被重发的流式结果替换。）",
+                    status: .failed
+                )
+            ]
+        )
+    }
+
+    private static func compactDeletePair() -> [ConversationThread] {
+        let openID = UUID(uuidString: "00000000-0000-0000-0000-000000000441") ?? UUID()
+        let neighborID = UUID(uuidString: "00000000-0000-0000-0000-000000000442") ?? UUID()
+        let open = ConversationThread(
+            id: openID,
+            title: "Companion Compact Delete Open",
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "这是当前打开的会话，删除它后不应该自动跳进另一条。"
+                )
+            ]
+        )
+        let neighbor = ConversationThread(
+            id: neighborID,
+            title: "Companion Compact Delete Neighbor",
+            messages: [
+                ChatMessage(
+                    role: .assistant,
+                    text: "邻居会话；删除上一条后应保持在列表里，由用户自己决定下一步。"
+                )
+            ]
+        )
+        return [open, neighbor]
+    }
+
     private static let onePixelPNGBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aW2QAAAAASUVORK5CYII="
+}
+
+/// Slow-paced streaming service used by the `companion_streaming_fade_in`
+/// UI test scenario. Emits short Chinese segments at ~5Hz so the
+/// per-character trailing fade-in (issue #22) is large enough to capture in
+/// a single screenshot. Total wall-clock is ~6s which fits well inside the
+/// UI test's 10s wait windows.
+private struct CompanionStreamingFadeInService: AIStreamingService {
+    func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached(priority: .userInitiated) {
+                continuation.yield(
+                    .thoughtDelta("演示：流式回复的渐入动画。")
+                )
+
+                let chunks: [String] = [
+                    "智能", "手表", "上的", "聊天", "界面", "应该",
+                    "保持", "干净、", "克制。", "新的",
+                    "渐入", "字符", "动画", "让", "回复", "看起来",
+                    "像被", "一只", "手", "轻轻", "揭开", "毯子",
+                    "推出", "来。"
+                ]
+
+                for chunk in chunks {
+                    guard Task.isCancelled == false else {
+                        continuation.finish()
+                        return
+                    }
+
+                    try? await Task.sleep(nanoseconds: 220_000_000)
+                    continuation.yield(.answerDelta(chunk))
+                }
+
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
 }
 #endif
