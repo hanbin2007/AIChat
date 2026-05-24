@@ -20,7 +20,7 @@ platform :ios do
 
     build_app(
       project: "AIChat.xcodeproj",
-      scheme: "AIChat iOS App",
+      scheme: "AIChat",
       configuration: "Release",
       export_method: "app-store",
       clean: true,

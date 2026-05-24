@@ -5,8 +5,15 @@
 set -euo pipefail
 
 REPO="/Users/zhb/Documents/aichat"
-LOG="$REPO/fastlane/nightly.log"
-exec >> "$LOG" 2>&1
+LOG_DIR="$REPO/fastlane/logs"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/nightly-$(date +%F).log"
+# Prune logs older than 14 days, then cap this run's log at 100 MB. head closes
+# the pipe at the cap and the resulting SIGPIPE kills the run, so a stuck or
+# interactive prompt can never fill the disk again (see incident 2026-05-24:
+# a wrong gym scheme dropped into an interactive picker and the loop wrote 58 GB).
+find "$LOG_DIR" -name 'nightly-*.log' -mtime +14 -delete 2>/dev/null || true
+exec > >(head -c 104857600 > "$LOG") 2>&1
 
 echo "===== Nightly run $(date -Iseconds) ====="
 
@@ -44,5 +51,11 @@ $RECENT_FIXES
 Recent commits:
 $RECENT_COMMITS"
 
-fastlane beta changelog:"$CHANGELOG"
+# Wall-clock cap (1h) when a timeout binary is available, so a silent hang can't
+# wedge the run indefinitely. Plain run if neither timeout nor gtimeout exists.
+if TIMEOUT_BIN="$(command -v timeout || command -v gtimeout)"; then
+  "$TIMEOUT_BIN" 3600 fastlane beta changelog:"$CHANGELOG"
+else
+  fastlane beta changelog:"$CHANGELOG"
+fi
 echo "===== Nightly done $(date -Iseconds) ====="
