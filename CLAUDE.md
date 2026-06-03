@@ -35,15 +35,18 @@ xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,n
 ## Local Configuration
 
 1. Copy `Config/Secrets.xcconfig.example` → `Config/Secrets.xcconfig` (gitignored)
-2. Set `AI_BACKEND_MODE` to `direct` (dev) or `relay` (production)
+2. The watch is relay-only; populate `AI_RELAY_BASE_URL` and (optionally) `AI_RELAY_BEARER_TOKEN` in the xcconfig
 3. In xcconfig, URLs must use `http:/$()/...` — `//` is treated as a comment
 
 ## Architecture
 
-**MVVM with a single central ObservableObject store.**
+**Per-VM MVVM. No central store.**
 
-- `ChatStore` (`AIChat Watch App/ViewModels/ChatStore.swift`) is the sole `@StateObject` source of truth, injected via `.environmentObject()` from the `@main` app entry point
-- Views read from and send actions to `ChatStore`; they never talk to services directly
+- Each screen owns a `@MainActor final class` + `@Observable` ViewModel under `AIChat Watch App/Stores/` (e.g. `ConversationDetailViewModel`, `ConversationListViewModel`, `ActivationCenterViewModel`, `RelayPurchaseSheetViewModel`, `BillingViewModel`, `GlobalSettingsViewModel`, `FavoritesViewModel`, `PromptLibraryViewModel`, `RelayPairingTokenViewModel`).
+- `AppEnvironment` (`AIChat Watch App/AppEnvironment.swift`) is the composition root. It owns the `RelayAPIClient` actor and the domain services (`ChatService`, `MemoryService`, `TranscriptionService`, `ConversationPersistence`, `BillingPersistence`, `SettingsService`, `RelayConnectionMonitor`) and is injected into the SwiftUI tree via `.environment(\.appEnvironment, ...)`. It does NOT hold ViewModels or shared UI state.
+- Views construct their own VMs from injected services on navigation; there is no central `ChatStore` — that pattern is gone.
+- The `ConversationPersistence` actor (`AIChat Watch App/Persistence/`) is the single source of truth for conversation data; subscribers receive change notifications via `stream() -> AsyncStream<[ConversationThread]>`.
+- Bearer-key persistence is via `RelayKeyStore` (in `AppConfiguration.swift`) backed by an app-group `UserDefaults` suite; activation flows must write to it for the key to survive cold launches.
 
 ### Targets
 
@@ -57,19 +60,15 @@ xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,n
 
 ### Watch App Layers
 
-- **Models/** — `ConversationThread`, `ChatMessage`, `ChatAttachment`, `PromptPreset`, `AIModelCatalog` — plain `Codable` structs
-- **Services/** — `GeminiAPIClient` (direct), `RelayAIClient` (relay proxy), `ConversationRepository` (JSON file persistence), `ICloudConversationSyncService`, `CompanionSyncBridge` (WatchConnectivity), `VoiceRecorder`, `AIContextBuilder`, `AIMemoryMaintenanceService`
-- **ViewModels/** — `ChatStore` only
-- **Views/** — SwiftUI views; `ContentView` is a root `TabView` (Favorites / PromptLibrary / Conversations)
+- **Models/** — `ConversationThread`, `ChatMessage`, `ChatAttachment`, `PromptPreset`, `AIModelCatalog`, `ConversationHistoryRenderBudget`, `AssistantMessageContentNormalizer` — plain `Codable` types and pure-function helpers
+- **Services/** — `ChatService` (relay SSE streaming actor), `RelayAPIClient`, `RelayActivationService`, `RelayBillingService`, `MemoryService`, `TranscriptionService`, `VoiceRecorder`, `SettingsService`, `RelayConnectionMonitor`, `WatchDisplayStateMonitor`
+- **Persistence/** — `AIChatSchemaV2.swift` (SwiftData entities), `ConversationPersistence` actor, `BillingPersistence`, `AIChatModelContainer`. V2 is the initial install schema; no V1 migration exists
+- **Stores/** — per-screen ViewModels listed above
+- **Views/** — SwiftUI views (currently a placeholder shell; the full UI surface is in active redesign)
 
-### AI Backend Modes
+### AI Backend
 
-Controlled by `AI_BACKEND_MODE` in xcconfig, read at launch via `AppConfiguration.load()`:
-
-- **direct** — watch calls Gemini API directly (dev only)
-- **relay** — watch calls a relay server that holds the API key and forwards SSE streams as `answer_delta` / `thought_delta` events
-
-`AIServiceFactory` creates the appropriate `AIStreamingService` implementation based on the mode.
+The watch is relay-only. `AppConfiguration.load()` resolves the relay base URL and bearer token at launch; `AppConfiguration.resolvedRelayBearerToken` reads from `RelayKeyStore` first and falls back to the xcconfig token. `ChatService` opens an SSE stream via `RelayAPIClient.streamChat(_:conversationID:)` and yields fresh `ConversationThread` snapshots through an `AsyncThrowingStream` for VM consumption.
 
 ### Local Swift Packages
 
@@ -78,9 +77,10 @@ Controlled by `AI_BACKEND_MODE` in xcconfig, read at launch via `AppConfiguratio
 
 ### Persistence
 
-- Conversations are stored as individual JSON files via `ConversationRepository`
-- iCloud sync via `ICloudConversationSyncService` using CloudKit document storage
-- Activation state via `ActivationRepository`
+- SwiftData V2 schema (11 entities, see `AIChatSchemaV2.swift`) backed by `AIChatModelContainer.makeOnDisk(...)`
+- All conversation reads/writes go through the `ConversationPersistence` actor; subscribers observe changes via `stream() -> AsyncStream<[ConversationThread]>`
+- Billing snapshot caching via `BillingPersistence`
+- Bearer key via `RelayKeyStore` (UserDefaults, app-group when configured)
 
 ### Localization
 
@@ -88,7 +88,7 @@ Chinese (zh-Hans) and English via `L10n.swift` in `Shared Licensing/`. Use `L10n
 
 ### UI Test Infrastructure
 
-UI tests use environment variable `AIChat_UI_TEST_SCENARIO` to bootstrap specific `ChatStore` configurations with seeded data and mock streaming services. Test scenarios are defined in `AIChatApp.swift` under `UITestBootstrap`.
+UI tests are intended to use environment variable `AIChat_UI_TEST_SCENARIO` to bootstrap specific `AppEnvironment` configurations with seeded data and mock streaming services. Test scenarios will be defined in `AIChatApp.swift` under `UITestBootstrap` (Phase 5 of the restoration roadmap; see `docs/watch-rewrite-restore-plan.md`).
 
 **When you make UI-affecting changes, the change MUST be exercised by a test in `AIChat Watch AppUITests` or `AIChat iOS AppUITests` that calls `attachScreenshot(app, named:)` at the relevant moment.** Round-trip:
 

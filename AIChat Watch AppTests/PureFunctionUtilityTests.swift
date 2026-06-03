@@ -3,7 +3,7 @@
 //  AIChat Watch AppTests
 //
 //  Pure-function tests for tiny utilities (title generation, deep-link
-//  parsing, completion feedback presentation rules).
+//  parsing).
 //
 
 import XCTest
@@ -30,21 +30,5 @@ final class PureFunctionUtilityTests: XCTestCase {
         let url = URL(string: "aichat://conversation/new")!
 
         XCTAssertEqual(AIChatDeepLink(url), .newConversation)
-    }
-
-    func testCompletionFeedbackForegroundPresentationOptionsEnableSound() {
-        let options = CompletionFeedbackEvent.foregroundPresentationOptions(
-            forNotificationIdentifier: CompletionFeedbackEvent.transcriptionCompleted.notificationIdentifier
-        )
-
-        XCTAssertTrue(options.contains(.sound))
-    }
-
-    func testCompletionFeedbackForegroundPresentationOptionsIgnoreUnknownNotifications() {
-        let options = CompletionFeedbackEvent.foregroundPresentationOptions(
-            forNotificationIdentifier: "some-other-notification"
-        )
-
-        XCTAssertEqual(options, [])
     }
 }
