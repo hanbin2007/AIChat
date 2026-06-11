@@ -1,8 +1,32 @@
 "use client";
-import * as React from "react";
-import { AdminShell } from "@/components/admin-shell";
-import { Button, Card, CardContent, CardHeader, CardTitle, Chip, Icon, IconButton, Segmented, Slider, Switch, TextField } from "@/components/m3";
-import { cn } from "@/lib/cn";
+
+import { useCallback, useRef, useState } from "react";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import TextField from "@mui/material/TextField";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import ToggleButton from "@mui/material/ToggleButton";
+import Chip from "@mui/material/Chip";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import VisibilityOffRounded from "@mui/icons-material/VisibilityOffRounded";
+import SendRounded from "@mui/icons-material/SendRounded";
+import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
+import { Markdown } from "@/components/markdown";
+import { useSetPageActions } from "@/components/shell/page-meta";
+import { DEFAULT_MODELS } from "@/lib/gemini/models";
 
 type Intensity = "fast" | "balanced" | "deep" | "extreme";
 
@@ -11,234 +35,361 @@ interface Message {
   role: "user" | "assistant";
   text: string;
   thought?: string;
-  attachments?: { mimeType: string; base64Data: string }[];
   finishReason?: string;
+  error?: string;
 }
 
-const MODELS = ["gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-2.5-flash"];
+interface RawEvent {
+  at: string;
+  type: string;
+  data: string;
+}
+
+const INTENSITIES: Intensity[] = ["fast", "balanced", "deep", "extreme"];
 
 export default function PlaygroundPage() {
-  const [bearer, setBearer] = React.useState("");
-  const [model, setModel] = React.useState(MODELS[0]);
-  const [intensityIndex, setIntensityIndex] = React.useState(1);
-  const [search, setSearch] = React.useState(false);
-  const [codeExec, setCodeExec] = React.useState(false);
-  const [systemPrompt, setSystemPrompt] = React.useState("");
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const [input, setInput] = React.useState("");
-  const [streaming, setStreaming] = React.useState(false);
-  const [rawEvents, setRawEvents] = React.useState<string[]>([]);
-  const [rawOpen, setRawOpen] = React.useState(false);
+  const [model, setModel] = useState(DEFAULT_MODELS[0]?.id ?? "");
+  const [intensity, setIntensity] = useState<Intensity>("balanced");
+  const [search, setSearch] = useState(false);
+  const [code, setCode] = useState(false);
+  const [token, setToken] = useState("");
+  const [system, setSystem] = useState("");
+  const [draft, setDraft] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [events, setEvents] = useState<RawEvent[]>([]);
+  const [showRaw, setShowRaw] = useState(true);
+  const [streaming, setStreaming] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const intensities: Intensity[] = ["fast", "balanced", "deep", "extreme"];
-  const intensity = intensities[intensityIndex];
-
-  async function send() {
-    if (!input.trim() || streaming) return;
-    const userMessage: Message = { id: crypto.randomUUID(), role: "user", text: input };
-    const assistant: Message = { id: crypto.randomUUID(), role: "assistant", text: "", thought: "" };
-    const history = [...messages, userMessage];
-    setMessages([...history, assistant]);
-    setInput("");
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || streaming) return;
+    setDraft("");
+    const userMsg: Message = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      text,
+    };
+    const assistantMsg: Message = {
+      id: `a-${Date.now()}`,
+      role: "assistant",
+      text: "",
+      thought: "",
+    };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setStreaming(true);
-    setRawEvents([]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
-      const payload = {
-        model,
-        systemPrompt: systemPrompt || undefined,
-        thinkingIntensity: intensity,
-        usesGoogleSearch: search,
-        usesCodeExecution: codeExec,
-        includeThoughts: true,
-        messages: history.map((m) => ({ role: m.role, text: m.text })),
-      };
       const res = await fetch("/api/v1/chat/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(payload),
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          thinking: { intensity },
+          tools: { search, codeExecution: code },
+          system: system || undefined,
+          messages: [...messages.filter((m) => m.role === "user").map((m) => ({ role: "user", content: m.text })), { role: "user", content: text }],
+        }),
       });
       if (!res.ok || !res.body) {
-        const err = await res.text().catch(() => "");
-        updateAssistant(assistant.id, (m) => ({ ...m, text: `错误：${err || res.statusText}` }));
+        const errText = await res.text().catch(() => "");
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsg.id ? { ...m, error: errText || `HTTP ${res.status}` } : m,
+          ),
+        );
         return;
       }
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffered = "";
+      let buffer = "";
       let currentEvent = "";
+      let currentData = "";
+      const flushEvent = (eventName: string, dataLine: string) => {
+        const at = new Date().toISOString();
+        setEvents((prev) => [...prev, { at, type: eventName, data: dataLine }].slice(-100));
+        try {
+          const parsed = JSON.parse(dataLine) as { delta?: string; reason?: string };
+          if (eventName === "answer_delta" && parsed.delta) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id ? { ...m, text: m.text + parsed.delta } : m,
+              ),
+            );
+          } else if (eventName === "thought_delta" && parsed.delta) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id ? { ...m, thought: (m.thought ?? "") + parsed.delta } : m,
+              ),
+            );
+          } else if (eventName === "done" && parsed.reason) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id ? { ...m, finishReason: parsed.reason } : m,
+              ),
+            );
+          } else if (eventName === "error") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsg.id ? { ...m, error: dataLine } : m,
+              ),
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffered += decoder.decode(value, { stream: true });
-        const lines = buffered.split("\n");
-        buffered = lines.pop() ?? "";
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
-          if (line.startsWith("event:")) {
+          if (line === "") {
+            if (currentEvent || currentData) flushEvent(currentEvent || "message", currentData);
+            currentEvent = "";
+            currentData = "";
+          } else if (line.startsWith("event:")) {
             currentEvent = line.slice(6).trim();
           } else if (line.startsWith("data:")) {
-            const data = line.slice(5).trim();
-            if (!data) continue;
-            setRawEvents((prev) => [...prev.slice(-99), `${currentEvent}: ${data}`]);
-            try {
-              const parsed = JSON.parse(data);
-              if (currentEvent === "answer_delta") {
-                updateAssistant(assistant.id, (m) => ({ ...m, text: m.text + (parsed.text ?? "") }));
-              } else if (currentEvent === "thought_delta") {
-                updateAssistant(assistant.id, (m) => ({ ...m, thought: (m.thought ?? "") + (parsed.text ?? "") }));
-              } else if (currentEvent === "done") {
-                updateAssistant(assistant.id, (m) => ({ ...m, finishReason: parsed.finishReason }));
-              } else if (currentEvent === "error") {
-                updateAssistant(assistant.id, (m) => ({ ...m, text: m.text + `\n\n[error: ${parsed.message}]` }));
-              }
-            } catch { /* ignore */ }
+            currentData += (currentData ? "\n" : "") + line.slice(5).trimStart();
           }
         }
       }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsg.id ? { ...m, error: String(err) } : m,
+          ),
+        );
+      }
     } finally {
+      abortRef.current = null;
       setStreaming(false);
     }
-  }
+  }, [draft, model, intensity, search, code, token, system, messages, streaming]);
 
-  function updateAssistant(id: string, updater: (m: Message) => Message) {
-    setMessages((prev) => prev.map((m) => (m.id === id ? updater(m) : m)));
-  }
+  useSetPageActions(
+    <Tooltip title={showRaw ? "隐藏原始事件" : "显示原始事件"}>
+      <IconButton aria-label="切换原始事件" onClick={() => setShowRaw((v) => !v)}>
+        {showRaw ? <VisibilityRounded /> : <VisibilityOffRounded />}
+      </IconButton>
+    </Tooltip>,
+    [showRaw],
+  );
 
   return (
-    <AdminShell title="Playground" breadcrumb={["Relay"]}>
-      <div className="grid h-[calc(100vh-4rem)] grid-cols-1 gap-0 md:grid-cols-[1fr_360px]">
-        <div className="flex min-h-0 flex-col">
-          <div className="sticky top-0 z-10 space-y-3 border-b border-outline-variant bg-surface p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Icon name="neurology" size={18} className="text-on-surface-variant" />
-                <select
+    <>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: showRaw ? "1fr 360px" : "1fr" },
+          gap: 2,
+          height: "calc(100vh - 140px)",
+        }}
+      >
+        <Card sx={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+            <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ lg: "center" }}>
+              <FormControl size="small" sx={{ minWidth: 220 }}>
+                <InputLabel>模型</InputLabel>
+                <Select
+                  label="模型"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="rounded-m3-xs border border-outline bg-surface px-3 py-2 text-m3-body-m"
                 >
-                  {MODELS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                  {DEFAULT_MODELS.map((m) => (
+                    <MenuItem key={m.id} value={m.id}>
+                      {m.displayName}
+                    </MenuItem>
                   ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-m3-label-m text-on-surface-variant">思考强度</span>
-                <Segmented
-                  value={intensity}
-                  onChange={(v) => setIntensityIndex(intensities.indexOf(v as Intensity))}
-                  options={intensities.map((i) => ({ value: i, label: i }))}
+                </Select>
+              </FormControl>
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={intensity}
+                onChange={(_e, v: Intensity | null) => {
+                  if (v) setIntensity(v);
+                }}
+              >
+                {INTENSITIES.map((i) => (
+                  <ToggleButton key={i} value={i}>
+                    {i}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+              <Stack direction="row" spacing={1}>
+                <Chip
+                  label="Search"
+                  variant={search ? "filled" : "outlined"}
+                  color={search ? "primary" : "default"}
+                  onClick={() => setSearch((v) => !v)}
                 />
-              </div>
-              <Chip selected={search} onClick={() => setSearch((v) => !v)} icon="travel_explore">
-                Google Search
-              </Chip>
-              <Chip selected={codeExec} onClick={() => setCodeExec((v) => !v)} icon="code">
-                Code Execution
-              </Chip>
-            </div>
-            <TextField
-              label="Authorization bearer"
-              placeholder="为空时使用 session — 仅可调 admin token；填入 rk_... 可走客户端路径测试计费"
-              value={bearer}
-              onChange={(e) => setBearer(e.target.value)}
-              variant="filled"
-            />
-            <TextField
-              label="System prompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              variant="filled"
-            />
-          </div>
-
-          <div className="flex-1 space-y-3 overflow-auto p-4 thin-scroll">
-            {messages.length === 0 && (
-              <div className="py-20 text-center text-on-surface-variant">
-                <Icon name="forum" size={48} className="opacity-40" />
-                <div className="mt-3 text-m3-body-m">输入消息开始对话</div>
-              </div>
-            )}
-            {messages.map((m) => (
-              <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
-                    m.role === "user"
-                      ? "rounded-br-m3-xs bg-primary-container text-on-primary-container"
-                      : "rounded-bl-m3-xs bg-surface-container text-on-surface",
-                  )}
-                >
-                  {m.thought && m.role === "assistant" && (
-                    <details className="mb-2 border-l-2 border-tertiary pl-2 text-m3-body-s italic text-on-surface-variant">
-                      <summary className="cursor-pointer text-m3-label-m">
-                        💭 Thought · {m.thought.length} chars
-                      </summary>
-                      <div className="mt-1 whitespace-pre-wrap">{m.thought}</div>
-                    </details>
-                  )}
-                  {m.text || (m.role === "assistant" && streaming ? "…" : "")}
-                  {m.finishReason && m.finishReason !== "STOP" && (
-                    <div className="mt-2 text-m3-label-m text-on-surface-variant">
-                      finishReason: {m.finishReason}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-end gap-2 border-t border-outline-variant bg-surface-container-low p-4">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              rows={2}
-              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-              className="flex-1 resize-none rounded-m3-md bg-surface-container-high px-3 py-2 text-m3-body-m outline-none"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-            />
-            <Button icon="send" onClick={send} loading={streaming} disabled={!input.trim()}>
-              发送
-            </Button>
-          </div>
-        </div>
-
-        <aside className="hidden border-l border-outline-variant bg-surface-container-low md:flex md:flex-col">
-          <div className="border-b border-outline-variant p-4">
-            <div className="flex items-center justify-between">
-              <div className="text-m3-title-s">Raw SSE</div>
-              <IconButton
-                icon={rawOpen ? "visibility_off" : "visibility"}
-                size="sm"
-                onClick={() => setRawOpen((v) => !v)}
+                <Chip
+                  label="Code"
+                  variant={code ? "filled" : "outlined"}
+                  color={code ? "primary" : "default"}
+                  onClick={() => setCode((v) => !v)}
+                />
+              </Stack>
+            </Stack>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ mt: 1.5 }}>
+              <TextField
+                label="Authorization (可选)"
+                size="small"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Bearer xxx"
+                fullWidth
               />
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto p-3 thin-scroll">
-            {rawOpen ? (
-              rawEvents.length === 0 ? (
-                <div className="text-m3-body-s text-on-surface-variant">尚未收到事件</div>
+              <TextField
+                label="System prompt (可选)"
+                size="small"
+                value={system}
+                onChange={(e) => setSystem(e.target.value)}
+                fullWidth
+              />
+            </Stack>
+          </Box>
+
+          <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
+            <Stack spacing={2}>
+              {messages.length === 0 ? (
+                <Typography color="text.secondary" sx={{ textAlign: "center", py: 4 }}>
+                  发起对话以测试 /api/v1/chat/stream
+                </Typography>
+              ) : null}
+              {messages.map((m) => (
+                <Card
+                  key={m.id}
+                  variant="outlined"
+                  sx={{
+                    bgcolor: m.role === "user" ? "action.hover" : "background.paper",
+                  }}
+                >
+                  <CardContent>
+                    <Typography variant="caption" color="text.secondary">
+                      {m.role === "user" ? "用户" : "助手"}
+                    </Typography>
+                    {m.role === "assistant" && m.thought ? (
+                      <Accordion sx={{ mb: 1, mt: 1 }}>
+                        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+                          <Typography variant="caption">
+                            💭 思考 · {m.thought.length} 字符
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Markdown source={m.thought} />
+                        </AccordionDetails>
+                      </Accordion>
+                    ) : null}
+                    {m.text ? (
+                      <Markdown source={m.text} />
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        {streaming && m.role === "assistant" ? "等待响应…" : ""}
+                      </Typography>
+                    )}
+                    {m.finishReason && m.finishReason !== "STOP" ? (
+                      <Typography variant="caption" color="warning.main" sx={{ mt: 1 }}>
+                        finishReason: {m.finishReason}
+                      </Typography>
+                    ) : null}
+                    {m.error ? (
+                      <Typography variant="caption" color="error.main" sx={{ display: "block", mt: 1 }}>
+                        {m.error}
+                      </Typography>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              ))}
+            </Stack>
+          </Box>
+
+          <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
+            <Stack direction="row" spacing={1.5}>
+              <TextField
+                multiline
+                minRows={1}
+                maxRows={6}
+                placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+                fullWidth
+              />
+              <Button
+                variant="contained"
+                disabled={!draft.trim() || streaming}
+                onClick={() => void send()}
+                startIcon={<SendRounded />}
+              >
+                {streaming ? "发送中…" : "发送"}
+              </Button>
+            </Stack>
+          </Box>
+        </Card>
+
+        {showRaw ? (
+          <Card sx={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                原始 SSE 事件
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                最近 100 条
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, overflow: "auto", p: 1.5, fontFamily: "var(--font-mono)" }}>
+              {events.length === 0 ? (
+                <Typography variant="caption" color="text.secondary">
+                  无事件
+                </Typography>
               ) : (
-                <ul className="space-y-1 font-mono text-m3-body-s">
-                  {rawEvents.map((e, i) => (
-                    <li key={i} className="truncate">{e}</li>
-                  ))}
-                </ul>
-              )
-            ) : (
-              <div className="text-m3-body-s text-on-surface-variant">点击眼睛图标查看原始 SSE 事件</div>
-            )}
-          </div>
-        </aside>
-      </div>
-    </AdminShell>
+                events.map((e, i) => (
+                  <Box key={i} sx={{ mb: 1 }}>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block" }}
+                    >
+                      {e.at.slice(11, 23)} · {e.type}
+                    </Typography>
+                    <Box
+                      component="pre"
+                      sx={{
+                        m: 0,
+                        whiteSpace: "pre-wrap",
+                        fontSize: "0.75rem",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {e.data}
+                    </Box>
+                  </Box>
+                ))
+              )}
+            </Box>
+          </Card>
+        ) : null}
+      </Box>
+    </>
   );
 }

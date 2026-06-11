@@ -1,220 +1,261 @@
-"use client";
-import * as React from "react";
-import { useParams, useRouter } from "next/navigation";
-import { AdminShell } from "@/components/admin-shell";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Icon, IconButton, Switch, Button } from "@/components/m3";
-import type { Conversation } from "@/lib/store/conversations";
-import { cn } from "@/lib/cn";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import CardHeader from "@mui/material/CardHeader";
+import { Stack } from "@/components/lib/stack";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import Avatar from "@mui/material/Avatar";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import LinearProgress from "@mui/material/LinearProgress";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
+import { Markdown } from "@/components/markdown";
+import { getConversation } from "@/lib/store/conversations";
 
-export default function ConversationPage() {
-  const params = useParams<{ id: string }>();
-  const router = useRouter();
-  const [conversation, setConversation] = React.useState<Conversation | null>(null);
-  const [reveal, setReveal] = React.useState(false);
+export const dynamic = "force-dynamic";
 
-  React.useEffect(() => {
-    fetch(`/api/admin/conversations/${params.id}`)
-      .then((r) => r.json())
-      .then((d) => setConversation(d.conversation));
-  }, [params.id]);
+export default async function ConversationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const conv = await getConversation(id);
+  if (!conv) notFound();
 
-  if (!conversation) {
-    return (
-      <AdminShell title="Conversation">
-        <div className="p-6 text-on-surface-variant">加载中…</div>
-      </AdminShell>
-    );
+  const modelTotals = new Map<string, number>();
+  for (const turn of conv.turns) {
+    if (!turn.modelID) continue;
+    modelTotals.set(turn.modelID, (modelTotals.get(turn.modelID) ?? 0) + (turn.credits ?? 0));
   }
-
-  const modelBreakdown = new Map<string, number>();
-  for (const t of conversation.turns) {
-    if (!t.modelID) continue;
-    modelBreakdown.set(t.modelID, (modelBreakdown.get(t.modelID) ?? 0) + (t.credits ?? 0));
-  }
+  const modelMax = Math.max(...modelTotals.values(), 1);
 
   return (
-    <AdminShell
-      title={conversation.title}
-      breadcrumb={["Relay", "Requests", "Conversations"]}
-      actions={
-        <div className="flex items-center gap-2">
-          <Switch checked={reveal} onChange={() => setReveal((v) => !v)} label="Reveal" />
-          <IconButton icon="arrow_back" onClick={() => router.back()} aria-label="返回" />
-        </div>
-      }
-    >
-      <div className="space-y-4 p-6 pb-24">
-        <Card variant="elevated">
-          <CardHeader>
-            <CardTitle>会话概览</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-6">
-            <Stat label="Turns" value={conversation.turnCount.toString()} />
-            <Stat label="Tokens in / out" value={`${formatNumber(conversation.totalInputTokens)} / ${formatNumber(conversation.totalOutputTokens)}`} />
-            <Stat label="Credits" value={formatNumber(conversation.totalCredits)} />
-            <Stat label="Models" value={conversation.modelsUsed.join(", ")} />
-            <Stat label="Device" value={`${conversation.devicePlatform ?? "?"} · ${conversation.deviceID?.slice(0, 10) ?? "—"}`} />
-            <Stat label="Range" value={`${new Date(conversation.firstAt).toLocaleString()} → ${new Date(conversation.lastAt).toLocaleString()}`} />
-            {conversation.hasErrors && <Badge tone="error">has errors</Badge>}
-            {conversation.confidence === "low" && <Badge tone="warn">推断归属</Badge>}
+    <>
+      <Stack spacing={3}>
+        <Card>
+          <CardContent>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {conv.title}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ fontFamily: "var(--font-mono)", display: "block", mt: 0.5 }}
+                >
+                  {conv.id}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                {conv.hasErrors ? <Chip size="small" label="包含错误" color="error" /> : null}
+                {conv.hasImages ? <Chip size="small" label="图片" /> : null}
+                {conv.hasAudio ? <Chip size="small" label="音频" /> : null}
+                <Chip
+                  size="small"
+                  label={conv.confidence === "high" ? "高置信" : "低置信"}
+                  variant="outlined"
+                />
+              </Stack>
+            </Stack>
+            <Stack
+              direction="row"
+              spacing={3}
+              sx={{ mt: 2, flexWrap: "wrap", color: "text.secondary" }}
+            >
+              <KV label="账户" value={conv.accountName ?? conv.accountID ?? "—"} />
+              <KV label="设备" value={conv.deviceAlias ?? conv.deviceID ?? "—"} />
+              <KV
+                label="时间"
+                value={`${new Date(conv.firstAt).toLocaleString("zh-Hans")} – ${new Date(conv.lastAt).toLocaleString("zh-Hans")}`}
+              />
+              <KV label="轮次" value={String(conv.turnCount)} />
+              <KV
+                label="Tokens 入 / 出"
+                value={`${conv.totalInputTokens} / ${conv.totalOutputTokens}`}
+              />
+              <KV label="Credits" value={String(conv.totalCredits)} />
+            </Stack>
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="space-y-4">
-            {conversation.turns.map((turn, i) => (
-              <article key={turn.id} className="space-y-2">
-                {turn.userText && (
-                  <Bubble role="user" reveal={reveal}>
-                    {turn.userText}
-                  </Bubble>
-                )}
-                {turn.thoughtText && (
-                  <ThoughtBlock text={turn.thoughtText} reveal={reveal} />
-                )}
-                {turn.assistantText && (
-                  <Bubble role="assistant" reveal={reveal}>
-                    {turn.assistantText}
-                  </Bubble>
-                )}
-                {turn.error && (
-                  <Bubble role="error" reveal={true}>
-                    {turn.error}
-                  </Bubble>
-                )}
-                <div className="ml-1 flex flex-wrap items-center gap-2 text-m3-label-s text-on-surface-variant">
-                  <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
-                  <span>·</span>
-                  <span>{turn.modelID ?? "—"}</span>
-                  {turn.thinkingIntensity && (
-                    <>
-                      <span>·</span>
-                      <span>{turn.thinkingIntensity}</span>
-                    </>
-                  )}
-                  <span>·</span>
-                  <span>{turn.inputTokens ?? 0}→{turn.outputTokens ?? 0} tokens</span>
-                  <span>·</span>
-                  <span>{turn.credits ?? 0} credits</span>
-                  <span>·</span>
-                  <span>{turn.latencyMs ?? 0}ms</span>
-                  {turn.finishReason && (
-                    <>
-                      <span>·</span>
-                      <span>{turn.finishReason}</span>
-                    </>
-                  )}
-                  {i < conversation.turns.length - 1 && (
-                    <span className="mx-2 h-px flex-1 bg-outline-variant" />
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <aside className="space-y-3 lg:sticky lg:top-20 self-start">
-            <Card variant="filled" className="p-4">
-              <div className="text-m3-label-m text-on-surface-variant">Model breakdown</div>
-              <ul className="mt-2 space-y-2 text-m3-body-s">
-                {Array.from(modelBreakdown.entries()).map(([m, credits]) => {
-                  const total = conversation.totalCredits || 1;
-                  return (
-                    <li key={m}>
-                      <div className="flex justify-between">
-                        <span>{m}</span>
-                        <span className="text-on-surface-variant">{formatNumber(credits)}</span>
-                      </div>
-                      <div className="mt-1 h-1 rounded-full bg-surface-container-highest">
-                        <div
-                          className="h-1 rounded-full bg-primary"
-                          style={{ width: `${Math.round((credits / total) * 100)}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
-            <Card variant="filled" className="p-4">
-              <div className="text-m3-label-m text-on-surface-variant">操作</div>
-              <div className="mt-3 flex flex-col gap-2">
-                <Button variant="outlined" icon="replay">Replay in Playground</Button>
-                <Button variant="outlined" icon="download">Export JSON</Button>
-                <Button variant="outlined" icon="flag">Flag for review</Button>
-              </div>
-            </Card>
-          </aside>
-        </div>
-      </div>
-    </AdminShell>
-  );
-}
-
-function Bubble({
-  role,
-  reveal,
-  children,
-}: {
-  role: "user" | "assistant" | "error";
-  reveal: boolean;
-  children: React.ReactNode;
-}) {
-  const content = reveal ? children : typeof children === "string" ? redactHints(children) : children;
-  return (
-    <div className={cn("flex", role === "user" ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[640px] whitespace-pre-wrap rounded-m3-lg px-4 py-3 text-m3-body-m",
-          role === "user" && "rounded-br-m3-xs bg-primary-container text-on-primary-container",
-          role === "assistant" && "rounded-bl-m3-xs bg-surface-container text-on-surface",
-          role === "error" && "rounded-bl-m3-xs bg-error-container text-on-error-container",
-        )}
-      >
-        {content}
-      </div>
-    </div>
-  );
-}
-
-function ThoughtBlock({ text, reveal }: { text: string; reveal: boolean }) {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[640px] rounded-m3-md border-l-2 border-tertiary bg-surface-container-lowest px-3 py-2 text-m3-body-s text-on-surface-variant">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 text-m3-label-m"
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", lg: "2fr 1fr" },
+            gap: 3,
+          }}
         >
-          <Icon name={open ? "expand_less" : "expand_more"} size={16} />
-          💭 Thought · {text.length.toLocaleString()} chars
-        </button>
-        {open && (
-          <div className="mt-2 whitespace-pre-wrap italic">
-            {reveal ? text : redactHints(text)}
-          </div>
-        )}
-      </div>
-    </div>
+          <Stack spacing={2}>
+            {conv.turns.map((turn) => (
+              <Card key={turn.id} component="article">
+                <CardContent>
+                  {turn.userText ? (
+                    <Stack direction="row" spacing={1.5} sx={{ mb: 2 }}>
+                      <Avatar sx={{ bgcolor: "secondary.main", width: 32, height: 32 }}>
+                        U
+                      </Avatar>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          用户
+                        </Typography>
+                        <Markdown source={turn.userText} />
+                      </Box>
+                    </Stack>
+                  ) : null}
+
+                  {turn.thoughtText ? (
+                    <Accordion sx={{ mb: 2, bgcolor: "action.hover" }}>
+                      <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+                        <Typography variant="caption">
+                          💭 思考 · {turn.thoughtText.length} 字符
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Markdown source={turn.thoughtText} />
+                      </AccordionDetails>
+                    </Accordion>
+                  ) : null}
+
+                  {turn.assistantText ? (
+                    <Stack direction="row" spacing={1.5}>
+                      <Avatar sx={{ bgcolor: "primary.main", width: 32, height: 32 }}>
+                        A
+                      </Avatar>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          助手
+                        </Typography>
+                        <Markdown source={turn.assistantText} />
+                      </Box>
+                    </Stack>
+                  ) : null}
+
+                  {turn.error ? (
+                    <Box
+                      sx={{
+                        mt: 2,
+                        p: 1.5,
+                        borderRadius: 1,
+                        border: 1,
+                        borderColor: "error.main",
+                        color: "error.main",
+                        bgcolor: "error.main",
+                        bgcolorAlpha: 0.05,
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+                        {turn.error}
+                      </Typography>
+                    </Box>
+                  ) : null}
+
+                  <Stack
+                    direction="row"
+                    spacing={2}
+                    sx={{
+                      mt: 2,
+                      flexWrap: "wrap",
+                      color: "text.secondary",
+                      fontSize: "0.75rem",
+                    }}
+                  >
+                    <span>{new Date(turn.timestamp).toLocaleString("zh-Hans")}</span>
+                    {turn.modelID ? <span>模型 {turn.modelID}</span> : null}
+                    {turn.thinkingIntensity ? <span>强度 {turn.thinkingIntensity}</span> : null}
+                    {turn.inputTokens != null ? (
+                      <span>
+                        Tokens {turn.inputTokens} → {turn.outputTokens ?? 0}
+                      </span>
+                    ) : null}
+                    {turn.credits != null ? <span>{turn.credits} credits</span> : null}
+                    {turn.latencyMs != null ? <span>{turn.latencyMs}ms</span> : null}
+                    {turn.finishReason ? <span>{turn.finishReason}</span> : null}
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+
+          <Box sx={{ position: { lg: "sticky" }, top: { lg: 24 } }}>
+            <Stack spacing={2}>
+              <Card>
+                <CardHeader title="模型分布" />
+                <CardContent>
+                  {modelTotals.size === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      无数据
+                    </Typography>
+                  ) : (
+                    <Stack spacing={1.5}>
+                      {Array.from(modelTotals.entries()).map(([m, c]) => (
+                        <Box key={m}>
+                          <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontFamily: "var(--font-mono)" }}
+                              noWrap
+                            >
+                              {m}
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontFamily: "var(--font-mono)" }}
+                            >
+                              {c}
+                            </Typography>
+                          </Stack>
+                          <LinearProgress variant="determinate" value={(c / modelMax) * 100} />
+                        </Box>
+                      ))}
+                    </Stack>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader title="操作" />
+                <CardContent>
+                  <Stack spacing={1}>
+                    <Button variant="outlined" component={Link} href="/playground">
+                      在 Playground 中重放
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      component="a"
+                      href={`/api/admin/conversations/${conv.id}`}
+                      download={`${conv.id}.json`}
+                    >
+                      导出 JSON
+                    </Button>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Stack>
+          </Box>
+        </Box>
+      </Stack>
+    </>
   );
 }
 
-function redactHints(text: React.ReactNode): string {
-  const str = typeof text === "string" ? text : "";
-  const chars = str.length;
-  return `[${chars.toLocaleString()} chars redacted — click Reveal to show]`;
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
+function KV({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-m3-label-m text-on-surface-variant">{label}</div>
-      <div className="mt-1 text-m3-title-s text-on-surface">{value}</div>
-    </div>
+    <Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontFamily: "var(--font-mono)" }}>
+        {value}
+      </Typography>
+    </Box>
   );
-}
-
-function formatNumber(n: number): string {
-  if (n > 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n > 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toLocaleString();
 }
