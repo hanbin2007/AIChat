@@ -23,7 +23,11 @@ export async function GET(req: Request) {
       (k) => k.deviceID === deviceID && k.state === "active",
     );
     if (!account || !key) return errorResponse(404, "Account not found.");
-    const status = await billingStore().getAccountStatus(key);
+    // H3: this branch resolved the key from an unauthenticated device-id
+    // header (no proof of possession of the rk_ secret). Never echo keyValue
+    // back here — strip it so a known deviceID can't be used to harvest a
+    // usable credential.
+    const status = await billingStore().getAccountStatus(key, { redactKeyValue: true });
     if (!status) return errorResponse(404, "Account not found.");
     return jsonResponse(200, status);
   }

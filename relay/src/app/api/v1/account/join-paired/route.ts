@@ -2,11 +2,15 @@ import { billingStore } from "@/lib/store/billing-store";
 import { pick } from "@/lib/gemini/dual-key";
 import { beginObserve, finishObserve } from "@/lib/api/observe";
 import { errorResponse, jsonResponse } from "@/lib/api/error";
+import { enforceAbuseLimit } from "@/lib/rate-limit";
 import type { DevicePlatform } from "@/lib/billing/types";
 
 export const runtime = "nodejs";
 
 const VALID_PLATFORMS: DevicePlatform[] = ["iPhone", "watch", "mac", "unknown"];
+// M5: throttle unauthenticated pairing-token consumption to defend against
+// online brute-forcing of pairing tokens.
+const JOIN_PAIRED_RPM = 5;
 
 export async function POST(req: Request) {
   const ctx = beginObserve(req, "/api/v1/account/join-paired");
@@ -22,6 +26,11 @@ export async function POST(req: Request) {
   if (!pairingToken || !deviceID) {
     await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: "Missing token or device" });
     return errorResponse(400, "Missing pairingToken or deviceID.");
+  }
+  const limited = enforceAbuseLimit(req, "join-paired", deviceID, JOIN_PAIRED_RPM);
+  if (limited) {
+    await finishObserve(ctx, { statusCode: 429, level: "warning", category: "failure", message: "Rate limited" });
+    return limited;
   }
   const platform: DevicePlatform = VALID_PLATFORMS.includes(rawPlatform as DevicePlatform)
     ? (rawPlatform as DevicePlatform)

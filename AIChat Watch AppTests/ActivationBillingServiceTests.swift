@@ -153,7 +153,7 @@ final class ActivationBillingServiceTests: XCTestCase {
         )
         await service.updateRelayAccountStatus(status, shareToCompanion: false)
 
-        XCTAssertEqual(service.relayAccessStatusTitle, "已过期")
+        XCTAssertEqual(service.relayAccessStatusTitle, L10n.tr("relay.status.expired"))
     }
 
     func testRelayAccessStatusTitleShowsAvailableWhenWithinExpiry() async {
@@ -164,7 +164,7 @@ final class ActivationBillingServiceTests: XCTestCase {
         )
         await service.updateRelayAccountStatus(status, shareToCompanion: false)
 
-        XCTAssertEqual(service.relayAccessStatusTitle, "在线可用")
+        XCTAssertEqual(service.relayAccessStatusTitle, L10n.tr("relay.status.available"))
     }
 
     // MARK: - Read-only mode follows managed access
@@ -181,5 +181,94 @@ final class ActivationBillingServiceTests: XCTestCase {
         // so the store should be locked into read-only.
         XCTAssertFalse(service.hasManagedRelayAccess)
         XCTAssertTrue(service.isReadOnlyMode)
+    }
+
+    // MARK: - M1: relay mode authorization state machine is self-consistent
+
+    private func makeActiveOfflineState(
+        deviceToken: UInt64 = 0xDEAD_BEEF_CAFE_F00D,
+        messageLimit: Int? = nil,
+        usedMessageCount: Int = 0
+    ) -> OfflineActivationState {
+        OfflineActivationState(
+            license: OfflineActivationLicense(
+                deviceToken: deviceToken,
+                requestIssuedAt: .now,
+                validFrom: .distantPast,
+                validUntil: .distantFuture,
+                messageLimit: messageLimit,
+                modelMask: 0xFFFF
+            ),
+            activationCodeFingerprint: "test-fingerprint",
+            activatedAt: .now,
+            usedMessageCount: usedMessageCount
+        )
+    }
+
+    /// Regression (M1): in relay mode, a valid OFFLINE activation must not
+    /// present a freely-editable composer (`isReadOnlyMode == false`) while the
+    /// send-gate (`activationFailureMessage`) rejects every send. With no
+    /// managed relay access and no online account fetched yet, the two surfaces
+    /// must agree: read-only + an actionable "needs online binding" message
+    /// (never the old permanent "verifying…" dead-end).
+    func testRelayModeOfflineActiveWithNilStatusIsConsistentlyReadOnly() async {
+        let service = makeService()
+        service.setActivationStateForPreview(makeActiveOfflineState())
+
+        // Sanity: offline activation alone reports active.
+        if case .active = service.activationStatus {
+            // expected
+        } else {
+            XCTFail("Expected offline activation to be active, got \(service.activationStatus)")
+        }
+
+        // No online account fetched yet.
+        XCTAssertNil(service.relayAccountStatus)
+        XCTAssertFalse(service.hasManagedRelayAccess)
+
+        // Both surfaces must agree: read-only AND every send blocked.
+        XCTAssertTrue(service.isReadOnlyMode)
+        let failure = service.activationFailureMessage(for: "gemini-3-flash-preview")
+        XCTAssertNotNil(failure)
+        XCTAssertEqual(failure, L10n.tr("relay.access.needs_online_binding"))
+    }
+
+    // MARK: - M6: offline credit is refunded on a failed/cancelled send
+
+    func testRefundActivationMessageRestoresOfflineCredit() async {
+        let service = makeService()
+        service.setActivationStateForPreview(makeActiveOfflineState(messageLimit: 5))
+
+        try? service.consumeActivationMessage(for: "gemini-3-flash-preview")
+        XCTAssertEqual(service.activationState?.usedMessageCount, 1)
+
+        service.refundActivationMessage()
+        XCTAssertEqual(service.activationState?.usedMessageCount, 0)
+    }
+
+    func testRefundActivationMessageIsClampedAtZero() async {
+        let service = makeService()
+        service.setActivationStateForPreview(makeActiveOfflineState(messageLimit: 5))
+
+        // Nothing consumed yet → refund must not drive the counter negative.
+        service.refundActivationMessage()
+        XCTAssertEqual(service.activationState?.usedMessageCount, 0)
+    }
+
+    func testRefundActivationMessageIsNoOpUnderManagedRelayAccess() async {
+        let service = makeService()
+        let status = makeStatus(
+            creditBalance: 500,
+            creditExpiresAt: Date().addingTimeInterval(3600)
+        )
+        await service.updateRelayAccountStatus(status, shareToCompanion: false)
+        service.setActivationStateForPreview(makeActiveOfflineState(messageLimit: 5, usedMessageCount: 2))
+
+        XCTAssertTrue(service.hasManagedRelayAccess)
+
+        // Managed relay access is metered server-side; the local offline
+        // counter must be untouched.
+        service.refundActivationMessage()
+        XCTAssertEqual(service.activationState?.usedMessageCount, 2)
     }
 }

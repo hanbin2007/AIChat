@@ -19,6 +19,11 @@ process.env.RELAY_ADMIN_PASSWORD = "testpassword";
 process.env.RELAY_BILLING_MODE = "stub";
 process.env.RELAY_DEBUG_LOGGING = "0";
 process.env.PORT = "8787";
+// JWS verification defaults ON in production. The test fixtures use forged,
+// unsigned JWS strings (see forgeJws in helpers.ts), so disable cryptographic
+// verification globally here. The dedicated jws.test.ts opts verification back
+// in per-case with a real self-signed ES256 chain.
+process.env.BILLING_JWS_VERIFY = "false";
 
 // A tiny in-memory substitute for next/headers' cookies() so admin auth
 // routes can be exercised from Vitest without the Next.js runtime context.

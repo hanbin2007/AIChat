@@ -1,5 +1,22 @@
 import Foundation
 
+/// Typed signals raised by the relay account/billing endpoints that callers
+/// need to react to distinctly. Kept separate from `RelayAPIError` (which is
+/// shared with the streaming client) so the billing layer can branch on a
+/// revoked/expired key without string-matching.
+enum RelayAccountServiceError: LocalizedError, Equatable {
+    /// HTTP 401 from the relay: the stored `rk_` key is revoked or expired.
+    /// Callers should clear the stored key and re-bootstrap.
+    case unauthorized
+
+    var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return L10n.tr("error.relay.invalid_response")
+        }
+    }
+}
+
 struct RelayAccountService {
     let configuration: AppConfiguration
     let deviceIdentity: WatchDeviceIdentity
@@ -131,7 +148,8 @@ struct RelayAccountService {
             let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
                 to: configuration.relayPurchaseSubmitURL,
                 method: "POST",
-                body: payload
+                body: payload,
+                bearerToken: configuration.resolvedRelayBearerToken
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -154,7 +172,8 @@ struct RelayAccountService {
             let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
                 to: configuration.relayPurchaseRestoreURL,
                 method: "POST",
-                body: payload
+                body: payload,
+                bearerToken: configuration.resolvedRelayBearerToken
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -240,6 +259,12 @@ struct RelayAccountService {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            // 401 means the stored key was revoked/expired. Surface a typed
+            // signal so callers can clear the local key, rather than collapsing
+            // every non-2xx into a generic error.
+            if httpResponse.statusCode == 401 {
+                throw RelayAccountServiceError.unauthorized
+            }
             throw relayClientError(from: data)
         }
 
@@ -308,7 +333,7 @@ struct RelayAccountService {
     ) throws -> T {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.applyRelayDateDecoding()
 
         do {
             return try decoder.decode(T.self, from: data)
@@ -318,7 +343,7 @@ struct RelayAccountService {
             }
 
             let fallbackDecoder = JSONDecoder()
-            fallbackDecoder.dateDecodingStrategy = .iso8601
+            fallbackDecoder.applyRelayDateDecoding()
             do {
                 return try fallbackDecoder.decode(T.self, from: normalizedData)
             } catch {

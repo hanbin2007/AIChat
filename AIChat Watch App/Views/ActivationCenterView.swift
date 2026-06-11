@@ -415,7 +415,7 @@ struct ActivationCenterView: View {
             return "订阅"
         case .offlineManual:
             return "离线导入"
-        case nil:
+        case .unknown, nil:
             return "unknown"
         }
     }
@@ -430,6 +430,8 @@ struct ActivationCenterView: View {
             return "已过期"
         case .inactive:
             return "未激活"
+        case .unknown:
+            return "未知状态"
         }
     }
 

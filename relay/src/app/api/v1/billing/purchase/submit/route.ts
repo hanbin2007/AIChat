@@ -40,7 +40,8 @@ export async function POST(req: Request) {
       ? await billingStore().getAccountStatus(auth.clientKey)
       : null;
     await finishObserve(ctx, { statusCode: 200, level: "success", category: "billing", message: "purchase submitted" });
-    return jsonResponse(200, snapshot ?? { ok: true });
+    // CONTRACT: wrap the AccountStatusResponse as { status: snapshot }.
+    return jsonResponse(200, { status: snapshot });
   } catch (err) {
     await finishObserve(ctx, { statusCode: 400, level: "error", category: "failure", message: (err as Error).message });
     return errorResponse(400, (err as Error).message);

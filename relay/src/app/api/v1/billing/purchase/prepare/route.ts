@@ -20,8 +20,12 @@ export async function POST(req: Request) {
   } catch {
     return errorResponse(400, "Invalid JSON body.");
   }
-  const accountID = auth.clientKey?.accountID ?? pick<string>(body, "accountID", "account_id");
-  const { appAccountToken } = await billingStore().preparePurchase({ accountID });
+  const requestedAccountID = auth.clientKey?.accountID ?? pick<string>(body, "accountID", "account_id");
+  const { accountID, appAccountToken } = await billingStore().preparePurchase({
+    accountID: requestedAccountID,
+  });
   await finishObserve(ctx, { statusCode: 200, level: "success", category: "billing", message: "purchase prepared" });
-  return jsonResponse(200, { appAccountToken });
+  // CONTRACT: return BOTH accountID and appAccountToken. Client treats
+  // accountID as optional / unused (forward-compat).
+  return jsonResponse(200, { accountID: accountID ?? requestedAccountID, appAccountToken });
 }

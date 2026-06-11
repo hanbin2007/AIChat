@@ -278,6 +278,66 @@ describe("BillingStore", () => {
       ).rejects.toThrow();
     });
 
+    it("is idempotent on transactionID — replaying does not double-grant (C3)", async () => {
+      const jws = forgeJws({
+        transactionId: "tx-dup",
+        originalTransactionId: "tx-dup",
+        productId: "com.aichat.relay.flash.monthly",
+      });
+      const first = await billingStore().submitPurchase({ signedTransactionInfo: jws, deviceID: "d1", platform: "watch" });
+      const accountID = first.account.accountID;
+      await billingStore().submitPurchase({ signedTransactionInfo: jws, deviceID: "d1", platform: "watch" });
+      const snap = await billingStore().snapshot();
+      const grants = Object.values(snap.grants).filter((g) => g.sourceTransactionID === "tx-dup");
+      expect(grants).toHaveLength(1);
+      expect(snap.accounts[accountID].creditBalance).toBe(20_000);
+    });
+
+    it("a fresh transactionID (renewal) still grants (C3)", async () => {
+      const base = { originalTransactionId: "orig", productId: "com.aichat.relay.flash.monthly" };
+      const first = await billingStore().submitPurchase({
+        signedTransactionInfo: forgeJws({ ...base, transactionId: "tx-r1" }),
+        deviceID: "d1",
+        platform: "watch",
+      });
+      await billingStore().submitPurchase({
+        signedTransactionInfo: forgeJws({ ...base, transactionId: "tx-r2" }),
+        deviceID: "d1",
+        platform: "watch",
+      });
+      const snap = await billingStore().snapshot();
+      expect(snap.accounts[first.account.accountID].creditBalance).toBe(40_000);
+    });
+
+    it("rejects an unknown productID rather than granting a fallback (H7)", async () => {
+      await expect(
+        billingStore().submitPurchase({
+          signedTransactionInfo: forgeJws({ transactionId: "tx-x", productId: "no.such.plan" }),
+          deviceID: "d1",
+          platform: "watch",
+        }),
+      ).rejects.toThrow(/unknown productid/i);
+    });
+
+    it("enforces maxBoundDevices when binding devices (M7)", async () => {
+      // Reduce the cap to 1 so we can exercise it quickly.
+      const snap = await billingStore().snapshot();
+      await billingStore().updatePolicy({ ...snap.policy, maxBoundDevices: 1 }, snap.plans);
+      const orig = "orig-cap";
+      await billingStore().submitPurchase({
+        signedTransactionInfo: forgeJws({ transactionId: "tx-c1", originalTransactionId: orig, productId: "com.aichat.relay.flash.monthly" }),
+        deviceID: "dev-1",
+        platform: "watch",
+      });
+      await expect(
+        billingStore().submitPurchase({
+          signedTransactionInfo: forgeJws({ transactionId: "tx-c2", originalTransactionId: orig, productId: "com.aichat.relay.flash.monthly" }),
+          deviceID: "dev-2",
+          platform: "watch",
+        }),
+      ).rejects.toThrow(/device bind cap/i);
+    });
+
     it("restorePurchases processes multiple transactions best-effort", async () => {
       const good = forgeJws({
         transactionId: "tx-a",

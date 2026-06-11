@@ -59,4 +59,23 @@ describe("GET /api/v1/account/status", () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it("does NOT leak the rk_ keyValue on the unauthenticated device-id branch (H3)", async () => {
+    await bootstrap(
+      makeRequest({
+        url: "http://test/api/v1/activation/bootstrap",
+        method: "POST",
+        body: { deviceID: "d3", platform: "watch" },
+      }),
+    );
+    const res = await status(
+      makeRequest({
+        url: "http://test/api/v1/account/status",
+        headers: { "x-aichat-device-id": "d3" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { key?: { keyValue?: string } };
+    expect(body.key?.keyValue ?? "").toBe("");
+  });
 });

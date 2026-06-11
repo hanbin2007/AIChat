@@ -37,3 +37,50 @@ export function rateLimiter(): RateLimiter {
   if (!globalThis.__rateLimiter) globalThis.__rateLimiter = new RateLimiter();
   return globalThis.__rateLimiter;
 }
+
+/**
+ * Best-effort client IP from proxy headers. Falls back to "unknown" when no
+ * forwarding header is present (e.g. direct/local requests). Caddy sits in
+ * front of the relay and sets `x-forwarded-for`.
+ */
+export function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
+/**
+ * Throttle abuse-prone unauthenticated endpoints (trial bootstrap, paired
+ * join). Keys on both client IP and the body-supplied deviceID so neither
+ * rotating the deviceID nor sharing an IP alone bypasses the limit. Returns a
+ * 429 Response when over the limit, otherwise null.
+ */
+export function enforceAbuseLimit(
+  req: Request,
+  scope: string,
+  deviceID: string | undefined,
+  rpm: number,
+): Response | null {
+  const ip = clientIp(req);
+  const limiter = rateLimiter();
+  const checks = [`${scope}:ip:${ip}`];
+  if (deviceID) checks.push(`${scope}:device:${deviceID}`);
+  for (const key of checks) {
+    const result = limiter.check(key, rpm);
+    if (!result.allowed) {
+      return new Response(
+        JSON.stringify({ error: "Too many requests. Slow down." }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(result.retryAfterSec),
+          },
+        },
+      );
+    }
+  }
+  return null;
+}

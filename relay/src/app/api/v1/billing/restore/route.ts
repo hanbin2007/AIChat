@@ -29,5 +29,6 @@ export async function POST(req: Request) {
   const { processed } = await billingStore().restorePurchases({ transactions, accountID, deviceID });
   const snapshot = auth.clientKey ? await billingStore().getAccountStatus(auth.clientKey) : null;
   await finishObserve(ctx, { statusCode: 200, level: "success", category: "billing", message: `restored ${processed}` });
-  return jsonResponse(200, snapshot ?? { processed });
+  // CONTRACT: wrap the AccountStatusResponse as { status: snapshot }.
+  return jsonResponse(200, { status: snapshot });
 }

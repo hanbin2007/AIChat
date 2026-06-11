@@ -26,11 +26,12 @@ final class RelayBillingContractsTests: XCTestCase {
         return encoder
     }
 
-    /// Client-side decoder: convertFromSnakeCase + ISO 8601 dates
+    /// Client-side decoder: convertFromSnakeCase + the production relay date
+    /// strategy (millisecond/second tolerant), mirroring the real decode path.
     private func clientDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.applyRelayDateDecoding()
         return decoder
     }
 
@@ -48,10 +49,10 @@ final class RelayBillingContractsTests: XCTestCase {
         return decoder
     }
 
-    /// Plain decoder with no strategies — tests that custom init(from:) handles camelCase keys standalone
+    /// Plain decoder with no key strategy — tests that custom init(from:) handles camelCase keys standalone
     private func plainDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.applyRelayDateDecoding()
         return decoder
     }
 
@@ -621,5 +622,179 @@ final class RelayBillingContractsTests: XCTestCase {
                 )
             )
         )
+    }
+
+    // MARK: - Tests: H1 — millisecond ISO 8601 dates from the Next.js relay
+
+    /// The production relay emits `Date.toISOString()` with millisecond
+    /// precision. The legacy `.iso8601` strategy rejects fractional seconds on
+    /// older OSes, silently nuking the whole account. The relay strategy must
+    /// accept BOTH precisions.
+    func testRelayDateDecodingAcceptsMillisecondPrecision() throws {
+        let json = Data("""
+        {
+            "request_id": "\(fixedUUID.uuidString)",
+            "endpoint": "/v1/chat/stream",
+            "model_id": "gemini-3-flash-preview",
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "reserved_credits": 10,
+            "settled_credits": 8,
+            "search_count": 1,
+            "created_at": "2026-06-11T03:11:30.075Z"
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayUsageSummary.self, from: json)
+
+        let expected = ISO8601DateFormatter().date(from: "2026-06-11T03:11:30Z")!.addingTimeInterval(0.075)
+        XCTAssertEqual(decoded.createdAt.timeIntervalSince1970, expected.timeIntervalSince1970, accuracy: 0.001)
+    }
+
+    func testRelayDateDecodingAcceptsSecondPrecision() throws {
+        let json = Data("""
+        {
+            "request_id": "\(fixedUUID.uuidString)",
+            "endpoint": "/v1/chat/stream",
+            "model_id": "gemini-3-flash-preview",
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "reserved_credits": 10,
+            "settled_credits": 8,
+            "search_count": 1,
+            "created_at": "2026-06-11T03:11:30Z"
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayUsageSummary.self, from: json)
+        XCTAssertEqual(decoded.createdAt, ISO8601DateFormatter().date(from: "2026-06-11T03:11:30Z")!)
+    }
+
+    /// A full account status with a millisecond `credit_expires_at` must NOT
+    /// collapse `account` to nil (the H1 failure mode).
+    func testAccountStatusSurvivesMillisecondCreditExpiry() throws {
+        let json = Data("""
+        {
+            "account": {
+                "accountId": "\(fixedUUID.uuidString)",
+                "state": "active",
+                "source": "trial",
+                "creditBalance": 800,
+                "creditExpiresAt": "2026-06-18T03:11:30.075Z"
+            },
+            "grants": [],
+            "recentUsage": []
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayAccountStatusResponse.self, from: json)
+        XCTAssertNotNil(decoded.account, "account must not be nuked by a millisecond date")
+        XCTAssertEqual(decoded.account?.creditBalance, 800)
+        XCTAssertNotNil(decoded.account?.creditExpiresAt)
+    }
+
+    // MARK: - Tests: H5 — unknown enum values decode to .unknown, not throw
+
+    func testUnknownAccessSourceDecodesToUnknown() throws {
+        let json = Data(#""brand_new_source""#.utf8)
+        let decoded = try clientDecoder().decode(RelayAccessSource.self, from: json)
+        XCTAssertEqual(decoded, .unknown)
+    }
+
+    func testUnknownAccountStateDecodesToUnknown() throws {
+        let json = Data(#""suspended_for_review""#.utf8)
+        let decoded = try clientDecoder().decode(RelayAccountState.self, from: json)
+        XCTAssertEqual(decoded, .unknown)
+    }
+
+    func testUnknownKeyStateDecodesToUnknown() throws {
+        let json = Data(#""quarantined""#.utf8)
+        let decoded = try clientDecoder().decode(RelayKeyState.self, from: json)
+        XCTAssertEqual(decoded, .unknown)
+    }
+
+    /// A new server enum value inside `account.state` must not nuke the whole
+    /// account object — it should land on `.unknown`.
+    func testAccountWithUnknownStateSurvives() throws {
+        let json = Data("""
+        {
+            "account": {
+                "accountId": "\(fixedUUID.uuidString)",
+                "state": "frozen_pending_audit",
+                "source": "subscription",
+                "creditBalance": 1234
+            },
+            "grants": [],
+            "recentUsage": []
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayAccountStatusResponse.self, from: json)
+        XCTAssertNotNil(decoded.account)
+        XCTAssertEqual(decoded.account?.state, .unknown)
+        XCTAssertEqual(decoded.account?.creditBalance, 1234)
+    }
+
+    // MARK: - Tests: C1 — prepare accountID optional + submission response shapes
+
+    func testPrepareResponseDecodesWithoutAccountID() throws {
+        // Production Next.js relay returns only { appAccountToken }.
+        let json = Data("""
+        { "appAccountToken": "\(fixedUUID.uuidString)" }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayPurchasePrepareResponse.self, from: json)
+        XCTAssertNil(decoded.accountID)
+        XCTAssertEqual(decoded.appAccountToken, fixedUUID)
+    }
+
+    func testPrepareResponseRoundTripWithNilAccountID() {
+        assertServerToClientRoundTrip(
+            RelayPurchasePrepareResponse(accountID: nil, appAccountToken: fixedUUID)
+        )
+    }
+
+    /// Submission/restore response must accept a BARE AccountStatusResponse
+    /// (production Next.js relay shape).
+    func testSubmissionResponseDecodesBareStatus() throws {
+        let json = Data("""
+        {
+            "account": {
+                "accountId": "\(fixedUUID.uuidString)",
+                "state": "active",
+                "source": "subscription",
+                "creditBalance": 9999
+            },
+            "grants": [],
+            "recentUsage": []
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayPurchaseSubmissionResponse.self, from: json)
+        XCTAssertEqual(decoded.status.account?.creditBalance, 9999)
+        XCTAssertEqual(decoded.status.account?.source, .subscription)
+    }
+
+    /// Submission/restore response must ALSO accept the wrapped { status: ... }
+    /// (legacy macOS relay shape).
+    func testSubmissionResponseDecodesWrappedStatus() throws {
+        let json = Data("""
+        {
+            "status": {
+                "account": {
+                    "accountId": "\(fixedUUID.uuidString)",
+                    "state": "active",
+                    "source": "trial",
+                    "creditBalance": 42
+                },
+                "grants": [],
+                "recentUsage": []
+            }
+        }
+        """.utf8)
+
+        let decoded = try clientDecoder().decode(RelayPurchaseSubmissionResponse.self, from: json)
+        XCTAssertEqual(decoded.status.account?.creditBalance, 42)
+        XCTAssertEqual(decoded.status.account?.source, .trial)
     }
 }

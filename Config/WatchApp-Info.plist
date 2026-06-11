@@ -4,6 +4,8 @@
 <dict>
 	<key>AI_BACKEND_MODE</key>
 	<string>$(AI_BACKEND_MODE)</string>
+	<key>AI_OFFLINE_ACTIVATION_SEED</key>
+	<string>$(AI_OFFLINE_ACTIVATION_SEED)</string>
 	<key>AI_RELAY_ALLOW_INSECURE_TLS</key>
 	<string>$(AI_RELAY_ALLOW_INSECURE_TLS)</string>
 	<key>AI_RELAY_BASE_URL</key>

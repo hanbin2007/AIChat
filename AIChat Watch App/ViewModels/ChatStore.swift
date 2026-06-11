@@ -2601,6 +2601,12 @@ final class ChatStore: ObservableObject {
             return
         }
 
+        // The offline activation credit was consumed at send-start; the stream
+        // failed or was cancelled, so refund it rather than burning a credit on
+        // a reply the user never received (M6). No-op under managed relay access
+        // (metered server-side) or when nothing was consumed.
+        activationBilling.refundActivationMessage()
+
         if finalError is CancellationError == false {
             conversationErrors[conversationID] = failureMessage(
                 from: finalError,

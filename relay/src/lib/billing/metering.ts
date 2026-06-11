@@ -1,18 +1,46 @@
 import type { MeteringPolicy, MeteringRate } from "./types";
 
 /**
- * Credit calculation — mirrors `RelayBillingStore.creditsForUsage` in
- * `AIChat Relay/RelayBillingStore.swift`. Unknown models fall back to the
- * first rate entry; callers should guard against that.
+ * Derive a coarse pricing family key from a model ID, e.g.
+ *   "gemini-3.1-pro-preview"  → "gemini-3-pro"
+ *   "gemini-3-flash-preview"  → "gemini-3-flash"
+ *   "gemini-2.5-flash"        → "gemini-2-flash"
+ * The major version is collapsed (3.1 → 3) so a point release can't be
+ * mis-mapped to a different tier, and the tier word (pro/flash/lite) is
+ * matched explicitly rather than by raw prefix.
+ */
+function familyKey(modelID: string): string | undefined {
+  const lower = modelID.toLowerCase();
+  const versionMatch = lower.match(/gemini-(\d+)/);
+  if (!versionMatch) return undefined;
+  const major = versionMatch[1];
+  const tier = ["pro", "flash-lite", "lite", "flash"].find((t) => lower.includes(t));
+  if (!tier) return undefined;
+  // Normalise flash-lite/lite to a single "lite" bucket.
+  const normalisedTier = tier === "flash-lite" ? "lite" : tier;
+  return `gemini-${major}-${normalisedTier}`;
+}
+
+/**
+ * Resolve the metering rate for a model. Exact match first, then a coarse
+ * version+tier family match. Unknown models DO NOT fall back to the most
+ * expensive rate — they resolve to the cheapest available rate so a typo or a
+ * newly-launched model can never silently overcharge.
  */
 export function rateForModel(policy: MeteringPolicy, modelID: string | undefined): MeteringRate {
   if (modelID) {
     const exact = policy.rates.find((r) => r.modelID === modelID);
     if (exact) return exact;
-    const family = policy.rates.find((r) => modelID.startsWith(r.modelID.split("-").slice(0, 2).join("-")));
-    if (family) return family;
+    const wantFamily = familyKey(modelID);
+    if (wantFamily) {
+      const family = policy.rates.find((r) => familyKey(r.modelID) === wantFamily);
+      if (family) return family;
+    }
   }
-  return policy.rates[0];
+  // Safe default: cheapest rate by output cost (flash-tier), never the pro rate.
+  return policy.rates.reduce((cheapest, r) =>
+    r.outputCreditsPerMillion < cheapest.outputCreditsPerMillion ? r : cheapest,
+  );
 }
 
 export interface UsageInput {

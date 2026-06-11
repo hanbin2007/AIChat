@@ -22,8 +22,12 @@ export function newActivationCode(): string {
   return out.join("-");
 }
 
+/**
+ * Pairing token with 128 bits of entropy (was 40 bits / `randomBytes(5)`,
+ * brute-forceable online). Grouped uppercase hex keeps it human-typeable.
+ */
 export function newPairingToken(): string {
-  return randomBytes(5).toString("hex").toUpperCase().match(/.{1,5}/g)!.join("-");
+  return randomBytes(16).toString("hex").toUpperCase().match(/.{1,5}/g)!.join("-");
 }
 
 export function newRequestId(): string {

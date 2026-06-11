@@ -35,8 +35,10 @@ describe("purchase / restore flow", () => {
         body: {},
       }),
     );
-    const body = (await res.json()) as { appAccountToken: string };
+    const body = (await res.json()) as { accountID?: string; appAccountToken: string };
     expect(body.appAccountToken).toMatch(/^[0-9a-f-]{36}$/);
+    // CONTRACT: prepare returns BOTH accountID and appAccountToken.
+    expect(body.accountID).toBeTruthy();
   });
 
   it("submit decodes JWS and activates a subscription grant", async () => {
@@ -56,9 +58,28 @@ describe("purchase / restore flow", () => {
       }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { account: { source: string; planID: string } };
-    expect(body.account.source).toBe("subscription");
-    expect(body.account.planID).toBe("flash_monthly");
+    // CONTRACT: response is wrapped as { status: <AccountStatusResponse> }.
+    const body = (await res.json()) as { status: { account: { source: string; planID: string } } };
+    expect(body.status.account.source).toBe("subscription");
+    expect(body.status.account.planID).toBe("flash_monthly");
+  });
+
+  it("submit rejects an unknown productID (H7) — no fallback credits", async () => {
+    const key = await bootstrapClient("phone-unknown");
+    const jws = forgeJws({
+      transactionId: "tx-unknown",
+      originalTransactionId: "tx-unknown",
+      productId: "com.aichat.relay.NOT_A_PLAN",
+    });
+    const res = await submit(
+      makeRequest({
+        url: "http://test/submit",
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+        body: { transaction: { signedTransactionInfo: jws } },
+      }),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("submit rejects missing transaction payload", async () => {
