@@ -21,3 +21,44 @@ struct FakeRelayClient: RelayClient {
         }
     }
 }
+
+// MARK: - Read seam
+
+/// Narrow protocol that isolates the two HTTP fetches `LiveRelayClient` needs.
+/// `RelayAccountService` will conform in a later plan; tests use `StubFetcher`.
+protocol RelayStatusFetching: Sendable {
+    func fetchAccountStatusForEntitlement() async throws -> RelayAccountStatusResponse?
+    func fetchCatalogForEntitlement() async throws -> RelayCatalogResponse
+}
+
+// MARK: - Live implementation
+
+struct LiveRelayClient: RelayClient {
+    let fetcher: any RelayStatusFetching
+
+    func fetchSnapshot() async throws -> RelaySnapshot {
+        let status: RelayAccountStatusResponse?
+        do {
+            status = try await fetcher.fetchAccountStatusForEntitlement()
+        } catch let e as RelayAccountServiceError {
+            if case .unauthorized = e { throw RelayError.unauthorized }
+            throw RelayError.transport(String(describing: e))
+        } catch {
+            throw RelayError.transport(String(describing: error))
+        }
+
+        guard let status, let account = status.account, let key = status.key else {
+            throw RelayError.notConfigured
+        }
+
+        let catalog: RelayCatalogResponse
+        do {
+            catalog = try await fetcher.fetchCatalogForEntitlement()
+        } catch {
+            throw RelayError.transport(String(describing: error))
+        }
+
+        let rates: [RelayMeteringRate] = catalog.meteringPolicy.rates
+        return EntitlementEngine.project(account: account, key: key, rates: rates)
+    }
+}
