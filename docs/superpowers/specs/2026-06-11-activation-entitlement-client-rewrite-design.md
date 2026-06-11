@@ -230,7 +230,7 @@ View → ChatStore.send()
 - **关键原则**：迁移**不信任旧缓存的余额/到期/状态**，只迁移"身份"（relay key / 待换码）；真实授权一律靠首次联网刷新重建。这天然规避旧 `billing.json` 无版本、字段漂移的问题。
 - **key 存储**：`RelaySnapshot.key.keyValue` 沿用现有安全存储位置（Keychain / app-group，与现状一致），不改存储介质。
 
-**存量"仅离线激活"用户（无 relay key）—— 需用户决策，见 §13。** 因为我们不存原始离线码，无法自动 exchange；候选：(a) 一段过渡宽限期内仍认旧离线 license，引导其联网换取 relay 账户；(b) 直接要求重新激活。
+**存量"仅离线激活"用户（无 relay key）—— 已定 = 选项 B（直接要求重新激活）。** 升级后这类用户迁移为空态 → `decision = readOnly(.noAccount)`，引导重新输入码/购买。**因此新引擎不需要任何 legacy-offline 兜底分支，`derive()` 保持 §5 的形态。** 迁移代码对"无 relay key 的旧离线 license"不做转换，直接丢弃旧离线状态。
 
 **切换方式（澄清自审查 #8 — 消除双读窗口）：**
 - 新分层（`RelayClient`/`Contract`/`Engine`/`Cache`/`Store`）可**先各自独立合入并单测**，此阶段不接线、不被 `ChatStore` 读取，对运行无影响。
@@ -257,14 +257,11 @@ View → ChatStore.send()
 | 契约防漂移 | 手写契约 + 真实 JSON 夹具契约测试（不上 codegen） |
 | 消费侧 | 单一 `EntitlementDecision`；平台配置与授权正交 |
 
-## 13. 待用户决策（自审查暴露）
+## 13. 已决策（自审查暴露的开放项）
 
-1. **存量"仅离线激活"用户（无 relay key）的迁移**（§10）：
-   - 选项 A — 过渡宽限：升级后一段时间内仍认旧离线 license（只读或受限可用），并强引导其联网换取 relay 账户；过渡期满未换则只读。体验平滑，但要在新引擎里临时保留一条"旧离线 license 兜底"的派生分支。
-   - 选项 B — 直接要求重新激活：升级即 `readOnly(.noAccount)`，引导重输码/购买。最干净，但对存量离线用户是一次硬中断。
-   - *待定，影响 §5 是否需要一个临时的 legacy-offline 分支。*
+1. **存量"仅离线激活"用户（无 relay key）的迁移 → 选定 B：直接要求重新激活。** 升级即空态 + `readOnly(.noAccount)`，引导重输码/购买。`derive()` 无需 legacy-offline 分支，状态机保持 §5 形态。（见 §10）
 
-2. **`graceWindow` 默认值**：暂定 7 天，可后续调。
+2. **`graceWindow` 默认值**：定 7 天，可后续调。
 
 ## 附：自审查处置记录
 
