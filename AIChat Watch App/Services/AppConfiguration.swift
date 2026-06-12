@@ -8,13 +8,10 @@
 import Foundation
 
 nonisolated enum AIBackendMode: String, Codable, Equatable {
-    case direct
     case relay
 
     var displayName: String {
         switch self {
-        case .direct:
-            return L10n.tr("backend.direct")
         case .relay:
             return L10n.tr("backend.relay")
         }
@@ -60,11 +57,13 @@ nonisolated struct AppConfiguration: Equatable {
     static func load(bundle: Bundle = .main, processInfo: ProcessInfo = .processInfo) -> AppConfiguration {
         let environment = processInfo.environment
 
-        let backendMode = AIBackendMode(
-            rawValue: value(for: "AI_BACKEND_MODE", bundle: bundle, environment: environment)?.lowercased() ?? ""
-        ) ?? .relay
+        // The app is relay-only; the direct backend mode was removed. The
+        // `AI_BACKEND_MODE` xcconfig key is no longer consulted.
+        let backendMode: AIBackendMode = .relay
 
-        let geminiAPIKey = value(for: "GEMINI_API_KEY", bundle: bundle, environment: environment)
+        // Relay-only clients never read or ship the upstream Gemini API key.
+        // The relay service owns that secret.
+        let geminiAPIKey: String? = nil
         let geminiModel = value(for: "GEMINI_MODEL", bundle: bundle, environment: environment) ?? "gemini-3-flash-preview"
         let geminiTranscriptionModel = value(
             for: "GEMINI_TRANSCRIPTION_MODEL",
@@ -73,7 +72,9 @@ nonisolated struct AppConfiguration: Equatable {
         ) ?? "gemini-3-flash-preview"
         let relayBaseURL = value(for: "AI_RELAY_BASE_URL", bundle: bundle, environment: environment)
             .flatMap(URL.init(string:))
-        let relayBearerToken = value(for: "AI_RELAY_BEARER_TOKEN", bundle: bundle, environment: environment)
+        // Client auth uses server-issued `rk_` keys persisted in
+        // `RelayAccessRepository`, not a static xcconfig/admin bearer.
+        let relayBearerToken: String? = nil
         let relayStreamPath = value(for: "AI_RELAY_STREAM_PATH", bundle: bundle, environment: environment) ?? "v1/chat/stream"
         let relayAllowsInsecureTLS = boolValue(
             for: "AI_RELAY_ALLOW_INSECURE_TLS",
@@ -102,24 +103,14 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var isAIConfigured: Bool {
-        switch backendMode {
-        case .direct:
-            return geminiAPIKey != nil
-        case .relay:
-            return relayConfigurationIssue == nil
-        }
+        relayConfigurationIssue == nil
     }
 
     var backendSummary: String {
-        switch backendMode {
-        case .direct:
-            return backendMode.displayName
-        case .relay:
-            return L10n.format(
-                "backend.relay.summary",
-                relayBaseURL?.host() ?? L10n.tr("backend.url_invalid")
-            )
-        }
+        L10n.format(
+            "backend.relay.summary",
+            relayBaseURL?.host() ?? L10n.tr("backend.url_invalid")
+        )
     }
 
     var storageSummary: String {
@@ -135,35 +126,14 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var configurationMessage: String {
-        switch backendMode {
-        case .direct:
-            guard geminiAPIKey == nil else {
-                return L10n.tr("configuration.gemini.ready")
-            }
-            return L10n.tr("configuration.gemini.missing_api_key")
-        case .relay:
-            if let relayConfigurationIssue {
-                return relayConfigurationIssue
-            }
-            return L10n.tr("configuration.relay.ready")
+        if let relayConfigurationIssue {
+            return relayConfigurationIssue
         }
+        return L10n.tr("configuration.relay.ready")
     }
 
     var voiceInputConfigurationMessage: String? {
-        switch backendMode {
-        case .direct:
-            guard geminiAPIKey == nil else {
-                return nil
-            }
-
-            return L10n.tr("configuration.voice.needs_api_key")
-        case .relay:
-            if let relayConfigurationIssue {
-                return relayConfigurationIssue
-            }
-
-            return nil
-        }
+        relayConfigurationIssue
     }
 
     var relayStreamURL: URL? {
@@ -263,15 +233,7 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var resolvedRelayBearerToken: String? {
-        // Online (relay) mode must authenticate as the user, so the server-issued
-        // key from the local store always wins. The xcconfig `relayBearerToken`
-        // is only honored as a fallback for the deprecated local Mac relay
-        // (where no per-user key exists); never let it shadow a real user key,
-        // otherwise account expiration and credit deduction get bypassed.
-        if let storedKey = RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier) {
-            return storedKey
-        }
-        return relayBearerToken
+        RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier)
     }
 
     private var hasValidRelayBaseURL: Bool {
@@ -289,10 +251,6 @@ nonisolated struct AppConfiguration: Equatable {
 
         guard hasValidRelayBaseURL else {
             return L10n.tr("configuration.relay.invalid_base_url")
-        }
-
-        guard resolvedRelayBearerToken != nil else {
-            return L10n.tr("configuration.relay.missing_bearer")
         }
 
         return nil

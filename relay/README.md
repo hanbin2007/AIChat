@@ -29,9 +29,7 @@ On first boot visit <http://localhost:8787/setup> to create the admin account.
 In `Config/Secrets.xcconfig`:
 
 ```xcconfig
-AI_BACKEND_MODE      = relay
 AI_RELAY_BASE_URL    = http:/$()/127.0.0.1:8787
-AI_RELAY_BEARER_TOKEN = <value of RELAY_BEARER_TOKEN>
 GEMINI_MODEL         = gemini-3-flash-preview
 ```
 

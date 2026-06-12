@@ -28,6 +28,13 @@ describe("id generators", () => {
     expect(newPairingToken()).toMatch(/^[0-9A-F]+(-[0-9A-F]+)+$/);
   });
 
+  it("newPairingToken carries at least 120 bits of entropy", () => {
+    const hex = newPairingToken().replace(/-/g, "");
+    // 32 hex chars × 4 bits = 128 bits.
+    expect(hex.length).toBeGreaterThanOrEqual(30);
+    expect(new Set([newPairingToken(), newPairingToken(), newPairingToken()]).size).toBe(3);
+  });
+
   it("newRequestId has the req_ prefix", () => {
     expect(newRequestId()).toMatch(/^req_[0-9a-f]{16}$/);
   });

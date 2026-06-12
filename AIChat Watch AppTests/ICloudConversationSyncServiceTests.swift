@@ -185,6 +185,6 @@ final class ICloudConversationSyncServiceTests: XCTestCase {
     }
 
     private func makeSyncConfiguration() -> AppConfiguration {
-        makeDirectModeAppConfiguration(geminiModel: "gemini-3-flash-preview")
+        makeGeminiRequestTestConfiguration(geminiModel: "gemini-3-flash-preview")
     }
 }

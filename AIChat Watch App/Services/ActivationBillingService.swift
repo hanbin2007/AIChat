@@ -7,9 +7,25 @@
 
 import Combine
 import Foundation
+import os
 #if canImport(StoreKit)
 import StoreKit
 #endif
+
+/// Typed outcomes raised by the relay billing flows so the UI can present an
+/// honest message instead of a blanket "success".
+enum RelayBillingOutcomeError: LocalizedError, Equatable {
+    /// `restoreRelayPurchases` found no entitlements to submit, or the server
+    /// accepted the restore but granted no usable managed access.
+    case noRestorablePurchases
+
+    var errorDescription: String? {
+        switch self {
+        case .noRestorablePurchases:
+            return L10n.tr("relay.restore.no_grant")
+        }
+    }
+}
 
 @MainActor
 final class ActivationBillingService: ObservableObject {
@@ -34,6 +50,14 @@ final class ActivationBillingService: ObservableObject {
     private let syncBridge: CompanionSyncBridge
     private var lastHandledCompanionActivationTransferID: String?
 
+    #if canImport(StoreKit)
+    /// Long-lived listener for out-of-band StoreKit transaction updates
+    /// (renewals, refunds, family-sharing revocations, Ask-to-Buy approvals).
+    /// Without it those events never reach the relay and local/server access
+    /// drift apart (H6).
+    private var transactionUpdatesTask: Task<Void, Never>?
+    #endif
+
     // MARK: - Init
 
     init(
@@ -53,7 +77,67 @@ final class ActivationBillingService: ObservableObject {
             deviceIdentity: deviceIdentity,
             repository: relayAccessRepository
         )
+
+        #if canImport(StoreKit)
+        startTransactionUpdatesListener()
+        #endif
     }
+
+    deinit {
+        #if canImport(StoreKit)
+        transactionUpdatesTask?.cancel()
+        #endif
+    }
+
+    #if canImport(StoreKit)
+    /// Starts the `Transaction.updates` listener that forwards out-of-band
+    /// renewals/refunds/revocations to the relay and finishes the transaction
+    /// so StoreKit stops re-delivering it (H6).
+    private func startTransactionUpdatesListener() {
+        transactionUpdatesTask?.cancel()
+        transactionUpdatesTask = Task { [weak self] in
+            for await verificationResult in Transaction.updates {
+                if Task.isCancelled {
+                    break
+                }
+                await self?.handleTransactionUpdate(verificationResult)
+            }
+        }
+    }
+
+    private func handleTransactionUpdate(
+        _ verificationResult: VerificationResult<Transaction>
+    ) async {
+        guard case .verified(let transaction) = verificationResult else {
+            // Unverified transactions can't be trusted for billing; leave them
+            // unfinished so StoreKit re-delivers once it can verify them.
+            return
+        }
+
+        do {
+            let status = try await relayAccountService.submitPurchase(
+                transaction: submittedTransaction(
+                    from: transaction,
+                    signedTransactionInfo: verificationResult.jwsRepresentation
+                )
+            )
+            await updateRelayAccountStatus(status, shareToCompanion: true)
+        } catch RelayAccountServiceError.unauthorized {
+            await clearStoredRelayKeyAfterUnauthorized()
+        } catch {
+            // Best-effort: refresh local status so a refund/revocation that the
+            // server already recorded is still reflected even if the submit
+            // round-trip failed.
+            relayBillingLog.error(
+                "Relay transaction update submit failed: \(String(describing: error), privacy: .public)"
+            )
+            await refreshActivationState()
+        }
+
+        // Always finish so StoreKit stops replaying this update.
+        await transaction.finish()
+    }
+    #endif
 
     // MARK: - Computed Properties
 
@@ -62,34 +146,30 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var relayAccessStatusTitle: String? {
-        guard configuration.backendMode == .relay,
-              let account = relayAccountStatus?.account
-        else {
+        guard let account = relayAccountStatus?.account else {
             return nil
         }
 
         switch account.state {
         case .active:
             if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
-                return "已过期"
+                return L10n.tr("relay.status.expired")
             }
             if account.creditBalance > 0 {
-                return "在线可用"
+                return L10n.tr("relay.status.available")
             }
-            return "额度用尽"
+            return L10n.tr("relay.status.exhausted")
         case .paused:
-            return "已暂停"
+            return L10n.tr("relay.status.paused")
         case .expired:
-            return "已过期"
-        case .inactive:
-            return "未激活"
+            return L10n.tr("relay.status.expired")
+        case .inactive, .unknown:
+            return L10n.tr("relay.status.inactive")
         }
     }
 
     var relayAccessStatusMessage: String? {
-        guard configuration.backendMode == .relay,
-              let account = relayAccountStatus?.account
-        else {
+        guard let account = relayAccountStatus?.account else {
             return nil
         }
 
@@ -97,10 +177,15 @@ final class ActivationBillingService: ObservableObject {
         if let source = relayAccountStatus?.key?.source {
             parts.append(relaySourceLabel(for: source))
         }
-        parts.append("\(account.creditBalance) credits")
+        parts.append(L10n.format("relay.status.credits", account.creditBalance))
 
         if let expiration = account.creditExpiresAt {
-            parts.append("到期 \(expiration.formatted(date: .abbreviated, time: .shortened))")
+            parts.append(
+                L10n.format(
+                    "relay.status.expires_at",
+                    expiration.formatted(date: .abbreviated, time: .shortened)
+                )
+            )
         }
 
         if let note = account.adminNote?.nonEmptyTrimmed {
@@ -115,16 +200,13 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var isReadOnlyMode: Bool {
-        if hasManagedRelayAccess {
-            return false
-        }
-
-        switch activationStatus {
-        case .active:
-            return false
-        case .inactive, .pending, .expired, .exhausted, .invalid:
-            return true
-        }
+        // The server account is the single source of truth for sending:
+        // offline activation is only a stepping stone that must be exchanged
+        // for managed relay access (see `applyActivationCode`). Without managed
+        // access every send is blocked server-side — so the composer stays
+        // read-only rather than pretending to be editable while
+        // `activationFailureMessage` rejects each send (M1).
+        hasManagedRelayAccess == false
     }
 
     var activationStatusTitle: String {
@@ -228,19 +310,39 @@ final class ActivationBillingService: ObservableObject {
         activationState = activationRepository.loadState()
         relayAccountStatus = await relayAccessRepository.loadState()?.status
 
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         do {
             let status = try await relayAccountService.fetchAccountStatusIfPossible()
             if status != nil {
                 await updateRelayAccountStatus(status, shareToCompanion: true)
             }
+        } catch RelayAccountServiceError.unauthorized {
+            // The stored rk_ key was revoked/expired server-side. Drop it so the
+            // app stops presenting a dead credential and re-bootstraps cleanly
+            // on the next access request (M2).
+            await clearStoredRelayKeyAfterUnauthorized()
         } catch {
-            // Silently ignore fetch errors when we already have a status;
-            // the caller (ChatStore) handles startupError propagation.
+            // Other transient fetch errors are non-fatal: we keep any cached
+            // status. The error is logged rather than silently dropped — the
+            // previous comment claimed the caller propagated it, but nothing
+            // did (L4).
+            relayBillingLog.error(
+                "Relay account status refresh failed: \(String(describing: error), privacy: .public)"
+            )
         }
+    }
+
+    /// Clears the locally stored relay key after the server reports the
+    /// credential is no longer valid (HTTP 401), and resets the in-memory
+    /// account status so the UI reflects the revoked state immediately (M2).
+    private func clearStoredRelayKeyAfterUnauthorized() async {
+        do {
+            try await relayAccessRepository.clearStoredKey()
+        } catch {
+            relayBillingLog.error(
+                "Failed to clear revoked relay key: \(String(describing: error), privacy: .public)"
+            )
+        }
+        await updateRelayAccountStatus(nil, shareToCompanion: false)
     }
 
     func activationRequestCode(now: Date = .now) -> String {
@@ -261,13 +363,11 @@ final class ActivationBillingService: ObservableObject {
         try activationRepository.saveState(nextState)
         activationState = nextState
 
-        if configuration.backendMode == .relay {
-            let status = try await relayAccountService.exchangeOfflineActivation(
-                code: rawCode,
-                state: nextState
-            )
-            await updateRelayAccountStatus(status, shareToCompanion: true)
-        }
+        let status = try await relayAccountService.exchangeOfflineActivation(
+            code: rawCode,
+            state: nextState
+        )
+        await updateRelayAccountStatus(status, shareToCompanion: true)
     }
 
     func clearActivation() throws {
@@ -279,6 +379,58 @@ final class ActivationBillingService: ObservableObject {
         activationState = state
     }
 
+    /// Synchronously seeds an account status into the published state for
+    /// previews and tests. The relay-only app derives send access from managed
+    /// relay status rather than offline activation, so preview/test stores that
+    /// need an editable composer use this instead of applying an offline code.
+    func setRelayAccountStatusForPreview(_ status: RelayAccountStatusResponse?) {
+        relayAccountStatus = status
+    }
+
+    /// Seeds managed relay access for tests, persisting the status through the
+    /// relay-access repository so a later `refreshActivationState()` (which
+    /// reloads the cached status from disk) preserves it instead of wiping the
+    /// in-memory seed. This mirrors how production code persists a fetched
+    /// status before any refresh round-trip.
+    func seedManagedRelayAccessForTesting(_ status: RelayAccountStatusResponse) async {
+        try? await relayAccessRepository.saveStatus(status)
+        relayAccountStatus = status
+    }
+
+    /// Builds an active managed-access status (active account + key + positive,
+    /// non-expired credit balance) for previews and tests.
+    static func previewManagedRelayAccessStatus(
+        creditBalance: Int = 1_000,
+        creditExpiresAt: Date? = nil
+    ) -> RelayAccountStatusResponse {
+        RelayAccountStatusResponse(
+            account: RelayAccountSummary(
+                accountID: UUID(),
+                displayName: nil,
+                adminNote: nil,
+                state: .active,
+                source: .subscription,
+                planID: nil,
+                originalTransactionID: nil,
+                appAccountToken: nil,
+                creditBalance: creditBalance,
+                creditExpiresAt: creditExpiresAt,
+                lastUsageAt: nil
+            ),
+            device: nil,
+            key: RelayKeySummary(
+                keyID: UUID(),
+                keyValue: "preview-server-issued-key",
+                state: .active,
+                source: .subscription,
+                note: nil,
+                issuedAt: Date(timeIntervalSince1970: 0)
+            ),
+            grants: [],
+            recentUsage: []
+        )
+    }
+
     func sendActivationCodeToPairedWatch(_ rawCode: String) {
         syncBridge.pushActivationCodeImport(rawCode)
     }
@@ -288,19 +440,11 @@ final class ActivationBillingService: ObservableObject {
     }
 
     func refreshRelayCatalog() async throws {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         relayCatalog = try await relayAccountService.fetchCatalog()
     }
 
     @discardableResult
     func requestManagedRelayAccess() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         let status = try await relayAccountService.refreshOrBootstrapStatus(forceBootstrap: true)
         await updateRelayAccountStatus(status, shareToCompanion: true)
         return status
@@ -308,10 +452,6 @@ final class ActivationBillingService: ObservableObject {
 
     @discardableResult
     func purchaseRelayPlan(id planID: String) async throws -> RelayStorePurchaseOutcome {
-        guard configuration.backendMode == .relay else {
-            throw RelayAPIError.missingConfiguration
-        }
-
         relayBillingBusy = true
         defer { relayBillingBusy = false }
 
@@ -360,10 +500,6 @@ final class ActivationBillingService: ObservableObject {
 
     @discardableResult
     func restoreRelayPurchases() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         relayBillingBusy = true
         defer { relayBillingBusy = false }
 
@@ -383,8 +519,22 @@ final class ActivationBillingService: ObservableObject {
             )
         }
 
+        // Nothing to restore: don't make the caller round-trip to the server
+        // only to report a misleading "restore complete" with no grant (M8).
+        guard submittedTransactions.isEmpty == false else {
+            throw RelayBillingOutcomeError.noRestorablePurchases
+        }
+
         let status = try await relayAccountService.restorePurchases(transactions: submittedTransactions)
         await updateRelayAccountStatus(status, shareToCompanion: true)
+
+        // The server accepted the restore but granted nothing usable (no active
+        // managed access). Surface a real failure instead of swallowing it and
+        // telling the user the restore succeeded (M8).
+        guard isManagedRelayAccessActive(for: status) else {
+            throw RelayBillingOutcomeError.noRestorablePurchases
+        }
+
         return status
         #else
         throw RelayAPIError.missingConfiguration
@@ -409,43 +559,29 @@ final class ActivationBillingService: ObservableObject {
     }
 
     func activationFailureMessage(for modelID: String) -> String? {
-        if configuration.backendMode == .relay {
-            if hasManagedRelayAccess {
-                return nil
-            }
-
-            guard let account = relayAccountStatus?.account else {
-                return "正在验证在线状态，请稍候…"
-            }
-
-            switch account.state {
-            case .active:
-                if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
-                    return "订阅或 credit 已过期。"
-                }
-                return account.creditBalance > 0 ? nil : "在线额度已用尽。"
-            case .paused:
-                return "当前 relay key 已在服务端暂停。"
-            case .expired:
-                return "订阅或 credit 已过期。"
-            case .inactive:
-                return "当前设备尚未完成在线激活。"
-            }
+        if hasManagedRelayAccess {
+            return nil
         }
 
-        switch activationStatus {
-        case .inactive:
-            return OfflineActivationError.notActivated.localizedDescription
-        case .pending(let state):
-            return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
+        guard let account = relayAccountStatus?.account else {
+            // No managed access and no online account yet: the device needs
+            // to bind online. Surface an actionable CTA instead of a
+            // permanent "verifying…" message that never resolves (M1).
+            return L10n.tr("relay.access.needs_online_binding")
+        }
+
+        switch account.state {
+        case .active:
+            if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
+                return L10n.tr("relay.failure.credits_expired")
+            }
+            return account.creditBalance > 0 ? nil : L10n.tr("relay.failure.credits_exhausted")
+        case .paused:
+            return L10n.tr("relay.failure.key_paused")
         case .expired:
-            return OfflineActivationError.licenseExpired.localizedDescription
-        case .exhausted:
-            return OfflineActivationError.messageLimitReached.localizedDescription
-        case .invalid(let message):
-            return message
-        case .active(let state, _):
-            return state.license.allows(modelID: modelID) ? nil : OfflineActivationError.modelNotAllowed.localizedDescription
+            return L10n.tr("relay.failure.credits_expired")
+        case .inactive, .unknown:
+            return L10n.tr("relay.failure.device_inactive")
         }
     }
 
@@ -463,6 +599,34 @@ final class ActivationBillingService: ObservableObject {
         if nextActivationState != activationState {
             try activationRepository.saveState(nextActivationState)
             activationState = nextActivationState
+        }
+    }
+
+    /// Reverses a single offline-credit consumption when the send it paid for
+    /// failed or was cancelled before completing. Managed relay access is
+    /// metered server-side per completed request, so there is nothing to refund
+    /// in that mode (M6).
+    func refundActivationMessage() {
+        guard hasManagedRelayAccess == false else {
+            return
+        }
+
+        guard let currentState = activationState,
+              currentState.usedMessageCount > 0
+        else {
+            return
+        }
+
+        var refundedState = currentState
+        refundedState.usedMessageCount -= 1
+
+        do {
+            try activationRepository.saveState(refundedState)
+            activationState = refundedState
+        } catch {
+            relayBillingLog.error(
+                "Failed to refund offline activation credit: \(String(describing: error), privacy: .public)"
+            )
         }
     }
 
@@ -528,13 +692,13 @@ final class ActivationBillingService: ObservableObject {
         for status: RelayAccountStatusResponse?,
         now: Date = .now
     ) -> Bool {
-        guard configuration.backendMode == .relay else {
-            return false
-        }
-
         guard let account = status?.account,
               let key = status?.key
         else {
+            return false
+        }
+
+        guard key.keyValue.nonEmptyTrimmed != nil else {
             return false
         }
 
@@ -546,8 +710,7 @@ final class ActivationBillingService: ObservableObject {
     }
 
     private func shareManagedRelayAccessToCompanionIfPossible() async {
-        guard configuration.backendMode == .relay,
-              configuration.relayBearerToken == nil,
+        guard configuration.relayBearerToken == nil,
               canTransferActivationCodeToPairedWatch,
               isManagedRelayAccessActive(for: relayAccountStatus)
         else {
@@ -558,15 +721,14 @@ final class ActivationBillingService: ObservableObject {
             let pairingToken = try await relayAccountService.requestPairingToken()
             syncBridge.pushRelayPairingToken(pairingToken.pairingToken, expiresAt: pairingToken.expiresAt)
         } catch {
-            companionActivationFeedbackMessage = "在线激活同步失败：\(error.localizedDescription)"
+            companionActivationFeedbackMessage = L10n.format(
+                "relay.sync.share_failed",
+                error.localizedDescription
+            )
         }
     }
 
     private func consumeRelayPairingToken(_ token: String, expiresAt: Date?) async {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         if let expiresAt, expiresAt <= .now {
             return
         }
@@ -574,9 +736,12 @@ final class ActivationBillingService: ObservableObject {
         do {
             let status = try await relayAccountService.joinPaired(pairingToken: token)
             await updateRelayAccountStatus(status, shareToCompanion: false)
-            companionActivationFeedbackMessage = "已同步配对设备的在线激活。"
+            companionActivationFeedbackMessage = L10n.tr("relay.sync.joined")
         } catch {
-            companionActivationFeedbackMessage = "同步在线激活失败：\(error.localizedDescription)"
+            companionActivationFeedbackMessage = L10n.format(
+                "relay.sync.join_failed",
+                error.localizedDescription
+            )
         }
     }
 
@@ -595,11 +760,13 @@ final class ActivationBillingService: ObservableObject {
     private func relaySourceLabel(for source: RelayAccessSource) -> String {
         switch source {
         case .trial:
-            return "试用"
+            return L10n.tr("relay.source.trial")
         case .subscription:
-            return "订阅"
+            return L10n.tr("relay.source.subscription")
         case .offlineManual:
-            return "离线导入"
+            return L10n.tr("relay.source.offline")
+        case .unknown:
+            return L10n.tr("relay.source.subscription")
         }
     }
 

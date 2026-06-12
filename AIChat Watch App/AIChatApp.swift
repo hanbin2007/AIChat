@@ -32,10 +32,7 @@ struct AIChat_Watch_AppApp: App {
 
         let configuration = AppConfiguration.load()
         let repository = ConversationRepository(configuration: configuration)
-        // Only allocate the handler when relay mode is active. In
-        // direct mode the ChatStore ignores it entirely.
-        let relayConnectionStatusHandler: RelayConnectionStatusHandler? =
-            configuration.backendMode == .relay ? RelayConnectionStatusHandler() : nil
+        let relayConnectionStatusHandler = RelayConnectionStatusHandler()
         let service = AIServiceFactory.makeService(
             configuration: configuration,
             relayConnectionStatusHandler: relayConnectionStatusHandler
@@ -873,7 +870,7 @@ private struct UITestBootstrap {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "ui-test-key",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",

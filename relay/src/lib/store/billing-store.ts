@@ -22,7 +22,7 @@ import {
   uuid,
 } from "@/lib/ids";
 import { DEFAULT_PLANS, DEFAULT_POLICY } from "@/lib/billing/defaults";
-import { decodeJwsPayload } from "@/lib/billing/jws";
+import { verifyJws } from "@/lib/billing/jws";
 import { creditsForUsage, maxOutputTokensForModel, rateForModel } from "@/lib/billing/metering";
 import type {
   Account,
@@ -172,7 +172,10 @@ class BillingStore {
     return a ? clone(a) : undefined;
   }
 
-  async getAccountStatus(key: Key): Promise<AccountStatusResponse | null> {
+  async getAccountStatus(
+    key: Key,
+    options?: { redactKeyValue?: boolean },
+  ): Promise<AccountStatusResponse | null> {
     await this.ensureLoaded();
     const acc = this.state.accounts[key.accountID];
     if (!acc) return null;
@@ -181,7 +184,12 @@ class BillingStore {
       .map((id) => this.state.grants[id])
       .filter(Boolean) as Grant[];
     const recentUsage = this.state.usage.filter((u) => u.accountID === acc.accountID).slice(-50);
-    return clone({ account: acc, device, key, grants, recentUsage });
+    // H3: callers that resolved the key without proving possession of the
+    // rk_ secret (e.g. an unauthenticated x-aichat-device-id lookup) must not
+    // receive keyValue back, or anyone who knows a deviceID could harvest a
+    // usable credential.
+    const safeKey: Key = options?.redactKeyValue ? { ...key, keyValue: "" } : key;
+    return clone({ account: acc, device, key: safeKey, grants, recentUsage });
   }
 
   // ---- trial / bootstrap -------------------------------------------------
@@ -263,13 +271,19 @@ class BillingStore {
 
   // ---- StoreKit ----------------------------------------------------------
 
-  async preparePurchase(params: { accountID?: string }): Promise<{ appAccountToken: string }> {
+  async preparePurchase(
+    params: { accountID?: string },
+  ): Promise<{ accountID?: string; appAccountToken: string }> {
     return this.write(() => {
       const token = uuid();
-      if (params.accountID && this.state.accounts[params.accountID]) {
-        this.state.accounts[params.accountID].appAccountToken = token;
+      const accountID =
+        params.accountID && this.state.accounts[params.accountID]
+          ? params.accountID
+          : undefined;
+      if (accountID) {
+        this.state.accounts[accountID].appAccountToken = token;
       }
-      return { appAccountToken: token };
+      return { accountID, appAccountToken: token };
     });
   }
 
@@ -280,12 +294,59 @@ class BillingStore {
     platform?: DevicePlatform;
   }): Promise<{ account: Account; key: Key; grant: Grant }> {
     return this.write(() => {
-      const decoded = decodeJwsPayload(params.signedTransactionInfo);
+      // Cryptographically verify the StoreKit JWS (gated by BILLING_JWS_VERIFY,
+      // default ON). Throws on a forged / tampered / unsigned payload.
+      const decoded = verifyJws(params.signedTransactionInfo);
       if (!decoded.transactionID || !decoded.productID) {
         throw new Error("Malformed StoreKit transaction payload.");
       }
-      const now = iso();
+      // H7: an unknown productID (no matching plan) must NOT mint credits.
       const plan = this.state.plans.find((p) => p.productID === decoded.productID);
+      if (!plan) {
+        throw new Error(`Unknown productID: ${decoded.productID}.`);
+      }
+
+      // C3: idempotency on transactionID. A given transaction is only granted
+      // once. If we've already recorded this transactionID — or already minted a
+      // grant sourced from it — return the existing account state without
+      // creating a duplicate Grant. Legitimate renewals carry a fresh
+      // transactionID, so they still flow through to a new grant below.
+      const alreadyProcessed =
+        !!this.state.transactions[decoded.transactionID] ||
+        Object.values(this.state.grants).some(
+          (g) => g.sourceTransactionID === decoded.transactionID,
+        );
+      if (alreadyProcessed) {
+        const existingGrant = Object.values(this.state.grants).find(
+          (g) => g.sourceTransactionID === decoded.transactionID,
+        );
+        const existingAccountID =
+          existingGrant?.accountID ??
+          this.state.transactions[decoded.transactionID]?.originalTransactionID;
+        const existingAccount = existingAccountID
+          ? this.state.accounts[existingAccountID] ??
+            Object.values(this.state.accounts).find(
+              (a) => a.originalTransactionID === existingAccountID,
+            )
+          : undefined;
+        const account =
+          existingAccount ??
+          (existingGrant ? this.state.accounts[existingGrant.accountID] : undefined);
+        if (account) {
+          const key = params.deviceID
+            ? Object.values(this.state.keys).find(
+                (k) => k.accountID === account.accountID && k.deviceID === params.deviceID,
+              )
+            : undefined;
+          return clone({
+            account,
+            key: key ?? ({} as Key),
+            grant: existingGrant ?? ({} as Grant),
+          });
+        }
+      }
+
+      const now = iso();
       const accountID =
         params.accountID ??
         (decoded.originalTransactionID &&
@@ -321,6 +382,13 @@ class BillingStore {
       let key: Key | undefined;
       if (params.deviceID) {
         const existing = this.state.devices[params.deviceID];
+        const alreadyBound = account.deviceIDs.includes(params.deviceID);
+        // M7: enforce the device-bind cap. Binding a *new* device that would
+        // push the account over policy.maxBoundDevices is rejected rather than
+        // silently detaching another device.
+        if (!alreadyBound && account.deviceIDs.length >= this.state.policy.maxBoundDevices) {
+          throw new Error("Device bind cap reached.");
+        }
         if (existing && existing.accountID !== account.accountID) {
           // Detach from old account.
           const old = this.state.accounts[existing.accountID];
@@ -366,8 +434,9 @@ class BillingStore {
         processedAt: now,
       };
 
-      // Grant credits — cap expiry at expirationDate + 1 month to match macOS.
-      const credits = plan?.monthlyCredits ?? 20_000;
+      // Grant credits — only known plans grant credits (see H7 guard above).
+      // Cap expiry at expirationDate + 1 month to match macOS.
+      const credits = plan.monthlyCredits;
       const expiresAt = decoded.expirationDate
         ? new Date(new Date(decoded.expirationDate).getTime() + 30 * 86400 * 1000).toISOString()
         : undefined;

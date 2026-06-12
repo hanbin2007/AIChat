@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       let finishReason = "";
       let inputTokens = 0;
       let outputTokens = 0;
+      let searchQueryCount = 0;
       // Client disconnect → release reservation so credits don't leak.
       const signal = req.signal;
       const onAbort = async () => {
@@ -112,6 +113,7 @@ export async function POST(req: Request) {
         finishReason = result.finishReason;
         inputTokens = result.usage?.promptTokens ?? 0;
         outputTokens = result.usage?.candidatesTokens ?? 0;
+        searchQueryCount = result.searchQueryCount;
       } catch (err: unknown) {
         if (aborted) return;
         send("error", { type: "error", message: (err as Error).message });
@@ -136,11 +138,22 @@ export async function POST(req: Request) {
       ctx.outputTokens = outputTokens;
       ctx.responseSummary = mergedAnswer.slice(0, 280);
       if (reservationID) {
-        const searchCount = (requestBody as { tools?: { google_search?: unknown }[] }).tools?.some(
+        const hasSearchTool = (requestBody as { tools?: { google_search?: unknown }[] }).tools?.some(
           (t) => "google_search" in t,
         )
-          ? 1
-          : 0;
+          ? true
+          : false;
+        // Prefer the real grounded-search count from groundingMetadata. For
+        // gemini-3.x each query is billed individually; for 2.5-era a request
+        // is billed as a single search surcharge regardless of query count.
+        // When grounding metadata is absent (searchQueryCount === 0) fall back
+        // to tool presence so the legacy contract still holds.
+        let searchCount: number;
+        if (searchQueryCount > 0) {
+          searchCount = model.startsWith("gemini-3") ? searchQueryCount : 1;
+        } else {
+          searchCount = hasSearchTool ? 1 : 0;
+        }
         const settled = await billingStore().settleCredits({
           requestID: reservationID,
           inputTokens,

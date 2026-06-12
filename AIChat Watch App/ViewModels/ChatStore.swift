@@ -355,9 +355,8 @@ final class ChatStore: ObservableObject {
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
-    /// Live relay-backend connectivity indicator. Only mutated when the
-    /// active configuration runs in relay mode — `.direct` callers keep
-    /// it at `.unknown` and the UI layer hides the dot entirely.
+    /// Live relay-backend connectivity indicator. The relay-only client reports
+    /// request lifecycle transitions through this status handler.
     @Published private(set) var relayConnectionStatus: RelayConnectionStatus = .unknown
     /// Timestamp of the last successful relay round-trip. Surfaced in
     /// the status detail sheet for the tester.
@@ -408,8 +407,10 @@ final class ChatStore: ObservableObject {
     private let replyPersistenceController: any ReplyPersistenceControlling
     private let activationRepository: ActivationRepository
     let activationBilling: ActivationBillingService
+    let entitlementStore: EntitlementStore
     let syncCoordinator: ConversationSyncCoordinator
     private var activationBillingCancellable: AnyCancellable?
+    private var entitlementCancellable: AnyCancellable?
     private var activationStateRebuildCancellable: AnyCancellable?
     private var syncCoordinatorCancellable: AnyCancellable?
     private let defaults: UserDefaults
@@ -456,12 +457,22 @@ final class ChatStore: ObservableObject {
             configuration: configuration,
             rootURL: repository.resolvedRootURL
         )
+        let relayAccountService = RelayAccountService(
+            configuration: configuration,
+            deviceIdentity: self.deviceIdentity,
+            repository: resolvedRelayAccessRepository
+        )
         self.activationBilling = ActivationBillingService(
             configuration: configuration,
             deviceIdentity: self.deviceIdentity,
             activationRepository: resolvedActivationRepository,
             relayAccessRepository: resolvedRelayAccessRepository,
             syncBridge: syncBridge
+        )
+        self.entitlementStore = EntitlementStore(
+            client: LiveRelayClient(fetcher: RelayAccountServiceFetcher(service: relayAccountService)),
+            cache: EntitlementCache(directory: repository.resolvedRootURL),
+            platformConfigured: configuration.isAIConfigured
         )
         self.syncCoordinator = ConversationSyncCoordinator(
             syncBridge: syncBridge,
@@ -535,6 +546,10 @@ final class ChatStore: ObservableObject {
             self?.objectWillChange.send()
         }
 
+        entitlementCancellable = entitlementStore.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+
         syncCoordinatorCancellable = syncCoordinator.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -545,10 +560,7 @@ final class ChatStore: ObservableObject {
                 self?.rebuildConversationListCaches()
             }
 
-        // Relay-mode only. In direct mode there is no handler attached
-        // and `relayConnectionStatus` stays at `.unknown` — the UI layer
-        // hides the indicator entirely by gating on `backendMode`.
-        if configuration.backendMode == .relay, let relayConnectionStatusHandler {
+        if let relayConnectionStatusHandler {
             relayConnectionStatusHandler.setOnChange { [weak self] status in
                 self?.applyRelayConnectionStatus(status)
             }
@@ -571,13 +583,7 @@ final class ChatStore: ObservableObject {
 
     /// Manually retries the latest assistant reply whose relay request
     /// failed. Called from the status detail sheet's "Retry" button.
-    /// Safe to call in any backend mode — in direct mode the detail
-    /// sheet never appears, so this is effectively relay-only.
     func retryLatestRelayFailure() async {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         // Prefer the most recently updated conversation whose last
         // assistant reply is in the `.failed` state. Keeps scope tight
         // — we don't track a per-request identifier.
@@ -598,11 +604,77 @@ final class ChatStore: ObservableObject {
     }
 
     var activationStatus: OfflineActivationStatus { activationBilling.activationStatus }
-    var hasManagedRelayAccess: Bool { activationBilling.hasManagedRelayAccess }
-    var isReadOnlyMode: Bool { activationBilling.isReadOnlyMode }
-    var activationStatusTitle: String { activationBilling.activationStatusTitle }
-    var activationStatusMessage: String { activationBilling.activationStatusMessage }
-    var activationAllowedModelIDs: Set<String>? { activationBilling.activationAllowedModelIDs }
+    var hasManagedRelayAccess: Bool {
+        if case .ready = entitlementStore.decision.capability { return true }
+        return false
+    }
+    var isReadOnlyMode: Bool { hasManagedRelayAccess == false }
+    var activationStatusTitle: String { entitlementStatusTitle(for: entitlementStore.decision) }
+    var activationStatusMessage: String { entitlementStatusMessage(for: entitlementStore.decision) }
+    var activationAllowedModelIDs: Set<String>? {
+        let models = entitlementStore.decision.availableModels
+        return models.isEmpty ? nil : Set(models)
+    }
+
+    private func entitlementStatusTitle(for decision: EntitlementDecision) -> String {
+        switch decision.capability {
+        case .ready:
+            return L10n.tr("activation.status.active")
+        case .bootstrapping:
+            return L10n.tr("activation.status.pending")
+        case .readOnly(let reason):
+            switch reason {
+            case .platformNotConfigured:
+                return L10n.tr("activation.status.invalid")
+            case .noAccount:
+                return L10n.tr("activation.status.inactive")
+            case .revoked:
+                return L10n.tr("relay.status.paused")
+            case .expired, .offlineGraceElapsed:
+                return L10n.tr("activation.status.expired")
+            case .exhausted:
+                return L10n.tr("activation.status.exhausted")
+            }
+        }
+    }
+
+    private func entitlementStatusMessage(for decision: EntitlementDecision) -> String {
+        switch decision.capability {
+        case .ready:
+            if let credits = decision.credits {
+                var parts = [L10n.format("relay.status.message.balance", credits.balance)]
+                if let expiresAt = credits.expiresAt {
+                    parts.append(
+                        L10n.format(
+                            "relay.status.message.expires",
+                            expiresAt.formatted(date: .abbreviated, time: .shortened)
+                        )
+                    )
+                }
+                return parts.joined(separator: " • ")
+            }
+            return L10n.tr("configuration.relay.ready")
+        case .bootstrapping:
+            return L10n.tr("relay.access.needs_online_binding")
+        case .readOnly(let reason):
+            return entitlementFailureMessage(for: reason)
+        }
+    }
+
+    private func entitlementFailureMessage(for reason: LockReason) -> String {
+        switch reason {
+        case .platformNotConfigured:
+            return configuration.configurationMessage
+        case .noAccount:
+            return L10n.tr("relay.access.needs_online_binding")
+        case .revoked:
+            return L10n.tr("relay.failure.key_paused")
+        case .expired, .offlineGraceElapsed:
+            return L10n.tr("relay.failure.credits_expired")
+        case .exhausted:
+            return L10n.tr("relay.failure.credits_exhausted")
+        }
+    }
 
     func loadConversationsIfNeeded() async {
         if hasLoadedConversations { return }
@@ -676,7 +748,26 @@ final class ChatStore: ObservableObject {
 
     func refreshActivationState() async {
         await activationBilling.refreshActivationState()
+        applyRelayAccountStatusToEntitlement()
+        await entitlementStore.refresh()
         rebuildConversationListCaches()
+    }
+
+    private func applyRelayAccountStatusToEntitlement(now: Date = .now) {
+        guard let status = activationBilling.relayAccountStatus,
+              let account = status.account,
+              let key = status.key,
+              key.keyValue.trimmed.isEmpty == false
+        else {
+            return
+        }
+
+        let snapshot = EntitlementEngine.project(
+            account: account,
+            key: key,
+            rates: activationBilling.relayCatalog?.meteringPolicy.rates ?? []
+        )
+        entitlementStore.apply(.relayRefreshed(snapshot, now: now))
     }
 
     func activationRequestCode(now: Date = .now) -> String {
@@ -689,6 +780,8 @@ final class ChatStore: ObservableObject {
 
     func applyActivationCode(_ rawCode: String, now: Date = .now) async throws {
         try await activationBilling.applyActivationCode(rawCode, now: now)
+        applyRelayAccountStatusToEntitlement()
+        await entitlementStore.refresh()
     }
 
     func clearActivation() async {
@@ -714,6 +807,7 @@ final class ChatStore: ObservableObject {
     func refreshRelayCatalog() async {
         do {
             try await activationBilling.refreshRelayCatalog()
+            applyRelayAccountStatusToEntitlement()
         } catch {
             if relayCatalog == nil {
                 startupError = error.localizedDescription
@@ -723,17 +817,26 @@ final class ChatStore: ObservableObject {
 
     @discardableResult
     func requestManagedRelayAccess() async throws -> RelayAccountStatusResponse? {
-        try await activationBilling.requestManagedRelayAccess()
+        let status = try await activationBilling.requestManagedRelayAccess()
+        applyRelayAccountStatusToEntitlement()
+        await entitlementStore.refresh()
+        return status
     }
 
     @discardableResult
     func purchaseRelayPlan(id planID: String) async throws -> RelayStorePurchaseOutcome {
-        try await activationBilling.purchaseRelayPlan(id: planID)
+        let outcome = try await activationBilling.purchaseRelayPlan(id: planID)
+        applyRelayAccountStatusToEntitlement()
+        await entitlementStore.refresh()
+        return outcome
     }
 
     @discardableResult
     func restoreRelayPurchases() async throws -> RelayAccountStatusResponse? {
-        try await activationBilling.restoreRelayPurchases()
+        let status = try await activationBilling.restoreRelayPurchases()
+        applyRelayAccountStatusToEntitlement()
+        await entitlementStore.refresh()
+        return status
     }
 
     func createConversation() async -> UUID? {
@@ -2042,7 +2145,18 @@ final class ChatStore: ObservableObject {
     }
 
     private func licensedConfiguration(from configuration: ConversationAIConfiguration) -> ConversationAIConfiguration {
-        activationBilling.licensedConfiguration(from: configuration)
+        let availableModels = entitlementStore.decision.availableModels
+        guard availableModels.isEmpty == false,
+              availableModels.contains(configuration.model) == false
+        else {
+            return configuration
+        }
+
+        var resolvedConfiguration = configuration
+        resolvedConfiguration.model = availableModels.contains(self.configuration.geminiModel)
+            ? self.configuration.geminiModel
+            : availableModels[0]
+        return resolvedConfiguration
     }
 
     private func persistDefaultConversationConfiguration() {
@@ -2058,7 +2172,19 @@ final class ChatStore: ObservableObject {
     }
 
     private func activationFailureMessage(for modelID: String) -> String? {
-        activationBilling.activationFailureMessage(for: modelID)
+        let decision = entitlementStore.decision
+        switch decision.capability {
+        case .ready:
+            let models = decision.availableModels
+            guard models.isEmpty == false, models.contains(modelID) == false else {
+                return nil
+            }
+            return L10n.tr("relay.failure.model_unavailable")
+        case .bootstrapping:
+            return L10n.tr("relay.access.needs_online_binding")
+        case .readOnly(let reason):
+            return entitlementFailureMessage(for: reason)
+        }
     }
 
     private func shouldRetrySend(after error: Error) -> Bool {
@@ -2389,7 +2515,9 @@ final class ChatStore: ObservableObject {
     }
 
     private func consumeActivationMessage(for modelID: String) async throws {
-        try activationBilling.consumeActivationMessage(for: modelID)
+        // Relay is server-metered. The client does not have authoritative token
+        // usage at send start, so local optimistic spend is updated only when a
+        // future stream contract carries usage data.
     }
 
     private func streamAssistantReply(
@@ -2576,10 +2704,8 @@ final class ChatStore: ObservableObject {
                 // the just-completed request. Server is the source of truth for
                 // deduction; the local cache would otherwise stay stale until
                 // the next launch.
-                if configuration.backendMode == .relay {
-                    Task { [weak self] in
-                        await self?.activationBilling.refreshActivationState()
-                    }
+                Task { [weak self] in
+                    await self?.refreshActivationState()
                 }
                 return
             } catch {
@@ -2899,12 +3025,12 @@ extension ChatStore {
         transcriptionService: AITranscriptionService? = PreviewAITranscriptionService(),
         completionFeedbackProvider: (any CompletionFeedbackProviding)? = nil,
         configuration: AppConfiguration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "preview-key",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "preview-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2949,6 +3075,17 @@ extension ChatStore {
                 )
             }
         )
+        // The relay-only app derives send access from managed relay status, not
+        // offline activation. Preview/test stores that ask for an active
+        // activation state (the default) get matching managed relay access so
+        // the composer stays editable and send/retry paths run. Scenarios that
+        // explicitly pass `activationState: nil` stay read-only.
+        if activationState != nil {
+            store.activationBilling.setRelayAccountStatusForPreview(
+                ActivationBillingService.previewManagedRelayAccessStatus()
+            )
+            store.applyRelayAccountStatusToEntitlement()
+        }
         store.rebuildConversationListCaches()
         store.hasLoadedConversations = true
         return store

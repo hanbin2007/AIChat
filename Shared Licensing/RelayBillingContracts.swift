@@ -1,4 +1,55 @@
 import Foundation
+import os
+
+/// Shared logger for relay billing decode diagnostics. Decode failures used to
+/// be swallowed by `try?`; we now at least emit a fault so a wire-format drift
+/// (new enum value, format change) is visible instead of silently nuking the
+/// account/key into nil.
+let relayBillingLog = Logger(subsystem: "com.aichat.relay", category: "billing-decode")
+
+enum RelayDateDecoding {
+    /// Parses ISO 8601 dates from the Next.js relay, which emits **millisecond**
+    /// precision (`Date.toISOString()` → `2026-06-11T03:11:30.075Z`). The
+    /// `.iso8601` strategy rejects fractional seconds on watchOS 11-12 / iOS
+    /// 16-18 / macOS pre-26, which silently nuked every account that carried a
+    /// timestamp. This strategy accepts BOTH fractional-second and whole-second
+    /// precision on every supported OS.
+    nonisolated(unsafe) private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    nonisolated(unsafe) private static let plainFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static let strategy: JSONDecoder.DateDecodingStrategy = .custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+
+        if let date = fractionalFormatter.date(from: raw) {
+            return date
+        }
+        if let date = plainFormatter.date(from: raw) {
+            return date
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unrecognized ISO 8601 date: \(raw)"
+        )
+    }
+}
+
+extension JSONDecoder {
+    /// Applies the relay's lenient millisecond/second ISO 8601 date strategy.
+    func applyRelayDateDecoding() {
+        dateDecodingStrategy = RelayDateDecoding.strategy
+    }
+}
 
 private extension KeyedDecodingContainer {
     nonisolated func decodeFirstPresent<T: Decodable>(
@@ -35,6 +86,15 @@ nonisolated enum RelayAccessSource: String, Codable, CaseIterable, Sendable {
     case trial
     case subscription
     case offlineManual
+    /// Forward-compat fallback: an unrecognized server value decodes here
+    /// instead of throwing, so a new server enum value does not nuke the
+    /// whole account/key object.
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RelayAccessSource(rawValue: raw) ?? .unknown
+    }
 }
 
 nonisolated enum RelayAccountState: String, Codable, CaseIterable, Sendable {
@@ -42,12 +102,24 @@ nonisolated enum RelayAccountState: String, Codable, CaseIterable, Sendable {
     case paused
     case expired
     case inactive
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RelayAccountState(rawValue: raw) ?? .unknown
+    }
 }
 
 nonisolated enum RelayKeyState: String, Codable, CaseIterable, Sendable {
     case active
     case paused
     case revoked
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RelayKeyState(rawValue: raw) ?? .unknown
+    }
 }
 
 nonisolated enum RelayDevicePlatform: String, Codable, CaseIterable, Sendable {
@@ -55,6 +127,11 @@ nonisolated enum RelayDevicePlatform: String, Codable, CaseIterable, Sendable {
     case watch
     case mac
     case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RelayDevicePlatform(rawValue: raw) ?? .unknown
+    }
 }
 
 nonisolated struct RelayPlanCatalogItem: Identifiable, Codable, Equatable, Hashable, Sendable {
@@ -489,11 +566,28 @@ nonisolated struct RelayAccountStatusResponse: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        account = try? container.decodeIfPresent(RelayAccountSummary.self, forKey: .account)
-        device = try? container.decodeIfPresent(RelayDeviceSummary.self, forKey: .device)
-        key = try? container.decodeIfPresent(RelayKeySummary.self, forKey: .key)
-        grants = (try? container.decodeIfPresent([RelayGrantSummary].self, forKey: .grants)) ?? []
-        recentUsage = (try? container.decodeIfPresent([RelayUsageSummary].self, forKey: .recentUsage)) ?? []
+        account = Self.decodeTolerant(RelayAccountSummary.self, from: container, forKey: .account, field: "account")
+        device = Self.decodeTolerant(RelayDeviceSummary.self, from: container, forKey: .device, field: "device")
+        key = Self.decodeTolerant(RelayKeySummary.self, from: container, forKey: .key, field: "key")
+        grants = Self.decodeTolerant([RelayGrantSummary].self, from: container, forKey: .grants, field: "grants") ?? []
+        recentUsage = Self.decodeTolerant([RelayUsageSummary].self, from: container, forKey: .recentUsage, field: "recentUsage") ?? []
+    }
+
+    /// Decodes an optional sub-object, tolerating a decode failure (so one
+    /// malformed field does not nuke the entire status), but — unlike a bare
+    /// `try?` — logs a fault so wire-format drift is observable.
+    private static func decodeTolerant<Value: Decodable>(
+        _ type: Value.Type,
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys,
+        field: String
+    ) -> Value? {
+        do {
+            return try container.decodeIfPresent(Value.self, forKey: key)
+        } catch {
+            relayBillingLog.fault("Relay status decode dropped '\(field, privacy: .public)': \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 }
 
@@ -562,7 +656,10 @@ nonisolated struct RelayPurchasePrepareRequest: Codable, Equatable, Sendable {
 }
 
 nonisolated struct RelayPurchasePrepareResponse: Codable, Equatable, Sendable {
-    var accountID: UUID
+    /// Optional for forward-compat: the production Next.js relay only returns
+    /// `{ appAccountToken }`. The client never reads `accountID`, so a missing
+    /// key must NOT abort the purchase flow (its first await).
+    var accountID: UUID?
     var appAccountToken: UUID
 
     private enum CodingKeys: String, CodingKey {
@@ -573,20 +670,20 @@ nonisolated struct RelayPurchasePrepareResponse: Codable, Equatable, Sendable {
         case appAccountTokenSnake = "app_account_token"
     }
 
-    init(accountID: UUID, appAccountToken: UUID) {
+    init(accountID: UUID?, appAccountToken: UUID) {
         self.accountID = accountID
         self.appAccountToken = appAccountToken
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        accountID = try container.decodeFirstPresent(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
+        accountID = try container.decodeIfPresentFirst(UUID.self, forKeys: [.accountID, .accountIDConverted, .accountIDSnake])
         appAccountToken = try container.decodeFirstPresent(UUID.self, forKeys: [.appAccountToken, .appAccountTokenSnake])
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(accountID, forKey: .accountID)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
         try container.encode(appAccountToken, forKey: .appAccountToken)
     }
 }
@@ -897,4 +994,30 @@ nonisolated struct RelayOfflineExchangeRequest: Codable, Equatable, Sendable {
 
 nonisolated struct RelayPurchaseSubmissionResponse: Codable, Equatable, Sendable {
     var status: RelayAccountStatusResponse
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+    }
+
+    init(status: RelayAccountStatusResponse) {
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        // The production Next.js relay returns a BARE `AccountStatusResponse`
+        // from purchase/submit and billing/restore, while the legacy macOS
+        // relay wrapped it as `{ status: ... }`. Accept both.
+        if let container = try? decoder.container(keyedBy: CodingKeys.self),
+           container.contains(.status) {
+            status = try container.decode(RelayAccountStatusResponse.self, forKey: .status)
+            return
+        }
+
+        status = try RelayAccountStatusResponse(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+    }
 }

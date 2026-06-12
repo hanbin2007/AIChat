@@ -172,28 +172,29 @@ Rules:
 export function buildMemoryRequest(body: Record<string, unknown>, model: string) {
   const sections: string[] = [];
   sections.push(`Mode hint: ${pick<string>(body, "mode") ?? "casual"}`);
-  sections.push(`Conversation title: ${pick<string>(body, "conversationTitle") ?? "Untitled"}`);
+  sections.push(`Conversation title: ${pick<string>(body, "conversationTitle", "conversation_title") ?? "Untitled"}`);
 
-  const focus = pick<Record<string, unknown>>(body, "existingFocusState");
+  const focus = pick<Record<string, unknown>>(body, "existingFocusState", "existing_focus_state");
   if (focus) {
     const lines: string[] = [];
     if (focus.kind) lines.push(`kind: ${focus.kind}`);
     if (focus.title) lines.push(`title: ${focus.title}`);
-    if (focus.focusNote) lines.push(`focusNote: ${focus.focusNote}`);
-    const openLoops = Array.isArray(focus.openLoops) ? (focus.openLoops as string[]) : [];
+    const focusNote = pick<string>(focus, "focusNote", "focus_note");
+    if (focusNote) lines.push(`focusNote: ${focusNote}`);
+    const openLoops = pick<string[]>(focus, "openLoops", "open_loops") ?? [];
     if (openLoops.length) lines.push(`openLoops: ${openLoops.join(" | ")}`);
     if (lines.length) sections.push(`Existing focus state:\n${lines.join("\n")}`);
   }
 
-  const existingMemory = pick<string[]>(body, "existingMemoryItems") ?? [];
+  const existingMemory = pick<string[]>(body, "existingMemoryItems", "existing_memory_items") ?? [];
   if (existingMemory.length) sections.push(`Existing reusable memory:\n${existingMemory.map((x) => `- ${x}`).join("\n")}`);
 
-  const recent = pick<Record<string, unknown>[]>(body, "recentMessages") ?? [];
+  const recent = pick<Record<string, unknown>[]>(body, "recentMessages", "recent_messages") ?? [];
   sections.push(
     `Recent messages (newest last):\n${recent.map((m, i) => `[${i + 1}] ${pick<string>(m, "role")}: ${pick<string>(m, "text") ?? ""}`).join("\n")}`,
   );
 
-  const archive = pick<Record<string, unknown>[]>(body, "archiveCandidateMessages") ?? [];
+  const archive = pick<Record<string, unknown>[]>(body, "archiveCandidateMessages", "archive_candidate_messages") ?? [];
   if (archive.length) {
     sections.push(
       `Archive candidate (older stable slice to compress if useful):\n${archive.map((m, i) => `[${i + 1}] ${pick<string>(m, "role")}: ${pick<string>(m, "text") ?? ""}`).join("\n")}`,

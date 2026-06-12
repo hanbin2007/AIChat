@@ -22,16 +22,25 @@ interface ChunkSummary {
   attachments: { mimeType: string; base64Data: string; filename: string }[];
   finishReason: string;
   rawParts: GeminiPart[];
+  webSearchQueries: string[];
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
 }
 
 function summariseChunk(chunk: unknown): ChunkSummary {
   const c = chunk as {
-    candidates?: { content?: { parts?: GeminiPart[] }; finishReason?: string }[];
+    candidates?: {
+      content?: { parts?: GeminiPart[] };
+      finishReason?: string;
+      groundingMetadata?: { webSearchQueries?: unknown };
+    }[];
     usageMetadata?: ChunkSummary["usageMetadata"];
   };
   const candidate = c.candidates?.[0];
   const parts = candidate?.content?.parts ?? [];
+  const rawQueries = candidate?.groundingMetadata?.webSearchQueries;
+  const webSearchQueries = Array.isArray(rawQueries)
+    ? rawQueries.filter((q): q is string => typeof q === "string")
+    : [];
   const answerText = parts.filter((p) => p.thought !== true).map((p) => p.text ?? "").join("");
   const thoughtText = parts.filter((p) => p.thought === true).map((p) => p.text ?? "").join("");
   const attachments = parts
@@ -47,6 +56,7 @@ function summariseChunk(chunk: unknown): ChunkSummary {
     attachments,
     finishReason: typeof candidate?.finishReason === "string" ? candidate.finishReason.trim() : "",
     rawParts: parts,
+    webSearchQueries,
     usageMetadata: c.usageMetadata,
   };
 }
@@ -63,6 +73,12 @@ export interface StreamResult {
   answerText: string;
   thoughtText: string;
   modelContentParts: GeminiPart[];
+  /**
+   * Number of distinct grounded search queries Gemini actually ran (from
+   * `groundingMetadata.webSearchQueries`), deduped across chunks. 0 when
+   * grounding metadata is absent — callers fall back to tool presence.
+   */
+  searchQueryCount: number;
   usage?: { promptTokens: number; candidatesTokens: number; totalTokens: number };
 }
 
@@ -97,6 +113,7 @@ export async function proxyGeminiStream(params: {
   const emittedAttachmentKeys = new Set<string>();
   let finishReason = "";
   const accumulatedParts: GeminiPart[] = [];
+  const searchQueries = new Set<string>();
   let lastUsage: ChunkSummary["usageMetadata"];
 
   const ingest = (raw: string) => {
@@ -113,6 +130,7 @@ export async function proxyGeminiStream(params: {
     const summary = summariseChunk(parsed);
     if (summary.finishReason) finishReason = summary.finishReason;
     if (summary.usageMetadata) lastUsage = summary.usageMetadata;
+    for (const q of summary.webSearchQueries) searchQueries.add(q);
     accumulatedParts.push(...summary.rawParts);
 
     for (const attachment of summary.attachments) {
@@ -165,6 +183,7 @@ export async function proxyGeminiStream(params: {
     answerText: emittedAnswer,
     thoughtText: emittedThought,
     modelContentParts: accumulatedParts,
+    searchQueryCount: searchQueries.size,
     usage: lastUsage
       ? {
           promptTokens: lastUsage.promptTokenCount ?? 0,

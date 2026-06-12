@@ -260,4 +260,33 @@ describe("buildMemoryRequest", () => {
     const content = (req.contents[0].parts[0] as { text: string }).text;
     expect(content).toContain("Archive candidate: none");
   });
+
+  it("reads snake_case fields the way the Swift client serialises them", () => {
+    // The watch app encodes ConversationMemoryExtractionRequest with
+    // .convertToSnakeCase, so the relay receives snake_case keys.
+    const req = buildMemoryRequest(
+      {
+        mode: "task",
+        conversation_title: "Snake Title",
+        recent_messages: [{ role: "user", text: "recent snake" }],
+        existing_focus_state: {
+          kind: "task",
+          title: "Snake Focus",
+          focus_note: "stay on task",
+          open_loops: ["finish migration"],
+        },
+        existing_memory_items: ["snake fact"],
+        archive_candidate_messages: [{ role: "user", text: "old snake" }],
+      },
+      "gemini-3-flash-preview",
+    );
+    const content = (req.contents[0].parts[0] as { text: string }).text;
+    expect(content).toContain("Conversation title: Snake Title");
+    expect(content).toContain("recent snake");
+    expect(content).toContain("Snake Focus");
+    expect(content).toContain("focusNote: stay on task");
+    expect(content).toContain("finish migration");
+    expect(content).toContain("snake fact");
+    expect(content).toContain("old snake");
+  });
 });

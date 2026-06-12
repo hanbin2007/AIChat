@@ -31,11 +31,9 @@ struct ActivationCenterView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
                 .listRowBackground(Color.clear)
 
-                if chatStore.configuration.backendMode == .relay {
-                    onlineAccountSection
-                    onlinePlansSection
-                    recentUsageSection
-                }
+                onlineAccountSection
+                onlinePlansSection
+                recentUsageSection
 
                 Section("当前设备") {
                     LabeledContent("设备码", value: chatStore.deviceIdentity.displayToken)
@@ -146,10 +144,8 @@ struct ActivationCenterView: View {
             }
             .onAppear {
                 refreshRequestCode()
-                if chatStore.configuration.backendMode == .relay {
-                    Task {
-                        await chatStore.refreshRelayCatalog()
-                    }
+                Task {
+                    await chatStore.refreshRelayCatalog()
                 }
             }
         }
@@ -415,7 +411,7 @@ struct ActivationCenterView: View {
             return "订阅"
         case .offlineManual:
             return "离线导入"
-        case nil:
+        case .unknown, nil:
             return "unknown"
         }
     }
@@ -430,6 +426,8 @@ struct ActivationCenterView: View {
             return "已过期"
         case .inactive:
             return "未激活"
+        case .unknown:
+            return "未知状态"
         }
     }
 

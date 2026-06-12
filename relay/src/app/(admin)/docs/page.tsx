@@ -64,9 +64,7 @@ const ENDPOINTS: Endpoint[] = [
 ];
 
 const XCCONFIG = `// AIChat 客户端 — Config/Secrets.xcconfig
-AI_BACKEND_MODE = relay
-RELAY_BASE_URL = http:/$()/<your-relay-host>:8787
-RELAY_BEARER_TOKEN = <在 .env 中配置的 RELAY_BEARER_TOKEN>`;
+AI_RELAY_BASE_URL = http:/$()/<your-relay-host>:8787`;
 
 export default function DocsPage() {
   return (

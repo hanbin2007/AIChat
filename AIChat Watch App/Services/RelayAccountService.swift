@@ -1,5 +1,22 @@
 import Foundation
 
+/// Typed signals raised by the relay account/billing endpoints that callers
+/// need to react to distinctly. Kept separate from `RelayAPIError` (which is
+/// shared with the streaming client) so the billing layer can branch on a
+/// revoked/expired key without string-matching.
+enum RelayAccountServiceError: LocalizedError, Equatable {
+    /// HTTP 401 from the relay: the stored `rk_` key is revoked or expired.
+    /// Callers should clear the stored key and re-bootstrap.
+    case unauthorized
+
+    var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return L10n.tr("error.relay.invalid_response")
+        }
+    }
+}
+
 struct RelayAccountService {
     let configuration: AppConfiguration
     let deviceIdentity: WatchDeviceIdentity
@@ -7,10 +24,6 @@ struct RelayAccountService {
     var session: URLSession = .shared
 
     func refreshOrBootstrapStatus(forceBootstrap: Bool = false) async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         if forceBootstrap == false,
            let status = try await fetchAccountStatusIfPossible() {
             try await repository.saveStatus(status)
@@ -41,13 +54,11 @@ struct RelayAccountService {
     }
 
     func fetchAccountStatusIfPossible() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay,
-              configuration.relayAccountStatusURL != nil
-        else {
+        guard configuration.relayAccountStatusURL != nil else {
             return nil
         }
 
-        guard let bearerToken = configuration.resolvedRelayBearerToken else {
+        guard let bearerToken = await storedBearerToken() else {
             return nil
         }
 
@@ -117,7 +128,7 @@ struct RelayAccountService {
             to: configuration.relayPurchasePrepareURL,
             method: "POST",
             body: payload,
-            bearerToken: configuration.resolvedRelayBearerToken
+            bearerToken: await storedBearerToken()
         )
     }
 
@@ -131,7 +142,8 @@ struct RelayAccountService {
             let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
                 to: configuration.relayPurchaseSubmitURL,
                 method: "POST",
-                body: payload
+                body: payload,
+                bearerToken: await storedBearerToken()
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -154,7 +166,8 @@ struct RelayAccountService {
             let response: RelayPurchaseSubmissionResponse = try await performJSONRequest(
                 to: configuration.relayPurchaseRestoreURL,
                 method: "POST",
-                body: payload
+                body: payload,
+                bearerToken: await storedBearerToken()
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -168,7 +181,7 @@ struct RelayAccountService {
     }
 
     func requestPairingToken() async throws -> RelayPairingTokenResponse {
-        guard let bearerToken = configuration.resolvedRelayBearerToken else {
+        guard let bearerToken = await storedBearerToken() else {
             throw RelayAPIError.missingConfiguration
         }
 
@@ -201,6 +214,10 @@ struct RelayAccountService {
             }
             throw RelayAPIError.emptyResponse
         }
+    }
+
+    private func storedBearerToken() async -> String? {
+        await repository.storedRelayKey() ?? configuration.resolvedRelayBearerToken
     }
 
     private func performJSONRequest<T: Decodable, Body: Encodable>(
@@ -240,6 +257,12 @@ struct RelayAccountService {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            // 401 means the stored key was revoked/expired. Surface a typed
+            // signal so callers can clear the local key, rather than collapsing
+            // every non-2xx into a generic error.
+            if httpResponse.statusCode == 401 {
+                throw RelayAccountServiceError.unauthorized
+            }
             throw relayClientError(from: data)
         }
 
@@ -308,7 +331,7 @@ struct RelayAccountService {
     ) throws -> T {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.applyRelayDateDecoding()
 
         do {
             return try decoder.decode(T.self, from: data)
@@ -318,7 +341,7 @@ struct RelayAccountService {
             }
 
             let fallbackDecoder = JSONDecoder()
-            fallbackDecoder.dateDecodingStrategy = .iso8601
+            fallbackDecoder.applyRelayDateDecoding()
             do {
                 return try fallbackDecoder.decode(T.self, from: normalizedData)
             } catch {

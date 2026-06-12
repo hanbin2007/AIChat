@@ -3,8 +3,7 @@
 //  AIChat Watch AppTests
 //
 //  Covers the relay connection-status state machine and the
-//  `RelayAIClient` lifecycle emissions. Relay-mode only — no
-//  direct-mode coverage by design.
+//  `RelayAIClient` lifecycle emissions in the relay-only app path.
 //
 
 import XCTest

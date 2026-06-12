@@ -66,6 +66,34 @@ describe("proxyGeminiStream", () => {
     expect(attachments).toHaveLength(1);
   });
 
+  it("counts distinct grounded search queries from groundingMetadata", async () => {
+    mockGeminiStream([
+      sse({ candidates: [{ content: { parts: [{ text: "ans" }] }, groundingMetadata: { webSearchQueries: ["a", "b"] } }] }),
+      // Cumulative repeat + one new query — must dedupe to 3 total.
+      sse({ candidates: [{ content: { parts: [] }, groundingMetadata: { webSearchQueries: ["a", "b", "c"] } }] }),
+      sse({ candidates: [{ finishReason: "STOP", content: { parts: [] } }] }),
+    ]);
+    const result = await proxyGeminiStream({
+      model: "gemini-3-flash-preview",
+      requestBody: {},
+      onEvent: () => undefined,
+    });
+    expect(result.searchQueryCount).toBe(3);
+  });
+
+  it("reports searchQueryCount 0 when no grounding metadata is present", async () => {
+    mockGeminiStream([
+      sse({ candidates: [{ content: { parts: [{ text: "ans" }] } }] }),
+      sse({ candidates: [{ finishReason: "STOP", content: { parts: [] } }] }),
+    ]);
+    const result = await proxyGeminiStream({
+      model: "gemini-3-flash-preview",
+      requestBody: {},
+      onEvent: () => undefined,
+    });
+    expect(result.searchQueryCount).toBe(0);
+  });
+
   it("throws on upstream non-2xx responses with the statusCode attached", async () => {
     vi.stubGlobal(
       "fetch",

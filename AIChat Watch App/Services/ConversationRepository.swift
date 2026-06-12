@@ -453,6 +453,7 @@ actor ConversationRepository {
 
         return fileURLs.filter {
             $0.pathExtension == "json" &&
+            $0.lastPathComponent != "entitlement-state.json" &&
             $0.lastPathComponent.hasPrefix("_") == false
         }
     }

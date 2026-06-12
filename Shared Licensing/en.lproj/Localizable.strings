@@ -30,20 +30,15 @@
 "favorites.remove" = "Remove Favorite";
 "favorites.empty.title" = "No Favorites Yet";
 "favorites.empty.message" = "Swipe left on a conversation and add it to favorites. Favorited chats show up here.";
-"backend.direct" = "Direct Gemini";
 "backend.relay" = "Relay Gateway";
 "backend.relay.summary" = "Relay Gateway • %@";
 "backend.url_invalid" = "Invalid URL";
 "storage.app_group.requested" = "App Group requested: %@";
 "storage.local.watch" = "Local watch storage";
 "storage.local.iphone" = "Local iPhone storage";
-"configuration.gemini.ready" = "Gemini is ready.";
-"configuration.gemini.missing_api_key" = "Add GEMINI_API_KEY in Config/Secrets.xcconfig or the scheme environment before sending.";
 "configuration.relay.ready" = "Relay gateway is ready.";
 "configuration.relay.missing_base_url" = "Relay mode needs AI_RELAY_BASE_URL in Config/Secrets.xcconfig.";
 "configuration.relay.invalid_base_url" = "AI_RELAY_BASE_URL is invalid. In xcconfig, write http:/$()/127.0.0.1:8787 instead of http://127.0.0.1:8787.";
-"configuration.relay.missing_bearer" = "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig.";
-"configuration.voice.needs_api_key" = "Voice transcription needs GEMINI_API_KEY because audio is transcribed before sending.";
 "sync.unavailable.watch" = "Phone sync unavailable";
 "sync.unavailable.iphone" = "Watch sync unavailable";
 "sync.not_paired.watch" = "Watch not paired";
@@ -115,6 +110,26 @@
 "activation.message.expired.with_date" = "License expired at %@. Activate again.";
 "activation.message.expired.no_date" = "This license is no longer valid. Activate again.";
 "activation.message.exhausted" = "All %d credits in this license are used. Generate a new code.";
+"relay.status.expired" = "Expired";
+"relay.status.available" = "Online";
+"relay.status.exhausted" = "Credits used up";
+"relay.status.paused" = "Paused";
+"relay.status.inactive" = "Inactive";
+"relay.status.credits" = "%d credits";
+"relay.status.expires_at" = "Expires %@";
+"relay.source.trial" = "Trial";
+"relay.source.subscription" = "Subscription";
+"relay.source.offline" = "Offline import";
+"relay.access.needs_online_binding" = "This device is not bound online yet. Open the Activation Center to request access.";
+"relay.failure.credits_expired" = "Your subscription or credits have expired. Activate again.";
+"relay.failure.credits_exhausted" = "Your online credits are used up.";
+"relay.failure.key_paused" = "This relay key has been paused on the server.";
+"relay.failure.device_inactive" = "This device has not completed online activation.";
+"relay.failure.model_unavailable" = "This model is not included in the current relay entitlement.";
+"relay.restore.no_grant" = "No purchases were available to restore.";
+"relay.sync.share_failed" = "Failed to sync online activation: %@";
+"relay.sync.joined" = "Synced the paired device's online activation.";
+"relay.sync.join_failed" = "Failed to sync online activation: %@";
 "error.retry.failure_with_operation" = "%@ failed after %d retries: %@";
 "error.retry.failure" = "Still failed after %d retries: %@";
 "common.all" = "All";
@@ -305,7 +320,7 @@
 "Summary" = "Summary";
 "Stopped" = "Stopped";
 "Voice note" = "Voice note";
-"Gemini Setup" = "Gemini Setup";
+"Gemini Setup" = "Relay Setup";
 
 /* iPhone */
 "Apple Watch 备用导入" = "Apple Watch Fallback Import";

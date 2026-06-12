@@ -2,12 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>AI_BACKEND_MODE</key>
-	<string>$(AI_BACKEND_MODE)</string>
 	<key>AI_RELAY_BASE_URL</key>
 	<string>$(AI_RELAY_BASE_URL)</string>
-	<key>AI_RELAY_BEARER_TOKEN</key>
-	<string>$(AI_RELAY_BEARER_TOKEN)</string>
 	<key>AI_RELAY_ALLOW_INSECURE_TLS</key>
 	<string>$(AI_RELAY_ALLOW_INSECURE_TLS)</string>
 	<key>AI_RELAY_STREAM_PATH</key>
@@ -49,8 +45,6 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>GEMINI_API_KEY</key>
-	<string>$(GEMINI_API_KEY)</string>
 	<key>GEMINI_MODEL</key>
 	<string>$(GEMINI_MODEL)</string>
 	<key>GEMINI_TRANSCRIPTION_MODEL</key>

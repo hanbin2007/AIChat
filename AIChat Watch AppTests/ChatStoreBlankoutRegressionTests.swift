@@ -185,7 +185,7 @@ final class ChatStoreBlankoutRegressionTests: XCTestCase {
 
     private func makeTestConfiguration() -> AppConfiguration {
         AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",

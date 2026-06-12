@@ -3,10 +3,16 @@
 APP_MARKETING_VERSION = 2.2
 APP_BUILD_VERSION = 7
 
-AI_BACKEND_MODE = relay
 GEMINI_MODEL = gemini-3-flash-preview
 GEMINI_TRANSCRIPTION_MODEL = gemini-3-flash-preview
 AI_RELAY_STREAM_PATH = v1/chat/stream
 ICLOUD_CONTAINER_IDENTIFIER = iCloud.hanbin.AIChat
+
+// HMAC seed for offline activation codes. The watch verifier and the iOS
+// keygen read this same value so legacy + compact codes stay mutually valid.
+// Override in Config/Secrets.xcconfig for production. This dev default is a
+// strong generated value (not a placeholder) but is checked in, so it must
+// be rotated for a release build.
+AI_OFFLINE_ACTIVATION_SEED = 295d459ccdd8782f6528852bd948958967305170d84d00883ab6e09dc276c6dc
 SWIFT_ENABLE_EXPLICIT_MODULES = NO
 CLANG_ENABLE_EXPLICIT_MODULES = NO

@@ -3,17 +3,32 @@ import { creditsForUsage, maxOutputTokensForModel, rateForModel } from "@/lib/bi
 import { DEFAULT_POLICY } from "@/lib/billing/defaults";
 
 describe("rateForModel", () => {
+  const cheapest = DEFAULT_POLICY.rates.reduce((c, r) =>
+    r.outputCreditsPerMillion < c.outputCreditsPerMillion ? r : c,
+  );
+
   it("returns the exact match when present", () => {
     expect(rateForModel(DEFAULT_POLICY, "gemini-3-flash-preview").modelID).toBe("gemini-3-flash-preview");
     expect(rateForModel(DEFAULT_POLICY, "gemini-3.1-pro-preview").modelID).toBe("gemini-3.1-pro-preview");
   });
 
-  it("falls back to the first rate entry for unknown models", () => {
-    expect(rateForModel(DEFAULT_POLICY, "made-up-model").modelID).toBe(DEFAULT_POLICY.rates[0].modelID);
+  it("resolves a point release to its version+tier family rather than pro", () => {
+    // gemini-3.5-flash-preview has no exact entry but must map to the flash
+    // family — never to the (more expensive) pro rate.
+    const rate = rateForModel(DEFAULT_POLICY, "gemini-3.5-flash-preview");
+    expect(rate.modelID).toBe("gemini-3-flash-preview");
   });
 
-  it("falls back safely when modelID is undefined", () => {
-    expect(rateForModel(DEFAULT_POLICY, undefined).modelID).toBe(DEFAULT_POLICY.rates[0].modelID);
+  it("does NOT fall back to the most expensive pro rate for unknown models", () => {
+    const rate = rateForModel(DEFAULT_POLICY, "made-up-model");
+    expect(rate.modelID).toBe(cheapest.modelID);
+    expect(rate.outputCreditsPerMillion).toBeLessThanOrEqual(
+      DEFAULT_POLICY.rates[0].outputCreditsPerMillion,
+    );
+  });
+
+  it("falls back to the cheapest rate when modelID is undefined", () => {
+    expect(rateForModel(DEFAULT_POLICY, undefined).modelID).toBe(cheapest.modelID);
   });
 });
 

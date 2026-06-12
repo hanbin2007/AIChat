@@ -78,10 +78,7 @@ struct ContentView: View {
                     }
                 }
 
-                // Relay-only connectivity dot. Direct mode never renders
-                // this indicator; the compile-time gate is the runtime
-                // `backendMode == .relay` check on the parent store.
-                if navigationPath.isEmpty && chatStore.configuration.backendMode == .relay {
+                if navigationPath.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         RelayStatusDot()
                     }

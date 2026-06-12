@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { rateLimiter } from "@/lib/rate-limit";
-import { resetState } from "../helpers";
+import { clientIp, enforceAbuseLimit, rateLimiter } from "@/lib/rate-limit";
+import { makeRequest, resetState } from "../helpers";
 
 describe("rate limiter", () => {
   beforeEach(async () => {
@@ -38,5 +38,41 @@ describe("rate limiter", () => {
     limiter.check("a", 1);
     expect(limiter.check("a", 1).allowed).toBe(false);
     expect(limiter.check("b", 1).allowed).toBe(true);
+  });
+
+  describe("clientIp", () => {
+    it("reads the first x-forwarded-for hop", () => {
+      const req = makeRequest({ url: "http://t", headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" } });
+      expect(clientIp(req)).toBe("1.2.3.4");
+    });
+    it("falls back to x-real-ip then 'unknown'", () => {
+      expect(clientIp(makeRequest({ url: "http://t", headers: { "x-real-ip": "9.9.9.9" } }))).toBe("9.9.9.9");
+      expect(clientIp(makeRequest({ url: "http://t" }))).toBe("unknown");
+    });
+  });
+
+  describe("enforceAbuseLimit", () => {
+    it("returns null under the limit and a 429 over it", () => {
+      const mk = () => makeRequest({ url: "http://t", method: "POST", headers: { "x-forwarded-for": "10.0.0.1" } });
+      for (let i = 0; i < 2; i++) {
+        expect(enforceAbuseLimit(mk(), "bootstrap", "dev", 2)).toBeNull();
+      }
+      const blocked = enforceAbuseLimit(mk(), "bootstrap", "dev", 2);
+      expect(blocked).not.toBeNull();
+      expect(blocked!.status).toBe(429);
+      expect(blocked!.headers.get("Retry-After")).toBeTruthy();
+    });
+
+    it("throttles a rotating deviceID sharing one IP", () => {
+      const mkIp = (ip: string, device: string) => {
+        const req = makeRequest({ url: "http://t", method: "POST", headers: { "x-forwarded-for": ip } });
+        return enforceAbuseLimit(req, "bootstrap", device, 3);
+      };
+      // Same IP, rotating deviceIDs — the IP bucket still trips.
+      expect(mkIp("11.0.0.1", "a")).toBeNull();
+      expect(mkIp("11.0.0.1", "b")).toBeNull();
+      expect(mkIp("11.0.0.1", "c")).toBeNull();
+      expect(mkIp("11.0.0.1", "d")).not.toBeNull();
+    });
   });
 });
