@@ -126,7 +126,6 @@ platform :ios do
         teamID: APPLE_TEAM_ID
       },
       xcargs: archive_xcargs(build_number),
-      export_xcargs: xcodebuild_auth_args,
       clean: true,
       output_directory: File.join(PROJECT_ROOT, "build/fastlane"),
       output_name: "AIChat-#{build_number}",
