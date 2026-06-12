@@ -1,9 +1,11 @@
 require "open3"
 require "pathname"
+require "shellwords"
 
 default_platform(:ios)
 
 PROJECT_ROOT = File.expand_path("..", __dir__)
+APPLE_TEAM_ID = ENV["APPLE_TEAM_ID"] || "NCLY9ZGRMZ"
 TESTFLIGHT_EXTERNAL_GROUP = ENV["TESTFLIGHT_EXTERNAL_GROUP"] || "PBTestGroup"
 INFO_PLISTS = [
   "Config/AIChatContainer-Info.plist",
@@ -77,28 +79,20 @@ def plist_build_versions
   end
 end
 
-def set_plist_build_versions(build_number)
-  INFO_PLISTS.each do |path|
-    _stdout, stderr, status = Open3.capture3(
-      "/usr/libexec/PlistBuddy",
-      "-c",
-      "Set :CFBundleVersion #{build_number}",
-      path
-    )
-    UI.user_error!("Could not set CFBundleVersion in #{path}: #{stderr}") unless status.success?
-  end
+def xcodebuild_auth_args
+  [
+    "-allowProvisioningUpdates",
+    "-authenticationKeyPath", ENV.fetch("ASC_KEY_PATH"),
+    "-authenticationKeyID", ENV.fetch("ASC_KEY_ID"),
+    "-authenticationKeyIssuerID", ENV.fetch("ASC_ISSUER_ID")
+  ].shelljoin
 end
 
-def restore_plist_build_versions(values)
-  values.each do |path, value|
-    _stdout, stderr, status = Open3.capture3(
-      "/usr/libexec/PlistBuddy",
-      "-c",
-      "Set :CFBundleVersion #{value}",
-      path
-    )
-    UI.error("Could not restore CFBundleVersion in #{path}: #{stderr}") unless status.success?
-  end
+def archive_xcargs(build_number)
+  [
+    "APP_BUILD_VERSION=#{build_number}",
+    xcodebuild_auth_args
+  ].join(" ")
 end
 
 platform :ios do
@@ -113,7 +107,6 @@ platform :ios do
     preflight!(options[:allow_dirty].to_s == "true")
     changelog = release_notes(options)
     build_number = release_build_number(options)
-    original_versions = plist_build_versions
 
     app_store_connect_api_key(
       key_id: ENV.fetch("ASC_KEY_ID"),
@@ -123,63 +116,63 @@ platform :ios do
       in_house: false
     )
 
-    begin
-      set_plist_build_versions(build_number)
+    build_app(
+      project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
+      scheme: "AIChat",
+      configuration: "Release",
+      export_method: "app-store-connect",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: APPLE_TEAM_ID
+      },
+      xcargs: archive_xcargs(build_number),
+      export_xcargs: xcodebuild_auth_args,
+      clean: true,
+      output_directory: File.join(PROJECT_ROOT, "build/fastlane"),
+      output_name: "AIChat-#{build_number}",
+      silent: false
+    )
 
-      build_app(
-        project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
-        scheme: "AIChat",
-        configuration: "Release",
-        export_method: "app-store",
-        clean: true,
-        output_directory: File.join(PROJECT_ROOT, "build/fastlane"),
-        output_name: "AIChat-#{build_number}",
-        silent: false
-      )
+    # Upload + wait for processing + submit for Beta App Review + distribute to external group.
+    upload_to_testflight(
+      distribute_external: true,
+      groups: [TESTFLIGHT_EXTERNAL_GROUP],
+      changelog: changelog,
+      notify_external_testers: true,
+      skip_waiting_for_build_processing: false,
+      reject_build_waiting_for_review: true,
 
-      # Upload + wait for processing + submit for Beta App Review + distribute to external group.
-      upload_to_testflight(
-        distribute_external: true,
-        groups: [TESTFLIGHT_EXTERNAL_GROUP],
-        changelog: changelog,
-        notify_external_testers: true,
-        skip_waiting_for_build_processing: false,
-        reject_build_waiting_for_review: true,
+      # Export compliance — HTTPS-only via URLSession is exempt encryption.
+      # Without this Apple gates every build behind a manual "uses encryption?" question.
+      uses_non_exempt_encryption: false,
 
-        # Export compliance — HTTPS-only via URLSession is exempt encryption.
-        # Without this Apple gates every build behind a manual "uses encryption?" question.
-        uses_non_exempt_encryption: false,
+      # Beta App Review info — shown to Apple's reviewer on the first build of a new
+      # version string. Subsequent builds same version auto-approve without review.
+      beta_app_review_info: {
+        contact_email: "thebestzhq@outlook.com",
+        contact_first_name: "Hanbin",
+        contact_last_name: "Zhang",
+        contact_phone: "+86 13358169179",
+        demo_account_required: false,
+        notes: <<~NOTES
+          AI chat app for Apple Watch. Primary target is the watchOS app; iOS companion is for activation key registration only. Uses the production relay for LLM requests. No special test account needed.
 
-        # Beta App Review info — shown to Apple's reviewer on the first build of a new
-        # version string. Subsequent builds same version auto-approve without review.
-        beta_app_review_info: {
-          contact_email: "thebestzhq@outlook.com",
-          contact_first_name: "Hanbin",
-          contact_last_name: "Zhang",
-          contact_phone: "+86 13358169179",
-          demo_account_required: false,
-          notes: <<~NOTES
-            AI chat app for Apple Watch. Primary target is the watchOS app; iOS companion is for activation key registration only. Uses the production relay for LLM requests. No special test account needed.
+          Changes in this build:
+          #{changelog}
+        NOTES
+      },
 
-            Changes in this build:
-            #{changelog}
-          NOTES
+      # Localized What-to-Test text shown inside TestFlight app.
+      localized_build_info: {
+        "default" => {
+          whats_new: changelog
         },
-
-        # Localized What-to-Test text shown inside TestFlight app.
-        localized_build_info: {
-          "default" => {
-            whats_new: changelog
-          },
-          "zh-Hans" => {
-            whats_new: changelog
-          }
+        "zh-Hans" => {
+          whats_new: changelog
         }
-      )
+      }
+    )
 
-      UI.success("Uploaded AIChat build #{build_number} to TestFlight group #{TESTFLIGHT_EXTERNAL_GROUP}.")
-    ensure
-      restore_plist_build_versions(original_versions)
-    end
+    UI.success("Uploaded AIChat build #{build_number} to TestFlight group #{TESTFLIGHT_EXTERNAL_GROUP}.")
   end
 end
