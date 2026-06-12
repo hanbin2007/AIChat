@@ -237,10 +237,31 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     func resolvedRelayBearerToken(rootURL: URL?) -> String? {
-        RelayAccessRepository.storedRelayKey(
+        if let storedKey = RelayAccessRepository.storedRelayKey(
             appGroupIdentifier: appGroupIdentifier,
             rootURL: rootURL
+        ) {
+            return storedKey
+        }
+
+        let entitlementRootURL = BillingActivationStoreSupport.defaultRootURL(
+            fileManager: .default,
+            appGroupIdentifier: appGroupIdentifier,
+            overrideRootURL: rootURL
         )
+        guard let state = EntitlementCache(directory: entitlementRootURL).load(),
+              let keyValue = state.account?.keyValue.nonEmptyTrimmed
+        else { return nil }
+
+        let decision = EntitlementEngine.derive(
+            state,
+            now: Date(),
+            platformConfigured: isAIConfigured
+        )
+        if case .ready = decision.capability {
+            return keyValue
+        }
+        return nil
     }
 
     private var hasValidRelayBaseURL: Bool {

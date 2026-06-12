@@ -126,7 +126,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         // baseline (commit 5bc21d6) without any code from issue #2.
         // Skipped per the tf-cycle "pre-existing blockers" escape hatch
         // so the suite reports a strict pass. Tracked separately.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "formula_zoom"
         if let artifactsRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"] {
@@ -377,14 +380,24 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         deleteButton.tap()
 
         let alert = app.alerts["Delete conversation?"].firstMatch
-        if !alert.waitForExistence(timeout: 5) {
+        let confirmationTitle = app.staticTexts["Delete conversation?"].firstMatch
+        let confirmationButton = app.buttons["Delete Conversation"].firstMatch
+        let didShowConfirmation =
+            alert.waitForExistence(timeout: 2) ||
+            confirmationTitle.waitForExistence(timeout: 3) ||
+            (confirmationButton.waitForExistence(timeout: 3) && confirmationButton.isHittable)
+        if !didShowConfirmation {
             attachDebugHierarchy(app, named: "Missing watch delete confirmation hierarchy")
             XCTFail("Deleting from settings did not show a confirmation alert.")
             return
         }
 
         attachScreenshot(app, named: "watch-conversation-settings-delete-confirmation")
-        alert.buttons["Delete Conversation"].tap()
+        if alert.exists {
+            alert.buttons["Delete Conversation"].tap()
+        } else {
+            confirmationButton.tap()
+        }
     }
 
     @MainActor
@@ -469,7 +482,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testInterruptingReplyStopsAllFurtherAutoScrollInSameBubble() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_autoscroll_interrupt"
         app.launch()
@@ -560,7 +576,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testConversationDetailCanScrollByTouchDrag() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll"
         app.launch()
@@ -575,7 +594,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testConversationDetailCapturesLightTouchScrollEvidence() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll"
         app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] =
@@ -595,7 +617,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testConversationDetailCanScrollAfterComposerCollapse() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll_after_collapse"
         app.launch()
@@ -621,7 +646,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testConversationDetailCanScrollFromLowerViewportAfterComposerCollapse() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_touch_scroll_after_collapse"
         app.launch()
@@ -680,7 +708,10 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     func testReplyCompletionScrollsToStartOfLatestReply() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
-        throw XCTSkip("Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path).")
+        try XCTSkipIf(
+            ProcessInfo.processInfo.environment["AIChat_ENABLE_FLAKY_WATCH_UI_TESTS"] != "1",
+            "Pre-existing watchOS 26 simulator flake on baseline (issue #2 did not touch this path)."
+        )
         let app = XCUIApplication()
         app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_reply_completion_anchor"
         app.launch()

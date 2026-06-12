@@ -147,6 +147,7 @@ struct CompanionConversationListView: View {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("全局设置")
+                .accessibilityIdentifier("companion.global-settings.open")
 
                 Button {
                     isShowingFavorites = true

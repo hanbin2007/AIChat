@@ -73,4 +73,61 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
             status.key?.keyValue
         )
     }
+
+    @MainActor
+    func testRelayBearerTokenFallsBackToReadyEntitlementSnapshot() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let snapshot = makeManagedRelaySnapshot()
+        let state = EntitlementState(
+            account: snapshot,
+            lastVerifiedAt: Date(),
+            localSpend: 0,
+            pending: nil,
+            lastError: nil
+        )
+        try EntitlementCache(directory: relayAccessRootURL).save(state)
+
+        XCTAssertEqual(
+            configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL),
+            snapshot.keyValue
+        )
+    }
+
+    @MainActor
+    func testRelayBearerTokenDoesNotUseUnavailableEntitlementSnapshot() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let snapshot = makeManagedRelaySnapshot(
+            creditExpiresAt: Date().addingTimeInterval(-60)
+        )
+        let state = EntitlementState(
+            account: snapshot,
+            lastVerifiedAt: Date(),
+            localSpend: 0,
+            pending: nil,
+            lastError: nil
+        )
+        try EntitlementCache(directory: relayAccessRootURL).save(state)
+
+        XCTAssertNil(configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL))
+    }
 }

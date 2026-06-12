@@ -22,7 +22,7 @@ final class AIChat_iOS_AppUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         app.launch()
 
-        let settingsButton = app.buttons["全局设置"].firstMatch
+        let settingsButton = app.buttons["companion.global-settings.open"].firstMatch
         if !settingsButton.waitForExistence(timeout: 10) {
             attachDebugHierarchy(app, named: "Missing companion global settings button hierarchy")
             XCTFail("The companion global settings button did not appear.")

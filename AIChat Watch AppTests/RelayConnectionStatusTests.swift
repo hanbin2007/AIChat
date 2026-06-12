@@ -207,13 +207,10 @@ final class RelayConnectionStatusTests: XCTestCase {
 
     func testRelayTranscriptionUsesInjectedCredentialProvider() async throws {
         let configuration = Self.makeRelayConfiguration()
-        let recorder = RelayRequestRecorder()
-        let session = Self.makeRecordingSession(recorder: recorder)
-        var service = RelayTranscriptionService(
+        let service = RelayTranscriptionService(
             configuration: configuration,
             credentialProvider: StaticRelayCredentialProvider(token: "rk_provider_token")
         )
-        service.session = session
 
         let audio = try ChatAttachment.makeRecordedAudio(
             from: Data([0x01, 0x02, 0x03]),
@@ -226,13 +223,13 @@ final class RelayConnectionStatusTests: XCTestCase {
             messages: [ChatMessage(role: .user, text: "transcribe")]
         )
 
-        _ = try await service.transcribeUserAudio(
-            audio,
+        let request = try await service.makeTranscriptionRequest(
+            for: audio,
             in: conversation,
             using: VoiceTranscriptionConfiguration(model: "gemini-3-flash-preview")
         )
 
-        XCTAssertEqual(recorder.authorizationHeader, "Bearer rk_provider_token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer rk_provider_token")
     }
 
     func testRelayChatRequestUsesInjectedCredentialProvider() throws {
@@ -267,16 +264,6 @@ final class RelayConnectionStatusTests: XCTestCase {
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
-    }
-
-    private static func makeRecordingSession(recorder: RelayRequestRecorder) -> URLSession {
-        RecordingURLProtocol.register(recorder)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [RecordingURLProtocol.self]
-        configuration.httpAdditionalHeaders = [
-            RecordingURLProtocol.recorderHeader: recorder.identifier.uuidString
-        ]
-        return URLSession(configuration: configuration)
     }
 
     @MainActor
@@ -378,68 +365,5 @@ private struct StaticRelayCredentialProvider: RelayCredentialProviding {
 
     func relayBearerToken() -> String? {
         token
-    }
-}
-
-private final class RelayRequestRecorder: @unchecked Sendable {
-    let identifier = UUID()
-    private let lock = NSLock()
-    private var capturedAuthorizationHeader: String?
-
-    var authorizationHeader: String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return capturedAuthorizationHeader
-    }
-
-    func record(_ request: URLRequest) {
-        lock.lock()
-        capturedAuthorizationHeader = request.value(forHTTPHeaderField: "Authorization")
-        lock.unlock()
-    }
-}
-
-private final class RecordingURLProtocol: URLProtocol {
-    static let recorderHeader = "X-AIChat-Test-Recorder"
-    private static let lock = NSLock()
-    private static var recorders: [String: RelayRequestRecorder] = [:]
-
-    override class func canInit(with request: URLRequest) -> Bool {
-        request.value(forHTTPHeaderField: recorderHeader) != nil
-    }
-
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        if let recorderID = request.value(forHTTPHeaderField: Self.recorderHeader),
-           let recorder = Self.recorder(for: recorderID) {
-            recorder.record(request)
-        }
-
-        let response = HTTPURLResponse(
-            url: request.url ?? URL(string: "https://relay.example.test")!,
-            statusCode: 200,
-            httpVersion: "HTTP/1.1",
-            headerFields: ["Content-Type": "application/json"]
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"text":"ok"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-
-    static func register(_ recorder: RelayRequestRecorder) {
-        lock.lock()
-        recorders[recorder.identifier.uuidString] = recorder
-        lock.unlock()
-    }
-
-    private static func recorder(for identifier: String) -> RelayRequestRecorder? {
-        lock.lock()
-        defer { lock.unlock() }
-        return recorders[identifier]
     }
 }

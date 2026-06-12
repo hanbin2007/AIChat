@@ -184,29 +184,10 @@ nonisolated struct RelayTranscriptionService: AITranscriptionService {
             throw VoiceTranscriptionError.invalidAudio
         }
 
-        guard let url = configuration.relayTranscriptionURL,
-              let bearerToken = resolvedCredentialProvider.relayBearerToken()
-        else {
-            throw RelayAPIError.missingConfiguration
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-
-        let prompt = VoiceTranscriptionPromptBuilder.prompt(
-            for: conversation,
-            customPrompt: transcriptionConfiguration.customPrompt,
-            includesContext: transcriptionConfiguration.includesContext,
-            existingDraftText: transcriptionConfiguration.existingDraftText,
-            maxContextMessages: maxContextMessages,
-            maxContextCharacters: maxContextCharacters
-        )
-        request.httpBody = try await makeRelayRequestData(
-            prompt: prompt,
-            audioAttachment: audioAttachment,
-            model: transcriptionConfiguration.model
+        let request = try await makeTranscriptionRequest(
+            for: audioAttachment,
+            in: conversation,
+            using: transcriptionConfiguration
         )
 
         let relaySession = makeRelayURLSession(
@@ -256,6 +237,38 @@ nonisolated struct RelayTranscriptionService: AITranscriptionService {
             text: transcript,
             model: model ?? fallbackModel
         )
+    }
+
+    func makeTranscriptionRequest(
+        for audioAttachment: ChatAttachment,
+        in conversation: ConversationThread,
+        using transcriptionConfiguration: VoiceTranscriptionConfiguration
+    ) async throws -> URLRequest {
+        guard let url = configuration.relayTranscriptionURL,
+              let bearerToken = resolvedCredentialProvider.relayBearerToken()
+        else {
+            throw RelayAPIError.missingConfiguration
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+
+        let prompt = VoiceTranscriptionPromptBuilder.prompt(
+            for: conversation,
+            customPrompt: transcriptionConfiguration.customPrompt,
+            includesContext: transcriptionConfiguration.includesContext,
+            existingDraftText: transcriptionConfiguration.existingDraftText,
+            maxContextMessages: maxContextMessages,
+            maxContextCharacters: maxContextCharacters
+        )
+        request.httpBody = try await makeRelayRequestData(
+            prompt: prompt,
+            audioAttachment: audioAttachment,
+            model: transcriptionConfiguration.model
+        )
+        return request
     }
 
     func makeRelayRequest(

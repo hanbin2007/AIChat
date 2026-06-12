@@ -200,6 +200,7 @@ final class StreamingTextPacer: ObservableObject {
     }
 
     private func revealFully() {
+        reserveRevealedCapacityForPendingBuffers()
         if answerBuffer.pendingCount > 0 {
             appendRevealed(toAnswer: answerBuffer.pendingCount)
         }
@@ -230,6 +231,7 @@ final class StreamingTextPacer: ObservableObject {
     #if DEBUG
     func revealSynchronouslyForTesting(maxChunkSize: Int) {
         let chunkSize = max(maxChunkSize, 1)
+        reserveRevealedCapacityForPendingBuffers()
         while hasBufferPending {
             let thoughtChunk = min(thoughtBuffer.pendingCount, chunkSize)
             if thoughtChunk > 0 {
@@ -243,6 +245,15 @@ final class StreamingTextPacer: ObservableObject {
         }
     }
     #endif
+
+    private func reserveRevealedCapacityForPendingBuffers() {
+        if answerBuffer.pendingCount > 0 {
+            revealedText.reserveCapacity(revealedText.count + answerBuffer.pendingCount)
+        }
+        if thoughtBuffer.pendingCount > 0 {
+            revealedThoughtSummary.reserveCapacity(revealedThoughtSummary.count + thoughtBuffer.pendingCount)
+        }
+    }
 }
 
 private struct GraphemeRevealBuffer {
