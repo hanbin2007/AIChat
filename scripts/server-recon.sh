@@ -6,8 +6,8 @@
 # or just copy this whole file, paste into a shell, and capture stdout.
 #
 # Send the output back so I can choose between nginx / caddy / traefik /
-# whatever's already terminating TLS on this box, and pick a non-colliding
-# path for the chisel WSS endpoint.
+# whatever's already terminating TLS on this box, and inspect the relay
+# runtime without mutating the server.
 
 set -u
 echo "================ host & os ================"

@@ -1,26 +1,29 @@
 import { requireAdmin } from "@/lib/auth/admin-guard";
-import { settingsStore } from "@/lib/store/settings-store";
-import { auditLog } from "@/lib/store/audit-log";
+import { settingsStore, type SettingsSnapshot } from "@/lib/store/settings-store";
+import { auditLog, sanitizeAuditPayload } from "@/lib/store/audit-log";
 import { jsonResponse } from "@/lib/api/error";
 
 export const runtime = "nodejs";
 
-function mask(value: string | undefined, keep = 6): string {
-  if (!value) return "";
-  if (value.length <= keep) return "••••••";
-  return `••••••${value.slice(-keep)}`;
+function publicSettingsSnapshot(snapshot: SettingsSnapshot): SettingsSnapshot {
+  return {
+    ...snapshot,
+    adminUsers: snapshot.adminUsers.map((user) => ({
+      ...user,
+      passwordHash: "[redacted]",
+    })),
+    adminTokens: snapshot.adminTokens.map((token) => ({
+      ...token,
+      value: "[redacted]",
+    })),
+  };
 }
 
 export async function GET() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
   const snapshot = await settingsStore().get();
-  const redacted = {
-    ...snapshot,
-    adminUsers: snapshot.adminUsers.map((u) => ({ ...u, passwordHash: "[redacted]" })),
-    adminTokens: snapshot.adminTokens.map((t) => ({ ...t, value: mask(t.value) })),
-  };
-  return jsonResponse(200, redacted);
+  return jsonResponse(200, publicSettingsSnapshot(snapshot));
 }
 
 export async function PATCH(req: Request) {

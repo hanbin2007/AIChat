@@ -10,6 +10,7 @@ import ListItemButton from "@mui/material/ListItemButton";
 import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Avatar from "@mui/material/Avatar";
+import Box from "@mui/material/Box";
 import { Stack } from "@/components/lib/stack";
 import Typography from "@mui/material/Typography";
 import CheckRounded from "@mui/icons-material/CheckRounded";
@@ -59,13 +60,9 @@ export function LaunchChecklist({ items }: Props) {
       />
       <CardContent sx={{ pt: 0 }}>
         <List disablePadding>
-          {items.map((item, i) => (
-            <ListItem key={item.id} disablePadding>
-              <ListItemButton
-                component={item.href ? Link : "div"}
-                href={item.href ?? "#"}
-                sx={{ borderRadius: 1, py: 1 }}
-              >
+          {items.map((item, i) => {
+            const content = (
+              <>
                 <ListItemIcon sx={{ minWidth: 44 }}>
                   <Avatar
                     sx={{
@@ -95,9 +92,23 @@ export function LaunchChecklist({ items }: Props) {
                     ) : undefined
                   }
                 />
-              </ListItemButton>
-            </ListItem>
-          ))}
+              </>
+            );
+
+            return (
+              <ListItem key={item.id} disablePadding>
+                {item.href ? (
+                  <ListItemButton component={Link} href={item.href} sx={{ borderRadius: 1, py: 1 }}>
+                    {content}
+                  </ListItemButton>
+                ) : (
+                  <Box sx={{ display: "flex", alignItems: "center", width: "100%", px: 2, py: 1 }}>
+                    {content}
+                  </Box>
+                )}
+              </ListItem>
+            );
+          })}
         </List>
       </CardContent>
     </Card>

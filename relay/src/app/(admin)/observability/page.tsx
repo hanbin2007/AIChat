@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
+import dynamic from "next/dynamic";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -14,13 +16,19 @@ import ToggleButton from "@mui/material/ToggleButton";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import DownloadRounded from "@mui/icons-material/DownloadRounded";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import type { DataGridProps, GridColDef } from "@mui/x-data-grid";
 import { useSnackbar } from "@/components/snackbar-provider";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { AuditEntry } from "@/lib/store/audit-log";
 
 type TabKey = "usage" | "audit" | "diag";
 type Range = "1h" | "24h" | "7d" | "30d";
+type LoadState = "loading" | "ready" | "error";
+
+const DataGrid = dynamic(() => import("@mui/x-data-grid").then((mod) => mod.DataGrid), {
+  ssr: false,
+  loading: () => <StatusPanel message="正在加载审计表格…" />,
+}) as ComponentType<DataGridProps<AuditEntry>>;
 
 const RANGE_MS: Record<Range, number> = {
   "1h": 3_600_000,
@@ -28,6 +36,46 @@ const RANGE_MS: Record<Range, number> = {
   "7d": 7 * 86_400_000,
   "30d": 30 * 86_400_000,
 };
+const REDACTED = "[redacted]";
+
+function shouldRedactField(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized.includes("token") || normalized.includes("key") || normalized.includes("password");
+}
+
+function sanitizeExportPayload<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => sanitizeExportPayload(item)) as T;
+  if (!value || typeof value !== "object") return value;
+
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "adminTokens" && Array.isArray(item)) {
+      output[key] = item.map((token) => {
+        if (!token || typeof token !== "object" || Array.isArray(token)) return sanitizeExportPayload(token);
+        return { ...(sanitizeExportPayload(token) as Record<string, unknown>), value: REDACTED };
+      });
+    } else if (key === "value" && "prefix" in (value as Record<string, unknown>) && "scope" in (value as Record<string, unknown>)) {
+      output[key] = REDACTED;
+    } else if (shouldRedactField(key)) {
+      output[key] = REDACTED;
+    } else {
+      output[key] = sanitizeExportPayload(item);
+    }
+  }
+  return output as T;
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(sanitizeExportPayload(payload), null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function ObservabilityPage() {
   const snackbar = useSnackbar();
@@ -35,6 +83,8 @@ export default function ObservabilityPage() {
   const [range, setRange] = useState<Range>("24h");
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [activityState, setActivityState] = useState<LoadState>("loading");
+  const [auditState, setAuditState] = useState<LoadState>("loading");
 
   const load = useCallback(async () => {
     try {
@@ -45,12 +95,20 @@ export default function ObservabilityPage() {
       if (r.ok) {
         const data = (await r.json()) as { requests: ActivityEntry[] };
         setActivity(data.requests);
+        setActivityState("ready");
+      } else {
+        setActivityState("error");
       }
       if (a.ok) {
         const data = (await a.json()) as { entries: AuditEntry[] };
         setAudit(data.entries);
+        setAuditState("ready");
+      } else {
+        setAuditState("error");
       }
     } catch {
+      setActivityState("error");
+      setAuditState("error");
       snackbar.push({ message: "拉取观测数据失败", severity: "error" });
     }
   }, [snackbar]);
@@ -132,7 +190,7 @@ export default function ObservabilityPage() {
     <>
       <Card>
         <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-          <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)}>
+          <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)} variant="scrollable">
             <Tab value="usage" label="用量" />
             <Tab value="audit" label="审计日志" />
             <Tab value="diag" label="诊断" />
@@ -147,6 +205,7 @@ export default function ObservabilityPage() {
                   {buckets.total} 条请求
                 </Typography>
                 <ToggleButtonGroup
+                  aria-label="时间范围"
                   exclusive
                   size="small"
                   value={range}
@@ -172,6 +231,10 @@ export default function ObservabilityPage() {
                 <ChartCard title="Tokens" values={buckets.tokens} />
                 <ChartCard title="Credits" values={buckets.credits} />
               </Box>
+
+              {activityState === "error" ? (
+                <StatusPanel message="请求日志加载失败，图表可能不完整。" actionLabel="重试" onAction={() => void load()} />
+              ) : null}
 
               <Card variant="outlined">
                 <CardHeader title={`错误分布 · ${range}`} />
@@ -199,13 +262,19 @@ export default function ObservabilityPage() {
 
           {tab === "audit" ? (
             <Box sx={{ height: 600 }}>
-              <DataGrid<AuditEntry>
+              {auditState === "loading" ? (
+                <StatusPanel message="正在加载审计日志…" />
+              ) : auditState === "error" ? (
+                <StatusPanel message="审计日志加载失败" actionLabel="重试" onAction={() => void load()} />
+              ) : (
+              <DataGrid
                 rows={audit}
                 columns={auditCols}
                 getRowId={(r) => r.id}
                 density="compact"
                 sx={{ border: "none" }}
               />
+              )}
             </Box>
           ) : null}
 
@@ -218,18 +287,14 @@ export default function ObservabilityPage() {
                 <Button
                   startIcon={<DownloadRounded />}
                   variant="outlined"
-                  component="a"
-                  href="/api/admin/requests"
-                  download="relay-requests.json"
+                  onClick={() => downloadJson("relay-requests.json", { requests: activity })}
                 >
                   请求日志 JSON
                 </Button>
                 <Button
                   startIcon={<DownloadRounded />}
                   variant="outlined"
-                  component="a"
-                  href="/api/admin/audit"
-                  download="relay-audit.json"
+                  onClick={() => downloadJson("relay-audit.json", { entries: audit })}
                 >
                   审计 JSON
                 </Button>
@@ -248,6 +313,29 @@ export default function ObservabilityPage() {
         </Box>
       </Card>
     </>
+  );
+}
+
+function StatusPanel({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <Box sx={{ minHeight: 180, display: "grid", placeItems: "center", p: 3, textAlign: "center" }}>
+      <Stack spacing={1.5} alignItems="center">
+        <Typography color="text.secondary">{message}</Typography>
+        {actionLabel && onAction ? (
+          <Button variant="outlined" size="small" onClick={onAction}>
+            {actionLabel}
+          </Button>
+        ) : null}
+      </Stack>
+    </Box>
   );
 }
 

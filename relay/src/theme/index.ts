@@ -47,10 +47,10 @@ export const theme = createTheme({
   shape: { borderRadius: 8 },
   typography: {
     fontFamily:
-      'var(--font-body), "Noto Sans SC", "PingFang SC", system-ui, sans-serif',
-    h1: { fontWeight: 700, letterSpacing: "-0.03em" },
-    h2: { fontWeight: 700, letterSpacing: "-0.02em" },
-    h3: { fontWeight: 700, letterSpacing: "-0.02em" },
+      '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    h1: { fontWeight: 700, letterSpacing: 0 },
+    h2: { fontWeight: 700, letterSpacing: 0 },
+    h3: { fontWeight: 700, letterSpacing: 0 },
     h4: { fontWeight: 700 },
     h5: { fontWeight: 700 },
     h6: { fontWeight: 700 },
@@ -73,6 +73,9 @@ export const theme = createTheme({
               0.1,
             )}, transparent 30%), linear-gradient(180deg, #131722 0%, #0f1218 100%)`,
           }),
+          [themeParam.breakpoints.down("sm")]: {
+            backgroundAttachment: "scroll",
+          },
         },
       }),
     },

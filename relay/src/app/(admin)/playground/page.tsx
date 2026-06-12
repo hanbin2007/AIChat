@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
 import Tooltip from "@mui/material/Tooltip";
 import Select from "@mui/material/Select";
 import MenuItem from "@mui/material/MenuItem";
@@ -23,6 +24,7 @@ import AccordionDetails from "@mui/material/AccordionDetails";
 import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
 import VisibilityOffRounded from "@mui/icons-material/VisibilityOffRounded";
 import SendRounded from "@mui/icons-material/SendRounded";
+import StopRounded from "@mui/icons-material/StopRounded";
 import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import { Markdown } from "@/components/markdown";
 import { useSetPageActions } from "@/components/shell/page-meta";
@@ -46,6 +48,13 @@ interface RawEvent {
 }
 
 const INTENSITIES: Intensity[] = ["fast", "balanced", "deep", "extreme"];
+const STREAM_INTERRUPTED_ERROR = "流已断开，未收到完成或错误事件。";
+const STREAM_CANCELLED_ERROR = "请求已取消。";
+
+function bearerHeaderValue(raw: string): string {
+  const value = raw.trim().replace(/^(Bearer\s+)+/i, "").trim();
+  return value ? `Bearer ${value}` : "";
+}
 
 export default function PlaygroundPage() {
   const [model, setModel] = useState(DEFAULT_MODELS[0]?.id ?? "");
@@ -53,13 +62,18 @@ export default function PlaygroundPage() {
   const [search, setSearch] = useState(false);
   const [code, setCode] = useState(false);
   const [token, setToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
   const [system, setSystem] = useState("");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [events, setEvents] = useState<RawEvent[]>([]);
-  const [showRaw, setShowRaw] = useState(true);
+  const [showRaw, setShowRaw] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -81,30 +95,35 @@ export default function PlaygroundPage() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const setAssistantError = (error: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsg.id ? { ...m, error } : m,
+        ),
+      );
+    };
 
     try {
+      const authorization = bearerHeaderValue(token);
       const res = await fetch("/api/v1/chat/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(authorization ? { Authorization: authorization } : {}),
         },
         signal: controller.signal,
         body: JSON.stringify({
           model,
-          thinking: { intensity },
-          tools: { search, codeExecution: code },
-          system: system || undefined,
-          messages: [...messages.filter((m) => m.role === "user").map((m) => ({ role: "user", content: m.text })), { role: "user", content: text }],
+          thinkingIntensity: intensity,
+          usesGoogleSearch: search,
+          usesCodeExecution: code,
+          systemPrompt: system || undefined,
+          messages: [...messages.filter((m) => m.role === "user").map((m) => ({ role: "user", text: m.text })), { role: "user", text }],
         }),
       });
       if (!res.ok || !res.body) {
         const errText = await res.text().catch(() => "");
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id ? { ...m, error: errText || `HTTP ${res.status}` } : m,
-          ),
-        );
+        setAssistantError(errText || `HTTP ${res.status}`);
         return;
       }
 
@@ -113,38 +132,57 @@ export default function PlaygroundPage() {
       let buffer = "";
       let currentEvent = "";
       let currentData = "";
+      let sawTerminalEvent = false;
       const flushEvent = (eventName: string, dataLine: string) => {
         const at = new Date().toISOString();
         setEvents((prev) => [...prev, { at, type: eventName, data: dataLine }].slice(-100));
+        let parsed: Record<string, unknown> | null = null;
         try {
-          const parsed = JSON.parse(dataLine) as { delta?: string; reason?: string };
-          if (eventName === "answer_delta" && parsed.delta) {
+          parsed = JSON.parse(dataLine) as Record<string, unknown>;
+        } catch {
+          parsed = null;
+        }
+
+        if (eventName === "answer_delta" && typeof parsed?.text === "string") {
+          const chunkText = parsed.text;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, text: m.text + chunkText } : m,
+            ),
+          );
+        } else if (eventName === "thought_delta" && typeof parsed?.text === "string") {
+          const chunkText = parsed.text;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, thought: (m.thought ?? "") + chunkText } : m,
+            ),
+          );
+        } else if (eventName === "done") {
+          sawTerminalEvent = true;
+          const finishReason = typeof parsed?.finishReason === "string" ? parsed.finishReason : "";
+          if (finishReason) {
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, text: m.text + parsed.delta } : m,
-              ),
-            );
-          } else if (eventName === "thought_delta" && parsed.delta) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, thought: (m.thought ?? "") + parsed.delta } : m,
-              ),
-            );
-          } else if (eventName === "done" && parsed.reason) {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, finishReason: parsed.reason } : m,
-              ),
-            );
-          } else if (eventName === "error") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, error: dataLine } : m,
+                m.id === assistantMsg.id ? { ...m, finishReason } : m,
               ),
             );
           }
-        } catch {
-          /* ignore */
+        } else if (eventName === "error") {
+          sawTerminalEvent = true;
+          const message = typeof parsed?.message === "string" ? parsed.message : dataLine;
+          setAssistantError(message || "流返回错误。");
+        }
+      };
+      const processLine = (rawLine: string) => {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (line === "") {
+          if (currentEvent || currentData) flushEvent(currentEvent || "message", currentData);
+          currentEvent = "";
+          currentData = "";
+        } else if (line.startsWith("event:")) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          currentData += (currentData ? "\n" : "") + line.slice(5).trimStart();
         }
       };
 
@@ -154,26 +192,20 @@ export default function PlaygroundPage() {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line === "") {
-            if (currentEvent || currentData) flushEvent(currentEvent || "message", currentData);
-            currentEvent = "";
-            currentData = "";
-          } else if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            currentData += (currentData ? "\n" : "") + line.slice(5).trimStart();
-          }
-        }
+        for (const line of lines) processLine(line);
+      }
+      buffer += decoder.decode();
+      if (buffer) {
+        for (const line of buffer.split("\n")) processLine(line);
+      }
+      if (currentEvent || currentData) {
+        flushEvent(currentEvent || "message", currentData);
+      }
+      if (!sawTerminalEvent) {
+        setAssistantError(controller.signal.aborted ? STREAM_CANCELLED_ERROR : STREAM_INTERRUPTED_ERROR);
       }
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id ? { ...m, error: String(err) } : m,
-          ),
-        );
-      }
+      setAssistantError((err as Error).name === "AbortError" ? STREAM_CANCELLED_ERROR : String(err));
     } finally {
       abortRef.current = null;
       setStreaming(false);
@@ -196,10 +228,18 @@ export default function PlaygroundPage() {
           display: "grid",
           gridTemplateColumns: { xs: "1fr", md: showRaw ? "1fr 360px" : "1fr" },
           gap: 2,
-          height: "calc(100vh - 140px)",
+          height: { xs: "auto", md: "calc(100dvh - 140px)" },
+          minHeight: { xs: "auto", md: 0 },
         }}
       >
-        <Card sx={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <Card
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            minHeight: { xs: "calc(100dvh - 112px)", md: 0 },
+          }}
+        >
           <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
             <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} alignItems={{ lg: "center" }}>
               <FormControl size="small" sx={{ minWidth: 220 }}>
@@ -249,9 +289,27 @@ export default function PlaygroundPage() {
               <TextField
                 label="Authorization (可选)"
                 size="small"
+                type={showToken ? "text" : "password"}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="Bearer xxx"
+                placeholder="relay-token 或 Bearer relay-token"
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Tooltip title={showToken ? "隐藏 Authorization" : "显示 Authorization"}>
+                          <IconButton
+                            aria-label={showToken ? "隐藏 Authorization" : "显示 Authorization"}
+                            edge="end"
+                            onClick={() => setShowToken((v) => !v)}
+                          >
+                            {showToken ? <VisibilityOffRounded /> : <VisibilityRounded />}
+                          </IconButton>
+                        </Tooltip>
+                      </InputAdornment>
+                    ),
+                  },
+                }}
                 fullWidth
               />
               <TextField
@@ -335,14 +393,27 @@ export default function PlaygroundPage() {
                 }}
                 fullWidth
               />
-              <Button
-                variant="contained"
-                disabled={!draft.trim() || streaming}
-                onClick={() => void send()}
-                startIcon={<SendRounded />}
-              >
-                {streaming ? "发送中…" : "发送"}
-              </Button>
+              {streaming ? (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={cancel}
+                  startIcon={<StopRounded />}
+                  sx={{ flexShrink: 0 }}
+                >
+                  取消
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  disabled={!draft.trim()}
+                  onClick={() => void send()}
+                  startIcon={<SendRounded />}
+                  sx={{ flexShrink: 0 }}
+                >
+                  发送
+                </Button>
+              )}
             </Stack>
           </Box>
         </Card>

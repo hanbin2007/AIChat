@@ -145,6 +145,27 @@ describe("BillingStore", () => {
       expect(after.policy.creditMultiplier).toBe(2);
       expect(after.plans).toHaveLength(newPlans.length);
     });
+
+    it("listAll exposes processed transactions for the admin billing page", async () => {
+      await billingStore().submitPurchase({
+        signedTransactionInfo: forgeJws({
+          transactionId: "tx-admin-list",
+          originalTransactionId: "tx-admin-list",
+          productId: "com.aichat.relay.flash.monthly",
+          environment: "Sandbox",
+        }),
+        deviceID: "d1",
+        platform: "watch",
+      });
+
+      const all = await billingStore().listAll();
+      expect(all.transactions).toHaveLength(1);
+      expect(all.transactions[0]).toMatchObject({
+        transactionID: "tx-admin-list",
+        productID: "com.aichat.relay.flash.monthly",
+        environment: "Sandbox",
+      });
+    });
   });
 
   // ---- activation codes ---------------------------------------------------

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -21,7 +23,7 @@ import AddRounded from "@mui/icons-material/AddRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import DeleteRounded from "@mui/icons-material/DeleteRounded";
 import OpenInNewRounded from "@mui/icons-material/OpenInNewRounded";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import type { DataGridProps, GridColDef } from "@mui/x-data-grid";
 import { useSnackbar } from "@/components/snackbar-provider";
 import { useSetPageActions } from "@/components/shell/page-meta";
 import type {
@@ -33,6 +35,12 @@ import type {
 } from "@/lib/billing/types";
 
 type TabKey = "accounts" | "devices" | "keys" | "codes" | "pairings";
+type LoadState = "loading" | "ready" | "error";
+
+const DataGrid = dynamic(() => import("@mui/x-data-grid").then((mod) => mod.DataGrid), {
+  ssr: false,
+  loading: () => <EmptyState message="正在加载表格…" />,
+}) as ComponentType<DataGridProps>;
 
 interface BillingData {
   accounts: Account[];
@@ -46,19 +54,24 @@ export default function AccountsPage() {
   const snackbar = useSnackbar();
   const [tab, setTab] = useState<TabKey>("accounts");
   const [data, setData] = useState<BillingData | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
   const [codeDialog, setCodeDialog] = useState(false);
   const [codeForm, setCodeForm] = useState({ count: 1, credits: 100, note: "" });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/admin/billing");
-    if (!res.ok) {
+    setLoadState("loading");
+    try {
+      const res = await fetch("/api/admin/billing");
+      if (!res.ok) throw new Error("拉取计费数据失败");
+      const json = (await res.json()) as BillingData;
+      setData(json);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
       snackbar.push({ message: "拉取计费数据失败", severity: "error" });
-      return;
     }
-    const json = (await res.json()) as BillingData;
-    setData(json);
   }, [snackbar]);
 
   useEffect(() => {
@@ -419,7 +432,8 @@ export default function AccountsPage() {
           </Tabs>
           <TextField
             size="small"
-            placeholder="搜索…"
+            label="搜索账户数据"
+            placeholder="名称 / ID / 备注"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             sx={{ minWidth: 240 }}
@@ -427,46 +441,50 @@ export default function AccountsPage() {
         </Stack>
 
         <Box sx={{ height: 600 }}>
-          {tab === "accounts" ? (
-            <DataGrid<Account>
+          {loadState === "loading" ? (
+            <EmptyState message="正在加载账户数据…" />
+          ) : loadState === "error" ? (
+            <EmptyState message="账户数据加载失败" actionLabel="重试" onAction={() => void load()} />
+          ) : tab === "accounts" ? (
+            <DataGrid
               rows={filterRows(data?.accounts ?? [], (r) => `${r.displayName ?? ""} ${r.accountID}`)}
-              columns={accountCols}
+              columns={accountCols as GridColDef[]}
               getRowId={(r) => r.accountID}
               density="compact"
               sx={{ border: "none" }}
             />
           ) : null}
           {tab === "devices" ? (
-            <DataGrid<Device>
+            <DataGrid
               rows={filterRows(data?.devices ?? [], (r) => `${r.alias ?? ""} ${r.deviceID} ${r.accountID}`)}
-              columns={deviceCols}
+              columns={deviceCols as GridColDef[]}
               getRowId={(r) => r.deviceID}
               density="compact"
               sx={{ border: "none" }}
             />
           ) : null}
           {tab === "keys" ? (
-            <DataGrid<Key>
+            <DataGrid
               rows={filterRows(data?.keys ?? [], (r) => `${r.keyValue} ${r.accountID}`)}
-              columns={keyCols}
+              columns={keyCols as GridColDef[]}
               getRowId={(r) => r.keyID}
               density="compact"
               sx={{ border: "none" }}
             />
           ) : null}
           {tab === "codes" ? (
-            <DataGrid<ActivationCode>
+            <DataGrid
               rows={filterRows(data?.activationCodes ?? [], (r) => `${r.code} ${r.note ?? ""}`)}
-              columns={codeCols}
+              columns={codeCols as GridColDef[]}
               getRowId={(r) => r.code}
               density="compact"
               sx={{ border: "none" }}
             />
           ) : null}
           {tab === "pairings" ? (
-            <DataGrid<PairingToken>
+            <DataGrid
               rows={filterRows(data?.pairingTokens ?? [], (r) => `${r.token} ${r.accountID}`)}
-              columns={pairingCols}
+              columns={pairingCols as GridColDef[]}
               getRowId={(r) => r.token}
               density="compact"
               sx={{ border: "none" }}
@@ -509,5 +527,28 @@ export default function AccountsPage() {
         </DialogActions>
       </Dialog>
     </>
+  );
+}
+
+function EmptyState({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <Box sx={{ minHeight: 320, display: "grid", placeItems: "center", p: 4 }}>
+      <Stack spacing={1.5} alignItems="center">
+        <Typography color="text.secondary">{message}</Typography>
+        {actionLabel && onAction ? (
+          <Button variant="outlined" size="small" onClick={onAction}>
+            {actionLabel}
+          </Button>
+        ) : null}
+      </Stack>
+    </Box>
   );
 }

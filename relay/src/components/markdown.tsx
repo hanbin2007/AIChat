@@ -11,7 +11,9 @@ export function Markdown({ source }: { source: string }) {
     <Box className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { maxExpand: 64, maxSize: 8 }]]}
+        disallowedElements={["img", "picture", "source", "video", "audio", "iframe", "object", "embed"]}
+        unwrapDisallowed
         components={{
           a: ({ href, children, ...rest }) => (
             <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>

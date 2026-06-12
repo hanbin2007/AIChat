@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentType } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
@@ -21,14 +23,25 @@ import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import PauseRounded from "@mui/icons-material/PauseRounded";
 import PlayArrowRounded from "@mui/icons-material/PlayArrowRounded";
 import CloseRounded from "@mui/icons-material/CloseRounded";
-import { DataGrid, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
-import { Markdown } from "@/components/markdown";
+import VisibilityRounded from "@mui/icons-material/VisibilityRounded";
+import type { DataGridProps, GridColDef, GridRowParams } from "@mui/x-data-grid";
 import { useSnackbar } from "@/components/snackbar-provider";
 import { useSetPageActions } from "@/components/shell/page-meta";
 import type { ActivityEntry } from "@/lib/store/request-log";
 import type { Conversation } from "@/lib/store/conversations";
 
 type TabKey = "live" | "history" | "conversations";
+type LoadState = "loading" | "ready" | "error";
+
+const DataGrid = dynamic(() => import("@mui/x-data-grid").then((mod) => mod.DataGrid), {
+  ssr: false,
+  loading: () => <EmptyState message="正在加载表格…" />,
+}) as ComponentType<DataGridProps<ActivityEntry>>;
+
+const Markdown = dynamic(() => import("@/components/markdown").then((mod) => mod.Markdown), {
+  ssr: false,
+  loading: () => <Typography variant="body2" color="text.secondary">正在加载渲染器…</Typography>,
+});
 
 const LEVELS: Array<ActivityEntry["level"]> = ["info", "success", "warning", "error"];
 
@@ -45,6 +58,11 @@ export default function RequestsPage() {
   const [tab, setTab] = useState<TabKey>("live");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [historyState, setHistoryState] = useState<LoadState>("loading");
+  const [conversationState, setConversationState] = useState<LoadState>("loading");
+  const [streamState, setStreamState] = useState<"connecting" | "live" | "paused" | "error">(
+    "connecting",
+  );
   const [paused, setPaused] = useState(false);
   const [search, setSearch] = useState("");
   const [activeLevels, setActiveLevels] = useState<string[]>([...LEVELS]);
@@ -55,23 +73,31 @@ export default function RequestsPage() {
   const [liveTick, setLiveTick] = useState(0);
 
   const fetchHistory = useCallback(async () => {
-    const res = await fetch("/api/admin/requests");
-    if (!res.ok) {
+    setHistoryState("loading");
+    try {
+      const res = await fetch("/api/admin/requests");
+      if (!res.ok) throw new Error("拉取请求日志失败");
+      const data = (await res.json()) as { requests: ActivityEntry[] };
+      setHistory(data.requests);
+      setHistoryState("ready");
+    } catch {
+      setHistoryState("error");
       snackbar.push({ message: "拉取请求日志失败", severity: "error" });
-      return;
     }
-    const data = (await res.json()) as { requests: ActivityEntry[] };
-    setHistory(data.requests);
   }, [snackbar]);
 
   const fetchConversations = useCallback(async () => {
-    const res = await fetch("/api/admin/conversations");
-    if (!res.ok) {
+    setConversationState("loading");
+    try {
+      const res = await fetch("/api/admin/conversations");
+      if (!res.ok) throw new Error("拉取对话失败");
+      const data = (await res.json()) as { conversations: Conversation[] };
+      setConversations(data.conversations);
+      setConversationState("ready");
+    } catch {
+      setConversationState("error");
       snackbar.push({ message: "拉取对话失败", severity: "error" });
-      return;
     }
-    const data = (await res.json()) as { conversations: Conversation[] };
-    setConversations(data.conversations);
   }, [snackbar]);
 
   useEffect(() => {
@@ -80,9 +106,14 @@ export default function RequestsPage() {
   }, [fetchHistory, fetchConversations]);
 
   useEffect(() => {
-    if (paused) return;
+    if (paused) {
+      setStreamState("paused");
+      return;
+    }
+    setStreamState("connecting");
     const es = new EventSource("/api/admin/requests/stream");
     eventRef.current = es;
+    es.onopen = () => setStreamState("live");
     es.addEventListener("activity", (event) => {
       try {
         const entry = JSON.parse((event as MessageEvent).data) as ActivityEntry;
@@ -93,6 +124,7 @@ export default function RequestsPage() {
       }
     });
     es.onerror = () => {
+      setStreamState("error");
       es.close();
     };
     return () => {
@@ -119,6 +151,27 @@ export default function RequestsPage() {
 
   const columns = useMemo<GridColDef<ActivityEntry>[]>(
     () => [
+      {
+        field: "actions",
+        headerName: " ",
+        width: 76,
+        sortable: false,
+        renderCell: (params) => (
+          <Tooltip title="查看详情">
+            <IconButton
+              aria-label="查看详情"
+              size="small"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelected(params.row);
+                setDrawerTab(0);
+              }}
+            >
+              <VisibilityRounded fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ),
+      },
       {
         field: "timestamp",
         headerName: "时间",
@@ -222,6 +275,7 @@ export default function RequestsPage() {
               alignItems={{ md: "center" }}
             >
               <ToggleButtonGroup
+                aria-label="请求日志视图"
                 exclusive
                 value={tab}
                 onChange={(_e, v) => {
@@ -235,7 +289,8 @@ export default function RequestsPage() {
               </ToggleButtonGroup>
               <TextField
                 size="small"
-                placeholder="搜索路径 / 模型 / 账户…"
+                label="搜索请求"
+                placeholder="路径 / 模型 / 账户"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 sx={{ flex: 1, maxWidth: 360 }}
@@ -261,7 +316,28 @@ export default function RequestsPage() {
 
         {liveOrHistory ? (
           <Card>
+            {tab === "live" ? (
+              <Box sx={{ px: 2, pt: 1.5 }}>
+                <Chip
+                  size="small"
+                  label={
+                    streamState === "live"
+                      ? "实时连接中"
+                      : streamState === "paused"
+                        ? "已暂停"
+                        : streamState === "error"
+                          ? "实时流已断开"
+                          : "正在连接实时流"
+                  }
+                  color={streamState === "error" ? "error" : streamState === "live" ? "success" : "default"}
+                  variant={streamState === "live" ? "filled" : "outlined"}
+                />
+              </Box>
+            ) : null}
             <Box sx={{ height: 600 }}>
+              {tab === "history" && historyState === "error" ? (
+                <EmptyState message="请求日志加载失败" actionLabel="重试" onAction={() => void fetchHistory()} />
+              ) : (
               <DataGrid
                 rows={rows}
                 columns={columns}
@@ -275,15 +351,18 @@ export default function RequestsPage() {
                 initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
                 sx={{ border: "none" }}
               />
+              )}
             </Box>
           </Card>
         ) : (
           <Card>
             <Box>
-              {conversations.length === 0 ? (
-                <Box sx={{ p: 6, textAlign: "center" }}>
-                  <Typography color="text.secondary">暂无对话记录</Typography>
-                </Box>
+              {conversationState === "loading" ? (
+                <EmptyState message="正在加载对话…" />
+              ) : conversationState === "error" ? (
+                <EmptyState message="对话加载失败" actionLabel="重试" onAction={() => void fetchConversations()} />
+              ) : conversations.length === 0 ? (
+                <EmptyState message="暂无对话记录" />
               ) : (
                 <Box>
                   {conversations.map((c, i) => (
@@ -345,6 +424,7 @@ export default function RequestsPage() {
         anchor="right"
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
+        aria-labelledby="request-detail-title"
         slotProps={{ paper: { sx: { width: { xs: "100%", sm: 520 } } } }}
       >
         {selected ? (
@@ -352,7 +432,7 @@ export default function RequestsPage() {
             <Box sx={{ p: 2, borderBottom: 1, borderColor: "divider" }}>
               <Stack direction="row" spacing={1} alignItems="center">
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }} noWrap>
+                  <Typography id="request-detail-title" variant="subtitle1" sx={{ fontWeight: 700 }} noWrap>
                     {selected.method ? `${selected.method} ` : ""}
                     {selected.path ?? selected.message}
                   </Typography>
@@ -441,5 +521,26 @@ export default function RequestsPage() {
         ) : null}
       </Drawer>
     </>
+  );
+}
+
+function EmptyState({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <Box sx={{ p: 6, textAlign: "center" }}>
+      <Stack spacing={1.5} alignItems="center">
+        <Typography color="text.secondary">{message}</Typography>
+        {actionLabel && onAction ? (
+          <Chip clickable label={actionLabel} onClick={onAction} variant="outlined" />
+        ) : null}
+      </Stack>
+    </Box>
   );
 }

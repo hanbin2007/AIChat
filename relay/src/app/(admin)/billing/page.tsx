@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
@@ -24,19 +24,30 @@ import TableHead from "@mui/material/TableHead";
 import TableBody from "@mui/material/TableBody";
 import TableRow from "@mui/material/TableRow";
 import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
 import Chip from "@mui/material/Chip";
 import AddRounded from "@mui/icons-material/AddRounded";
 import DeleteRounded from "@mui/icons-material/DeleteRounded";
 import RefreshRounded from "@mui/icons-material/RefreshRounded";
 import { useSnackbar } from "@/components/snackbar-provider";
 import { useSetPageActions } from "@/components/shell/page-meta";
-import type { MeteringPolicy, Plan, MeteringRate } from "@/lib/billing/types";
+import type { MeteringPolicy, Plan, MeteringRate, Transaction } from "@/lib/billing/types";
 
 type TabKey = "plans" | "policy" | "transactions";
 
 interface BillingResponse {
   policy: MeteringPolicy;
   plans: Plan[];
+  transactions: Transaction[];
+}
+
+function nonNegativeNumber(raw: string, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, value) : fallback;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 export default function BillingPage() {
@@ -46,23 +57,45 @@ export default function BillingPage() {
   const [policy, setPolicy] = useState<MeteringPolicy | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Calculator state
   const [calcInput, setCalcInput] = useState(2000);
   const [calcOutput, setCalcOutput] = useState(800);
   const [calcSearch, setCalcSearch] = useState(0);
   const [calcAudio, setCalcAudio] = useState(false);
+  const addPlan = useCallback(() => {
+    setPlans((ps) => [
+      ...ps,
+      {
+        id: `plan_${Date.now()}`,
+        title: "新套餐",
+        productID: "",
+        priceUSD: 0,
+        monthlyCredits: 0,
+      },
+    ]);
+  }, []);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/admin/billing");
-    if (!res.ok) {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/admin/billing");
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const json = (await res.json()) as BillingResponse;
+      setData(json);
+      setPolicy(cloneJson(json.policy));
+      setPlans(cloneJson(json.plans));
+    } catch {
+      setLoadError("拉取计费数据失败");
       snackbar.push({ message: "拉取计费数据失败", severity: "error" });
-      return;
+    } finally {
+      setLoading(false);
     }
-    const json = (await res.json()) as BillingResponse;
-    setData(json);
-    setPolicy(JSON.parse(JSON.stringify(json.policy)));
-    setPlans(JSON.parse(JSON.stringify(json.plans)));
   }, [snackbar]);
 
   useEffect(() => {
@@ -99,8 +132,8 @@ export default function BillingPage() {
 
   const discard = () => {
     if (!data) return;
-    setPolicy(JSON.parse(JSON.stringify(data.policy)));
-    setPlans(JSON.parse(JSON.stringify(data.plans)));
+    setPolicy(cloneJson(data.policy));
+    setPlans(cloneJson(data.plans));
   };
 
   const calc = useMemo(() => {
@@ -122,11 +155,11 @@ export default function BillingPage() {
 
   useSetPageActions(
     <Tooltip title="刷新">
-      <IconButton aria-label="刷新" onClick={() => void load()}>
+      <IconButton aria-label="刷新" onClick={() => void load()} disabled={loading}>
         <RefreshRounded />
       </IconButton>
     </Tooltip>,
-    [],
+    [load, loading],
   );
 
   return (
@@ -153,14 +186,27 @@ export default function BillingPage() {
 
         <Card>
           <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-            <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)}>
+            <Tabs
+              value={tab}
+              onChange={(_e, v: TabKey) => setTab(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
+            >
               <Tab value="plans" label={`Plans (${plans.length})`} />
               <Tab value="policy" label="Pricing Policy" />
               <Tab value="transactions" label="Transactions" />
             </Tabs>
           </Box>
+          {loading ? <LinearProgress /> : null}
 
           <Box sx={{ p: { xs: 2, md: 3 } }}>
+            {loadError ? (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {loadError}
+              </Alert>
+            ) : null}
+
             {tab === "policy" && policy ? (
               <Box
                 sx={{
@@ -318,124 +364,143 @@ export default function BillingPage() {
               </Box>
             ) : null}
 
+            {tab === "policy" && !loading && !loadError && !policy ? (
+              <EmptyState message="暂无计费策略" />
+            ) : null}
+
             {tab === "plans" ? (
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" },
-                  gap: 2,
-                }}
-              >
-                {plans.map((plan, idx) => (
-                  <Card key={plan.id} variant="outlined">
-                    <CardContent>
-                      <Stack spacing={1.5}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                            {plan.title || "未命名"}
-                          </Typography>
-                          <IconButton
-                            size="small"
-                            aria-label="删除"
-                            onClick={() =>
-                              setPlans((ps) => ps.filter((_, i) => i !== idx))
-                            }
-                          >
-                            <DeleteRounded fontSize="small" />
-                          </IconButton>
-                        </Stack>
-                        <TextField
-                          label="标题"
-                          size="small"
-                          value={plan.title}
-                          onChange={(e) =>
-                            setPlans((ps) =>
-                              ps.map((p, i) => (i === idx ? { ...p, title: e.target.value } : p)),
-                            )
-                          }
-                        />
-                        <TextField
-                          label="ID"
-                          size="small"
-                          value={plan.id}
-                          onChange={(e) =>
-                            setPlans((ps) =>
-                              ps.map((p, i) => (i === idx ? { ...p, id: e.target.value } : p)),
-                            )
-                          }
-                        />
-                        <TextField
-                          label="Product ID"
-                          size="small"
-                          value={plan.productID}
-                          onChange={(e) =>
-                            setPlans((ps) =>
-                              ps.map((p, i) =>
-                                i === idx ? { ...p, productID: e.target.value } : p,
-                              ),
-                            )
-                          }
-                        />
-                        <TextField
-                          label="价格 (USD)"
-                          size="small"
-                          type="number"
-                          value={plan.priceUSD}
-                          onChange={(e) =>
-                            setPlans((ps) =>
-                              ps.map((p, i) =>
-                                i === idx ? { ...p, priceUSD: Number(e.target.value) } : p,
-                              ),
-                            )
-                          }
-                        />
-                        <TextField
-                          label="月度 Credits"
-                          size="small"
-                          type="number"
-                          value={plan.monthlyCredits}
-                          onChange={(e) =>
-                            setPlans((ps) =>
-                              ps.map((p, i) =>
-                                i === idx ? { ...p, monthlyCredits: Number(e.target.value) } : p,
-                              ),
-                            )
-                          }
-                        />
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                ))}
-                <Card
-                  variant="outlined"
+              loading ? (
+                <EmptyState message="正在加载套餐…" />
+              ) : loadError ? null : plans.length > 0 ? (
+                <Box
                   sx={{
-                    border: "1px dashed",
-                    borderColor: "divider",
-                    minHeight: 240,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" },
+                    gap: 2,
                   }}
                 >
-                  <Button
-                    startIcon={<AddRounded />}
-                    onClick={() =>
-                      setPlans((ps) => [
-                        ...ps,
-                        {
-                          id: `plan_${Date.now()}`,
-                          title: "新套餐",
-                          productID: "",
-                          priceUSD: 0,
-                          monthlyCredits: 0,
-                        },
-                      ])
-                    }
+                  {plans.map((plan, idx) => (
+                    <Card key={plan.id} variant="outlined">
+                      <CardContent>
+                        <Stack spacing={1.5}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                              {plan.title || "未命名"}
+                            </Typography>
+                            <IconButton
+                              size="small"
+                              aria-label="删除"
+                              onClick={() =>
+                                setPlans((ps) => ps.filter((_, i) => i !== idx))
+                              }
+                            >
+                              <DeleteRounded fontSize="small" />
+                            </IconButton>
+                          </Stack>
+                          <TextField
+                            label="标题"
+                            size="small"
+                            value={plan.title}
+                            onChange={(e) =>
+                              setPlans((ps) =>
+                                ps.map((p, i) => (i === idx ? { ...p, title: e.target.value } : p)),
+                              )
+                            }
+                          />
+                          <TextField
+                            label="ID"
+                            size="small"
+                            value={plan.id}
+                            onChange={(e) =>
+                              setPlans((ps) =>
+                                ps.map((p, i) => (i === idx ? { ...p, id: e.target.value } : p)),
+                              )
+                            }
+                          />
+                          <TextField
+                            label="Product ID"
+                            size="small"
+                            value={plan.productID}
+                            onChange={(e) =>
+                              setPlans((ps) =>
+                                ps.map((p, i) =>
+                                  i === idx ? { ...p, productID: e.target.value } : p,
+                                ),
+                              )
+                            }
+                          />
+                          <TextField
+                            label="价格 (USD)"
+                            size="small"
+                            type="number"
+                            value={plan.priceUSD}
+                            onChange={(e) =>
+                              setPlans((ps) =>
+                                ps.map((p, i) =>
+                                  i === idx
+                                    ? {
+                                        ...p,
+                                        priceUSD: nonNegativeNumber(e.target.value, p.priceUSD),
+                                      }
+                                    : p,
+                                ),
+                              )
+                            }
+                          />
+                          <TextField
+                            label="月度 Credits"
+                            size="small"
+                            type="number"
+                            value={plan.monthlyCredits}
+                            onChange={(e) =>
+                              setPlans((ps) =>
+                                ps.map((p, i) =>
+                                  i === idx
+                                    ? {
+                                        ...p,
+                                        monthlyCredits: nonNegativeNumber(
+                                          e.target.value,
+                                          p.monthlyCredits,
+                                        ),
+                                      }
+                                    : p,
+                                ),
+                              )
+                            }
+                          />
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      border: "1px dashed",
+                      borderColor: "divider",
+                      minHeight: 240,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
                   >
-                    添加套餐
-                  </Button>
-                </Card>
-              </Box>
+                    <Button
+                      startIcon={<AddRounded />}
+                      onClick={addPlan}
+                    >
+                      添加套餐
+                    </Button>
+                  </Card>
+                </Box>
+              ) : (
+                <EmptyState
+                  message="暂无套餐"
+                  action={
+                    <Button startIcon={<AddRounded />} onClick={addPlan}>
+                      添加套餐
+                    </Button>
+                  }
+                />
+              )
             ) : null}
 
             {tab === "transactions" ? <TransactionsTab /> : null}
@@ -443,6 +508,19 @@ export default function BillingPage() {
         </Card>
       </Stack>
     </>
+  );
+}
+
+function EmptyState({ message, action }: { message: string; action?: ReactNode }) {
+  return (
+    <Box sx={{ p: 4, textAlign: "center" }}>
+      <Stack spacing={1.5} alignItems="center">
+        <Typography variant="body2" color="text.secondary">
+          {message}
+        </Typography>
+        {action}
+      </Stack>
+    </Box>
   );
 }
 
@@ -471,7 +549,10 @@ function SliderField({
         min={min}
         max={max}
         step={step}
-        onChange={(_e, v) => onChange(typeof v === "number" ? v : v[0])}
+        onChange={(_e, v) => {
+          const next = typeof v === "number" ? v : v[0];
+          if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)));
+        }}
         size="small"
       />
     </Box>
@@ -518,7 +599,13 @@ function RateCard({
             type="number"
             value={rate.inputCreditsPerMillion}
             onChange={(e) =>
-              onChange({ ...rate, inputCreditsPerMillion: Number(e.target.value) })
+              onChange({
+                ...rate,
+                inputCreditsPerMillion: nonNegativeNumber(
+                  e.target.value,
+                  rate.inputCreditsPerMillion,
+                ),
+              })
             }
           />
           <TextField
@@ -527,7 +614,13 @@ function RateCard({
             type="number"
             value={rate.outputCreditsPerMillion}
             onChange={(e) =>
-              onChange({ ...rate, outputCreditsPerMillion: Number(e.target.value) })
+              onChange({
+                ...rate,
+                outputCreditsPerMillion: nonNegativeNumber(
+                  e.target.value,
+                  rate.outputCreditsPerMillion,
+                ),
+              })
             }
           />
           <TextField
@@ -536,7 +629,13 @@ function RateCard({
             type="number"
             value={rate.searchSurchargeCredits}
             onChange={(e) =>
-              onChange({ ...rate, searchSurchargeCredits: Number(e.target.value) })
+              onChange({
+                ...rate,
+                searchSurchargeCredits: nonNegativeNumber(
+                  e.target.value,
+                  rate.searchSurchargeCredits,
+                ),
+              })
             }
           />
         </Stack>
@@ -546,72 +645,81 @@ function RateCard({
 }
 
 function TransactionsTab() {
-  const [transactions, setTransactions] = useState<
-    Array<{
-      transactionID: string;
-      productID: string;
-      environment: string;
-      purchaseDate?: string;
-      expirationDate?: string;
-      revokedDate?: string;
-    }>
-  >([]);
+  const [transactions, setTransactions] = useState<Transaction[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch("/api/admin/billing");
-      if (!res.ok) return;
-      const json = (await res.json()) as { transactions?: typeof transactions };
-      if (!cancelled) setTransactions(json.transactions ?? []);
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/admin/billing");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as { transactions?: Transaction[] };
+        if (!cancelled) setTransactions(json.transactions ?? []);
+      } catch {
+        if (!cancelled) setError("拉取交易记录失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (transactions.length === 0) {
-    return (
-      <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography variant="body2" color="text.secondary">
-          暂无交易记录
-        </Typography>
-      </Box>
-    );
+  if (loading) {
+    return <EmptyState message="正在加载交易记录…" />;
+  }
+
+  if (error) {
+    return <Alert severity="error">{error}</Alert>;
+  }
+
+  if (!transactions || transactions.length === 0) {
+    return <EmptyState message="暂无交易记录" />;
   }
 
   return (
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell>交易 ID</TableCell>
-          <TableCell>产品</TableCell>
-          <TableCell>环境</TableCell>
-          <TableCell>购买于</TableCell>
-          <TableCell>过期</TableCell>
-          <TableCell>状态</TableCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {transactions.map((t) => (
-          <TableRow key={t.transactionID}>
-            <TableCell sx={{ fontFamily: "var(--font-mono)" }}>
-              {t.transactionID.slice(0, 12)}…
-            </TableCell>
-            <TableCell>{t.productID}</TableCell>
-            <TableCell>{t.environment}</TableCell>
-            <TableCell>
-              {t.purchaseDate ? new Date(t.purchaseDate).toLocaleString("zh-Hans") : "—"}
-            </TableCell>
-            <TableCell>
-              {t.expirationDate ? new Date(t.expirationDate).toLocaleString("zh-Hans") : "—"}
-            </TableCell>
-            <TableCell>
-              {t.revokedDate ? <Chip size="small" label="已撤销" color="error" /> : <Chip size="small" label="活跃" />}
-            </TableCell>
+    <TableContainer sx={{ overflowX: "auto" }}>
+      <Table size="small" sx={{ minWidth: 760 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell>交易 ID</TableCell>
+            <TableCell>产品</TableCell>
+            <TableCell>环境</TableCell>
+            <TableCell>购买于</TableCell>
+            <TableCell>过期</TableCell>
+            <TableCell>状态</TableCell>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHead>
+        <TableBody>
+          {transactions.map((t) => (
+            <TableRow key={t.transactionID}>
+              <TableCell sx={{ fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>
+                {t.transactionID.slice(0, 12)}…
+              </TableCell>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>{t.productID}</TableCell>
+              <TableCell>{t.environment}</TableCell>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>
+                {t.purchaseDate ? new Date(t.purchaseDate).toLocaleString("zh-Hans") : "—"}
+              </TableCell>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>
+                {t.expirationDate ? new Date(t.expirationDate).toLocaleString("zh-Hans") : "—"}
+              </TableCell>
+              <TableCell>
+                {t.revokedDate ? (
+                  <Chip size="small" label="已撤销" color="error" />
+                ) : (
+                  <Chip size="small" label="活跃" />
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }

@@ -744,6 +744,7 @@ class BillingStore {
       keys: Object.values(this.state.keys),
       grants: Object.values(this.state.grants),
       usage: this.state.usage,
+      transactions: Object.values(this.state.transactions),
       activationCodes: Object.values(this.state.activationCodes),
       pairingTokens: Object.values(this.state.pairingTokens),
       policy: this.state.policy,

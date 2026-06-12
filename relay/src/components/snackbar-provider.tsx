@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
 import IconButton from "@mui/material/IconButton";
@@ -29,25 +29,19 @@ export function useSnackbar(): SnackbarContextValue {
 export function SnackbarProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState<SnackbarMessage | null>(null);
-  const queue = useRef<SnackbarMessage[]>([]);
+  const [queue, setQueue] = useState<SnackbarMessage[]>([]);
 
-  const showNext = useCallback(() => {
-    const next = queue.current.shift();
-    if (next) {
-      setCurrent(next);
-      setOpen(true);
-    } else {
-      setCurrent(null);
-    }
+  const push = useCallback((msg: SnackbarMessage) => {
+    setQueue((items) => [...items, msg]);
   }, []);
 
-  const push = useCallback(
-    (msg: SnackbarMessage) => {
-      queue.current.push(msg);
-      if (!open && !current) showNext();
-    },
-    [open, current, showNext],
-  );
+  useEffect(() => {
+    if (open || current || queue.length === 0) return;
+    const [next, ...rest] = queue;
+    setCurrent(next);
+    setQueue(rest);
+    setOpen(true);
+  }, [current, open, queue]);
 
   const handleClose = useCallback((_event?: unknown, reason?: string) => {
     if (reason === "clickaway") return;
@@ -55,8 +49,8 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleExited = useCallback(() => {
-    showNext();
-  }, [showNext]);
+    setCurrent(null);
+  }, []);
 
   const ctx = useMemo<SnackbarContextValue>(() => ({ push }), [push]);
 

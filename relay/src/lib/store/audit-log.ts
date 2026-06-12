@@ -18,12 +18,43 @@ export interface AuditEntry {
   target?: string;
   before?: unknown;
   after?: unknown;
+  details?: unknown;
   ip?: string;
   prevHash: string;
   hash: string;
 }
 
 const FILE = () => path.join(config.dataDir, "audit.json");
+const REDACTED = "[redacted]";
+
+function shouldRedactField(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized.includes("token") || normalized.includes("key") || normalized.includes("password");
+}
+
+export function sanitizeAuditPayload<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditPayload(item)) as T;
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "adminTokens" && Array.isArray(item)) {
+      output[key] = item.map((token) => {
+        if (!token || typeof token !== "object" || Array.isArray(token)) return sanitizeAuditPayload(token);
+        return { ...sanitizeAuditPayload(token), value: REDACTED };
+      });
+    } else if (key === "value" && "prefix" in (value as Record<string, unknown>) && "scope" in (value as Record<string, unknown>)) {
+      output[key] = REDACTED;
+    } else if (shouldRedactField(key)) {
+      output[key] = REDACTED;
+    } else {
+      output[key] = sanitizeAuditPayload(item);
+    }
+  }
+  return output as T;
+}
 
 class AuditLog {
   private entries: AuditEntry[] = [];
@@ -42,7 +73,7 @@ class AuditLog {
       const prev = this.entries[this.entries.length - 1];
       const prevHash = prev ? prev.hash : "GENESIS";
       const entry: AuditEntry = {
-        ...input,
+        ...sanitizeAuditPayload(input),
         id: uuid(),
         timestamp: new Date().toISOString(),
         prevHash,
@@ -59,7 +90,7 @@ class AuditLog {
 
   async list(limit = 200): Promise<AuditEntry[]> {
     await this.ensureLoaded();
-    return this.entries.slice(-limit).reverse();
+    return this.entries.slice(-limit).reverse().map((entry) => sanitizeAuditPayload(entry));
   }
 }
 

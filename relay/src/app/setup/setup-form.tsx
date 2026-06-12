@@ -20,6 +20,16 @@ const STEPS = ["欢迎", "管理员账户", "上游 Gemini", "Bearer Token", "�
 const XCCONFIG_SNIPPET = `// AIChat 客户端 — 在 Config/Secrets.xcconfig 中设置
 AI_RELAY_BASE_URL = http:/$()/<your-relay-host>:8787`;
 
+function setupErrorMessage(status?: number) {
+  if (status === 409) {
+    return "初始化已完成。请前往登录页，或直接进入控制台。";
+  }
+  if (status === 400) {
+    return "用户名和至少 8 位的新密码不能为空。";
+  }
+  return "初始化失败，请稍后重试。";
+}
+
 export default function SetupForm() {
   const router = useRouter();
   const [active, setActive] = useState(0);
@@ -51,22 +61,12 @@ export default function SetupForm() {
         body: JSON.stringify({ username, password }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { message?: string };
-        setError(data.message ?? "初始化失败");
+        setError(setupErrorMessage(res.status));
         return;
       }
-      const login = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      if (!login.ok) {
-        setError("初始化成功，但自动登录失败，请手动登录");
-        return;
-      }
-      next();
+      router.replace("/dashboard");
     } catch {
-      setError("网络错误，请重试");
+      setError("网络错误，请检查连接后重试。");
     } finally {
       setLoading(false);
     }
@@ -122,6 +122,7 @@ export default function SetupForm() {
                 label="用户名"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
                 autoFocus
                 fullWidth
               />
@@ -130,6 +131,8 @@ export default function SetupForm() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                helperText="至少 8 位，建议使用独立强密码。"
                 fullWidth
               />
               <TextField
@@ -137,9 +140,12 @@ export default function SetupForm() {
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
+                autoComplete="new-password"
                 error={confirm.length > 0 && password !== confirm}
                 helperText={
-                  confirm.length > 0 && password !== confirm ? "两次输入不一致" : undefined
+                  confirm.length > 0 && password !== confirm
+                    ? "两次输入不一致"
+                    : "请再次输入新密码。"
                 }
                 fullWidth
               />
@@ -191,15 +197,37 @@ export default function SetupForm() {
                 <Box component="code" sx={{ fontFamily: "var(--font-mono)" }}>
                   RELAY_BEARER_TOKEN
                 </Box>
-                ；客户端将携带此值访问 /api/v1。点击「创建并登录」会创建管理员账户并自动登录。
+                ；客户端将携带此值访问 /api/v1。点击「创建管理员并进入控制台」会创建管理员账户并进入控制台。
               </Alert>
-              {error ? <Alert severity="error">{error}</Alert> : null}
+              {error ? (
+                <Alert severity="error">
+                  <Stack spacing={1.5}>
+                    <Typography variant="body2">{error}</Typography>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => router.replace("/login")}
+                      >
+                        前往登录
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => router.replace("/dashboard")}
+                      >
+                        进入控制台
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Alert>
+              ) : null}
               <Stack direction="row" spacing={1.5} justifyContent="flex-end">
                 <Button onClick={back} disabled={loading}>
                   上一步
                 </Button>
                 <Button variant="contained" onClick={submit} disabled={loading}>
-                  {loading ? "处理中…" : "创建并登录"}
+                  {loading ? "处理中…" : "创建管理员并进入控制台"}
                 </Button>
               </Stack>
             </Stack>
@@ -233,8 +261,7 @@ export default function SetupForm() {
                 variant="contained"
                 size="large"
                 onClick={() => {
-                  router.push("/dashboard");
-                  router.refresh();
+                  router.replace("/dashboard");
                 }}
               >
                 进入控制台
