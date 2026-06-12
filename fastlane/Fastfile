@@ -14,9 +14,9 @@ INFO_PLISTS = [
   "Config/AIChatWatchWidget-Info.plist"
 ].map { |path| File.join(PROJECT_ROOT, path) }.freeze
 APP_STORE_PROFILE_NAMES = {
-  "hanbin.AIChat" => "iOS Team Store Provisioning Profile: hanbin.AIChat",
-  "hanbin.AIChat.watchkitapp" => "iOS Team Store Provisioning Profile: hanbin.AIChat.watchkitapp",
-  "hanbin.AIChat.watchkitapp.widget" => "iOS Team Store Provisioning Profile: hanbin.AIChat.watchkitapp.widget"
+  "hanbin.AIChat" => "hanbin.AIChat AppStore",
+  "hanbin.AIChat.watchkitapp" => "hanbin.AIChat.watchkitapp AppStore",
+  "hanbin.AIChat.watchkitapp.widget" => "hanbin.AIChat.watchkitapp.widget AppStore"
 }.freeze
 
 def require_env!(name)
@@ -169,7 +169,7 @@ platform :ios do
         signingStyle: "manual",
         teamID: APPLE_TEAM_ID,
         signingCertificate: "Apple Distribution",
-        provisioningProfiles: APP_STORE_PROFILE_NAMES
+        provisioningProfiles: APP_STORE_PROFILE_NAMES.dup
       },
       xcargs: archive_xcargs(build_number),
       clean: true,
