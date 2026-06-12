@@ -1,4 +1,5 @@
 require "open3"
+require "fileutils"
 require "pathname"
 require "shellwords"
 
@@ -12,6 +13,11 @@ INFO_PLISTS = [
   "Config/WatchApp-Info.plist",
   "Config/AIChatWatchWidget-Info.plist"
 ].map { |path| File.join(PROJECT_ROOT, path) }.freeze
+APP_STORE_PROFILE_NAMES = {
+  "hanbin.AIChat" => "iOS Team Store Provisioning Profile: hanbin.AIChat",
+  "hanbin.AIChat.watchkitapp" => "iOS Team Store Provisioning Profile: hanbin.AIChat.watchkitapp",
+  "hanbin.AIChat.watchkitapp.widget" => "iOS Team Store Provisioning Profile: hanbin.AIChat.watchkitapp.widget"
+}.freeze
 
 def require_env!(name)
   value = ENV[name].to_s.strip
@@ -121,6 +127,22 @@ def ensure_distribution_certificate!(api_key)
   )
 end
 
+def ensure_app_store_profiles!(api_key)
+  output_path = File.join(PROJECT_ROOT, "build/fastlane/profiles")
+  FileUtils.mkdir_p(output_path)
+
+  APP_STORE_PROFILE_NAMES.each_key do |app_identifier|
+    sigh(
+      api_key: api_key,
+      team_id: APPLE_TEAM_ID,
+      app_identifier: app_identifier,
+      force: true,
+      output_path: output_path,
+      filename: "#{app_identifier}.mobileprovision"
+    )
+  end
+end
+
 platform :ios do
   desc "Verify local manual TestFlight release prerequisites without uploading"
   lane :preflight do |options|
@@ -136,6 +158,7 @@ platform :ios do
 
     api_key = app_store_connect_key
     ensure_distribution_certificate!(api_key)
+    ensure_app_store_profiles!(api_key)
 
     build_app(
       project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
@@ -143,8 +166,10 @@ platform :ios do
       configuration: "Release",
       export_method: "app-store",
       export_options: {
-        signingStyle: "automatic",
-        teamID: APPLE_TEAM_ID
+        signingStyle: "manual",
+        teamID: APPLE_TEAM_ID,
+        signingCertificate: "Apple Distribution",
+        provisioningProfiles: APP_STORE_PROFILE_NAMES
       },
       xcargs: archive_xcargs(build_number),
       clean: true,
