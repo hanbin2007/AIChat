@@ -304,7 +304,7 @@ actor ICloudConversationSyncService {
     }
 }
 
-private struct DeletedConversationDigestEntry: Codable, Hashable {
+private nonisolated struct DeletedConversationDigestEntry: Codable, Hashable {
     let id: UUID
     let deletedAt: Date
 
@@ -320,14 +320,14 @@ private struct DeletedConversationDigestEntry: Codable, Hashable {
     }
 }
 
-private struct DigestPayload: Codable, Hashable {
+private nonisolated struct DigestPayload: Codable, Hashable {
     let conversations: [ConversationThread]
     let deletedConversationTombstones: [DeletedConversationDigestEntry]
     let globalPinnedMemories: [PinnedMemoryItem]
     let promptPresets: [PromptPreset]
 }
 
-private extension ConversationThread {
+private nonisolated extension ConversationThread {
     var digestSanitizedCopy: ConversationThread {
         var sanitizedConversation = self
 

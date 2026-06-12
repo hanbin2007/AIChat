@@ -9,6 +9,7 @@ import SwiftUI
 
 #if os(watchOS)
 struct ConversationListView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
     @State private var isShowingActivationCenter = false
@@ -179,6 +180,7 @@ struct ConversationListView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Built for Watch")
                 .font(.headline)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             Text(
                 chatStore.isReadOnlyMode ?
@@ -186,7 +188,7 @@ struct ConversationListView: View {
                 "Context-aware Gemini chat, voice prompts, photo prompts, streaming replies, relay-ready networking, and sync scaffolding for a paired iPhone."
             )
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
             Button {
                 if chatStore.isReadOnlyMode {
@@ -212,10 +214,10 @@ struct ConversationListView: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.42))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
         .accessibilityElement(children: .contain)
@@ -402,6 +404,8 @@ private struct IndexedConversationListItem: Identifiable, Equatable {
 }
 
 struct ConversationRowView: View, Equatable {
+    @Environment(\.colorScheme) private var colorScheme
+
     let item: WatchConversationListItem
     let relativeNow: Date
 
@@ -424,6 +428,7 @@ struct ConversationRowView: View, Equatable {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(item.title)
                     .font(.headline)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
                     .lineLimit(2)
 
                 if item.isFavorite {
@@ -442,7 +447,7 @@ struct ConversationRowView: View, Equatable {
 
             Text(item.previewText)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 .lineLimit(2)
 
             ViewThatFits(in: .horizontal) {
@@ -456,10 +461,10 @@ struct ConversationRowView: View, Equatable {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.38))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
         // Conversation titles + preview snippets are user-authored content

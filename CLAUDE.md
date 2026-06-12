@@ -16,18 +16,18 @@ xcodebuild -project AIChat.xcodeproj -scheme "AIChat Relay" -destination "platfo
 
 # Run watch unit tests (use the paired simulator by ID — `name=` is ambiguous
 # on machines with multiple Apple Watch Series 11 46mm runtimes installed)
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=89095621-9CFA-4FD3-BB9E-1091E04D796E" test
 
 # Run watch UI tests
-xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" -only-testing:"AIChat Watch AppUITests" test
+xcodebuild -scheme "AIChat Watch App" -destination "platform=watchOS Simulator,id=89095621-9CFA-4FD3-BB9E-1091E04D796E" -only-testing:"AIChat Watch AppUITests" test
 
 # UI-test-only schemes (used by Xcode Cloud to surface screenshots)
-xcodebuild -scheme "AIChat Watch UITests" -destination "platform=watchOS Simulator,id=93A83695-2859-4388-B337-957616D03F55" test
+xcodebuild -scheme "AIChat Watch UITests" -destination "platform=watchOS Simulator,id=89095621-9CFA-4FD3-BB9E-1091E04D796E" test
 xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,name=iPhone 17" test
 ```
 
-**Known-good simulator (verified 2026-04-19):**
-- Apple Watch Series 11 (46mm), watchOS 26.0, UDID `93A83695-2859-4388-B337-957616D03F55`, paired with iPhone 17 UDID `471F8F79-1922-43C8-A613-168B1E4C15CA`. Other installed watchOS simulators are not reliably usable (unpaired / name collisions across 26.0 and 26.2 runtimes).
+**Known-good simulator (verified 2026-06-12):**
+- Apple Watch Series 11 (46mm), watchOS 26.5, UDID `89095621-9CFA-4FD3-BB9E-1091E04D796E`, paired with iPhone 17 Pro Max UDID `2162AE93-D5B3-443C-B116-0258CF7B759B`. Other installed watchOS simulators may not be reliably usable (unpaired / name collisions / stale CoreSimulator state).
 - Write tests as `async throws` even when the logic is synchronous — watchOS 26 has a test-runner launch race that segfaults the first sync `@MainActor` test per process.
 
 **Important: Always verify changes compile before finishing. Run relevant tests when modifying testable code. Fix all build errors and test failures before considering work complete.**

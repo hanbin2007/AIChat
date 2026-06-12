@@ -22,6 +22,45 @@ import XCTest
 @testable import AIChat_Watch_App
 
 final class AODPrivacyTests: XCTestCase {
+    @MainActor
+    func testConversationDetailTitleFallsBackToGenericLabelWhenLuminanceIsReduced() async throws {
+        let sensitiveTitle = "Discuss Alice medical bill"
+
+        let title = ConversationDetailPrivacyPolicy.navigationTitle(
+            actualTitle: sensitiveTitle,
+            isLuminanceReduced: true,
+            redactionReasons: []
+        )
+
+        XCTAssertEqual(title, "Chat")
+        XCTAssertNotEqual(title, sensitiveTitle)
+    }
+
+    @MainActor
+    func testConversationDetailTitleFallsBackToGenericLabelWhenPrivacyRedacted() async throws {
+        let sensitiveTitle = "Bank transfer for Friday"
+
+        let title = ConversationDetailPrivacyPolicy.navigationTitle(
+            actualTitle: sensitiveTitle,
+            isLuminanceReduced: false,
+            redactionReasons: .privacy
+        )
+
+        XCTAssertEqual(title, "Chat")
+        XCTAssertNotEqual(title, sensitiveTitle)
+    }
+
+    @MainActor
+    func testConversationDetailTitleUsesActualTitleWhenDisplayIsActive() async throws {
+        let title = ConversationDetailPrivacyPolicy.navigationTitle(
+            actualTitle: "Planning",
+            isLuminanceReduced: false,
+            redactionReasons: []
+        )
+
+        XCTAssertEqual(title, "Planning")
+    }
+
     /// The Info.plist must advertise `WKSupportsAlwaysOnDisplay = true`.
     /// Without this key, watchOS never activates AOD for the app and
     /// `.privacySensitive()` modifiers elsewhere are dead. This assertion

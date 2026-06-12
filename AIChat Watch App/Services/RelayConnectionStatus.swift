@@ -46,7 +46,7 @@ nonisolated enum RelayConnectionStatus: Equatable {
 /// `onChange`. A 250ms debounce collapses rapid-flap transitions so the
 /// UI dot does not flicker when many concurrent requests fail in a
 /// burst.
-final class RelayConnectionStatusHandler: @unchecked Sendable {
+nonisolated final class RelayConnectionStatusHandler: @unchecked Sendable {
     /// Debounce window. Status transitions that arrive more frequently
     /// than this are coalesced to the most recent value.
     static let debounceInterval: TimeInterval = 0.25

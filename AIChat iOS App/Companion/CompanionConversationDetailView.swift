@@ -36,6 +36,7 @@ private struct CompanionToolSettingsDraft: Equatable {
 }
 
 struct CompanionConversationDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var chatStore: ChatStore
 
     let conversationID: UUID
@@ -106,19 +107,19 @@ struct CompanionConversationDetailView: View {
         .sheet(isPresented: $isShowingActivationCenter) {
             CompanionActivationCenterView()
         }
-        .onChange(of: selectedPhotoItems) { items in
+        .onChange(of: selectedPhotoItems) { _, items in
             Task {
                 await importPickedItems(items)
             }
         }
-        .onChange(of: voiceRecorder.completedAttachment) { attachment in
+        .onChange(of: voiceRecorder.completedAttachment) { _, attachment in
             guard let attachment else {
                 return
             }
 
             handleRecordedAttachment(attachment)
         }
-        .onChange(of: voiceRecorder.errorMessage) { errorMessage in
+        .onChange(of: voiceRecorder.errorMessage) { _, errorMessage in
             guard let errorMessage else {
                 return
             }
@@ -170,6 +171,7 @@ struct CompanionConversationDetailView: View {
                                 message: message,
                                 suspendStreamingRender: suspendedStreamingRenderMessageID == message.id,
                                 forceExpandedContent: latestMessageID == message.id,
+                                streamingPacer: chatStore.streamingPacer,
                                 onPinMessage: { messageID, convoID, scope in
                                     await chatStore.pinMessage(id: messageID, from: convoID, scope: scope)
                                 }
@@ -180,11 +182,7 @@ struct CompanionConversationDetailView: View {
                     }
 
                     if let errorMessage = chatStore.errorMessage(for: conversationID) {
-                        ConfigurationBannerView(
-                            iconName: "exclamationmark.triangle.fill",
-                            title: "发送失败",
-                            message: errorMessage
-                        )
+                        failedReplyBanner(errorMessage)
                         .id("conversation-error")
                     }
 
@@ -263,7 +261,7 @@ struct CompanionConversationDetailView: View {
                     force: true
                 )
             }
-            .onChange(of: conversation.messages.count) { _ in
+            .onChange(of: conversation.messages.count) {
                 reconcileRenderedHistory(with: conversation.messages)
                 scrollToBottomIfNeeded(
                     with: proxy,
@@ -271,7 +269,7 @@ struct CompanionConversationDetailView: View {
                     autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
-            .onChange(of: renderedMessageBudget) { newBudget in
+            .onChange(of: renderedMessageBudget) { _, newBudget in
                 guard newBudget > 0 else {
                     return
                 }
@@ -292,21 +290,33 @@ struct CompanionConversationDetailView: View {
                     autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
-            .onChange(of: conversation.updatedAt) { _ in
+            .onChange(of: conversation.updatedAt) {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
                     autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
-            .onChange(of: chatStore.isSending(conversationID: conversationID)) { _ in
+            .onChange(of: chatStore.isSending(conversationID: conversationID)) {
                 scrollToBottomIfNeeded(
                     with: proxy,
                     animated: false,
                     autoScrollSessionMessageID: autoScrollSessionMessageID
                 )
             }
-            .onChange(of: streamingMessageID) { newMessageID in
+            .onChange(of: chatStore.isGlobalAutoScrollEnabled) { _, isEnabled in
+                if isEnabled {
+                    isAutoScrollInterrupted = false
+                    interruptedAutoScrollSessionMessageID = nil
+                    scrollToBottomIfNeeded(
+                        with: proxy,
+                        animated: true,
+                        autoScrollSessionMessageID: autoScrollSessionMessageID,
+                        force: true
+                    )
+                }
+            }
+            .onChange(of: streamingMessageID) { _, newMessageID in
                 handleStreamingMessageChange(
                     newMessageID,
                     latestAssistantMessageID: latestAssistantMessageID,
@@ -323,11 +333,11 @@ struct CompanionConversationDetailView: View {
         return VStack(alignment: .leading, spacing: 14) {
             Text(conversation.title)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             Text("继续这条会话，和手表实时同步。")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
             HStack(spacing: 10) {
                 CompanionHeaderMetric(title: "模型", value: AIModelCatalog.shortLabel(for: configuration.model))
@@ -342,8 +352,8 @@ struct CompanionConversationDetailView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.04, green: 0.18, blue: 0.24),
-                            Color.black.opacity(0.42)
+                            DS.Surface.elevatedStrongFill(for: colorScheme),
+                            DS.Surface.elevatedFill(for: colorScheme)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -351,7 +361,7 @@ struct CompanionConversationDetailView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }
@@ -360,7 +370,7 @@ struct CompanionConversationDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(chatStore.isReadOnlyMode ? "当前设备只读" : "继续对话")
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             Text(
                 chatStore.isReadOnlyMode ?
@@ -368,7 +378,7 @@ struct CompanionConversationDetailView: View {
                 "直接输入、录音，或加图片。"
             )
             .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.78))
+            .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
             if chatStore.isReadOnlyMode {
                 Button("激活当前设备") {
@@ -388,10 +398,10 @@ struct CompanionConversationDetailView: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.black.opacity(0.36))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }
@@ -401,7 +411,7 @@ struct CompanionConversationDetailView: View {
             chatStore.updateDraftText(text, for: conversationID)
         }
         .buttonStyle(.bordered)
-        .tint(.white.opacity(0.9))
+        .tint(DS.Text.primary(for: colorScheme))
     }
 
     private func historyLoadingCard(visibleCount: Int, totalCount: Int) -> some View {
@@ -412,11 +422,11 @@ struct CompanionConversationDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("正在准备历史消息")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                 Text("先显示最近 \(visibleCount) / \(totalCount) 条，等导航稳定后再继续。")
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(DS.Text.secondary(for: colorScheme))
             }
 
             Spacer(minLength: 0)
@@ -424,10 +434,10 @@ struct CompanionConversationDetailView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.34))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }
@@ -444,11 +454,11 @@ struct CompanionConversationDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("加载更早消息")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                     Text("还有 \(hiddenMessageCount) 条未渲染，当前显示最近 \(visibleCount) / \(totalCount) 条。")
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 }
 
                 Spacer(minLength: 0)
@@ -461,10 +471,10 @@ struct CompanionConversationDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.black.opacity(0.30))
+                    .fill(DS.Surface.elevatedFill(for: colorScheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                     )
             )
         }
@@ -511,6 +521,12 @@ struct CompanionConversationDetailView: View {
             isSending == false &&
             isTranscribing == false &&
             voiceRecorder.isInteractive
+        let primaryButtonTitle =
+            isSending ? "停止回复" :
+            (canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "发送")
+        let primaryButtonIconName =
+            isSending ? "stop.fill" :
+            (canRestorePreviousMessage ? "arrow.uturn.backward.circle.fill" : "arrow.up.circle.fill")
         let voiceButtonLabel =
             voiceRecorder.isRecording ?
             (voiceCaptureMode == .directSend ? "停止并发送" : "停止并转录") :
@@ -588,17 +604,17 @@ struct CompanionConversationDetailView: View {
                 TextField("Ask Gemini", text: draftTextBinding(), axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.body)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
                     .lineLimit(1...5)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(DS.Surface.subtleFill(for: colorScheme))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
                     )
                     .tint(.cyan)
                     .focused($isDraftFieldFocused)
@@ -612,7 +628,7 @@ struct CompanionConversationDetailView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(voiceRecorder.isRecording ? .red : .white)
+                    .tint(voiceRecorder.isRecording ? .red : DS.Text.primary(for: colorScheme))
                     .disabled(voiceButtonDisabled)
                     .simultaneousGesture(
                         LongPressGesture(minimumDuration: 0.45)
@@ -640,21 +656,25 @@ struct CompanionConversationDetailView: View {
                     .accessibilityIdentifier("conversation.tool-entry")
 
                     Button {
-                        if canRestorePreviousMessage {
+                        if isSending {
+                            stopCurrentReply()
+                        } else if canRestorePreviousMessage {
                             restorePreviousUserMessage()
                         } else {
                             sendCurrentDraft()
                         }
                     } label: {
                         Label(
-                            canRestorePreviousMessage ? L10n.tr("conversation.restore_previous_message") : "发送",
-                            systemImage: canRestorePreviousMessage ? "arrow.uturn.backward.circle.fill" : "arrow.up.circle.fill"
+                            primaryButtonTitle,
+                            systemImage: primaryButtonIconName
                         )
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.cyan)
-                    .disabled((sendEnabled || canRestorePreviousMessage) == false)
+                    .tint(isSending ? .red : .cyan)
+                    .disabled(isSending ? false : (sendEnabled || canRestorePreviousMessage) == false)
+                    .accessibilityLabel(primaryButtonTitle)
+                    .accessibilityIdentifier("conversation.send.primary")
                 }
             }
             .padding(.horizontal, 16)
@@ -666,12 +686,34 @@ struct CompanionConversationDetailView: View {
 
     private var companionComposerBackground: some View {
         Rectangle()
-            .fill(Color.black.opacity(0.78))
+            .fill(DS.Surface.elevatedStrongFill(for: colorScheme))
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(DS.Surface.elevatedStroke(for: colorScheme))
                     .frame(height: 1)
             }
+    }
+
+    private func failedReplyBanner(_ errorMessage: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ConfigurationBannerView(
+                iconName: "exclamationmark.triangle.fill",
+                title: "发送失败",
+                message: errorMessage
+            )
+
+            if chatStore.canRetryLatestReply(in: conversationID) {
+                Button {
+                    retryLatestReply()
+                } label: {
+                    Label("重试上一条回复", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .accessibilityIdentifier("conversation.retry-latest")
+            }
+        }
     }
 
     private var conversationToolSheet: some View {
@@ -827,6 +869,28 @@ struct CompanionConversationDetailView: View {
         isDraftFieldFocused = true
     }
 
+    private func retryLatestReply() {
+        guard chatStore.isReadOnlyMode == false else {
+            isShowingActivationCenter = true
+            return
+        }
+
+        guard chatStore.canRetryLatestReply(in: conversationID) else {
+            return
+        }
+
+        chatStore.clearError(for: conversationID)
+        isDraftFieldFocused = false
+
+        Task {
+            await chatStore.retryLatestReply(in: conversationID)
+        }
+    }
+
+    private func stopCurrentReply() {
+        chatStore.stopSending(in: conversationID)
+    }
+
     private func scrollToBottom(with proxy: ScrollViewProxy, animated: Bool) {
         isAutoScrollInterrupted = false
         scrollInterruptionsSuppressedUntil = Date.now.addingTimeInterval(CompanionConversationScrollLayout.suppressionDuration)
@@ -877,6 +941,10 @@ struct CompanionConversationDetailView: View {
     }
 
     private func shouldAutoScroll(for autoScrollSessionMessageID: UUID?) -> Bool {
+        guard chatStore.isGlobalAutoScrollEnabled else {
+            return false
+        }
+
         if interruptedAutoScrollSessionMessageID == autoScrollSessionMessageID,
            interruptedAutoScrollSessionMessageID != nil {
             return false
@@ -1229,7 +1297,7 @@ struct CompanionConversationDetailView: View {
     }
 
     private func toolButtonTint(for configuration: ConversationAIConfiguration) -> Color {
-        (configuration.usesGoogleSearch || configuration.usesCodeExecution) ? .cyan : .white
+        (configuration.usesGoogleSearch || configuration.usesCodeExecution) ? .cyan : DS.Text.primary(for: colorScheme)
     }
 
     private func toolButtonAccessibilityLabel(for configuration: ConversationAIConfiguration) -> String {
@@ -1284,6 +1352,8 @@ private struct CompanionConversationBottomAnchorMaxYPreferenceKey: PreferenceKey
 }
 
 private struct CompanionHeaderMetric: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let value: String
 
@@ -1291,12 +1361,12 @@ private struct CompanionHeaderMetric: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.56))
+                .foregroundStyle(DS.Text.tertiary(for: colorScheme))
 
             OverflowScrollingText(
                 text: value,
                 font: .caption.weight(.semibold),
-                color: .white,
+                color: DS.Text.primary(for: colorScheme),
                 gap: 18,
                 speed: 24,
                 expandsHorizontally: true
@@ -1307,12 +1377,14 @@ private struct CompanionHeaderMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
     }
 }
 
 private struct CompanionComposerMenuLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let iconName: String
     let title: String
 
@@ -1325,7 +1397,7 @@ private struct CompanionComposerMenuLabel: View {
             OverflowScrollingText(
                 text: title,
                 font: .caption.weight(.semibold),
-                color: .white,
+                color: DS.Text.primary(for: colorScheme),
                 gap: 18,
                 speed: 24,
                 expandsHorizontally: true
@@ -1334,7 +1406,7 @@ private struct CompanionComposerMenuLabel: View {
 
             Image(systemName: "chevron.down")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(DS.Text.tertiary(for: colorScheme))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
@@ -1342,16 +1414,18 @@ private struct CompanionComposerMenuLabel: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
         )
     }
 }
 
 private struct CompanionInlineStatus: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let iconName: String
     let title: String
 
@@ -1362,7 +1436,7 @@ private struct CompanionInlineStatus: View {
             OverflowScrollingText(
                 text: title,
                 font: .subheadline,
-                color: .white.opacity(0.88),
+                color: DS.Text.primary(for: colorScheme),
                 gap: 18,
                 speed: 24,
                 expandsHorizontally: true
@@ -1373,12 +1447,14 @@ private struct CompanionInlineStatus: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
     }
 }
 
 private struct CompanionDraftAttachmentCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let attachment: ChatAttachment
     let onRemove: () -> Void
 
@@ -1425,7 +1501,7 @@ private struct CompanionDraftAttachmentCard: View {
             OverflowScrollingText(
                 text: attachment.filename,
                 font: .caption,
-                color: .white.opacity(0.82),
+                color: DS.Text.secondary(for: colorScheme),
                 gap: 18,
                 speed: 22,
                 expandsHorizontally: true

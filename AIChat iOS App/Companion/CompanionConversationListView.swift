@@ -175,6 +175,8 @@ struct CompanionConversationListView: View {
 }
 
 private struct CompanionConversationEmptyState: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let isReadOnlyMode: Bool
     let onCreateConversation: () -> Void
     let onOpenActivation: () -> Void
@@ -183,7 +185,7 @@ private struct CompanionConversationEmptyState: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(isReadOnlyMode ? "同步已就绪" : "从 iPhone 开始继续聊")
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             Text(
                 isReadOnlyMode ?
@@ -191,7 +193,7 @@ private struct CompanionConversationEmptyState: View {
                 "新建一条会话后，iPhone 和手表会共享同一套聊天记录、模型设置、图片与录音上下文。"
             )
             .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.78))
+            .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
             Button {
                 if isReadOnlyMode {
@@ -210,10 +212,10 @@ private struct CompanionConversationEmptyState: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.black.opacity(0.42))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
         .padding(.vertical, 6)
@@ -222,6 +224,8 @@ private struct CompanionConversationEmptyState: View {
 }
 
 struct CompanionConversationRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let conversation: ConversationThread
     let aiConfiguration: ConversationAIConfiguration
 
@@ -230,7 +234,7 @@ struct CompanionConversationRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(conversation.title)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
                     .lineLimit(2)
 
                 if conversation.isFavorite {
@@ -243,12 +247,12 @@ struct CompanionConversationRow: View {
 
                 Text(conversation.updatedAt, style: .relative)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(DS.Text.tertiary(for: colorScheme))
             }
 
             Text(conversation.previewText)
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 .lineLimit(3)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -275,10 +279,10 @@ struct CompanionConversationRow: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.black.opacity(0.38))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
         .padding(.vertical, 4)
@@ -286,6 +290,8 @@ struct CompanionConversationRow: View {
 }
 
 private struct CompanionMetaChip: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let iconName: String
 
@@ -298,11 +304,11 @@ private struct CompanionMetaChip: View {
             .padding(.vertical, 6)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(DS.Surface.subtleFill(for: colorScheme))
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
             )
     }
 }

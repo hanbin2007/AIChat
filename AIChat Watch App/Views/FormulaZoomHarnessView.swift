@@ -115,6 +115,8 @@ struct FormulaZoomHarnessView: View {
 }
 
 private struct FormulaEvidenceCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let caption: String?
     let markdown: String
@@ -128,12 +130,12 @@ private struct FormulaEvidenceCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             if let caption {
                 Text(caption)
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(DS.Text.secondary(for: colorScheme))
             }
 
             ChatBubbleView(
@@ -147,7 +149,7 @@ private struct FormulaEvidenceCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.30))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(accessibilityIdentifier)

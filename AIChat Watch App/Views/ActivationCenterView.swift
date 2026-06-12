@@ -10,6 +10,7 @@ import SwiftUI
 #if os(watchOS)
 struct ActivationCenterView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var chatStore: ChatStore
 
     @State private var requestCode = ""
@@ -18,6 +19,7 @@ struct ActivationCenterView: View {
     @State private var feedbackMessage: String?
     @State private var isSubmitting = false
     @State private var isShowingActivationCodeEntry = false
+    @State private var isShowingClearActivationConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -50,7 +52,7 @@ struct ActivationCenterView: View {
                             .padding(10)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color.black.opacity(0.28))
+                                    .fill(DS.Surface.subtleFill(for: colorScheme))
                             )
 
                         Text(
@@ -80,7 +82,7 @@ struct ActivationCenterView: View {
                             .padding(10)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(Color.black.opacity(0.28))
+                                    .fill(DS.Surface.subtleFill(for: colorScheme))
                             )
 
                         Text("打开一个只包含原生输入框的页面，避免当前列表布局影响点击和焦点。")
@@ -121,11 +123,7 @@ struct ActivationCenterView: View {
                 if chatStore.activationState != nil {
                     Section {
                         Button("清除当前授权", role: .destructive) {
-                            Task {
-                                await chatStore.clearActivation()
-                                refreshRequestCode()
-                                feedbackMessage = L10n.tr("activation.feedback.cleared")
-                            }
+                            isShowingClearActivationConfirmation = true
                         }
                     }
                 }
@@ -142,6 +140,16 @@ struct ActivationCenterView: View {
             .sheet(isPresented: $isShowingActivationCodeEntry) {
                 ActivationCodeEntrySheet(draftActivationCode: $draftActivationCode)
             }
+            .alert("清除当前授权？", isPresented: $isShowingClearActivationConfirmation) {
+                Button("清除当前授权", role: .destructive) {
+                    Task {
+                        await clearActivation()
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("清除后，这台设备会回到未授权状态，需要重新导入或申请授权。")
+            }
             .onAppear {
                 refreshRequestCode()
                 Task {
@@ -149,6 +157,12 @@ struct ActivationCenterView: View {
                 }
             }
         }
+    }
+
+    private func clearActivation() async {
+        await chatStore.clearActivation()
+        refreshRequestCode()
+        feedbackMessage = L10n.tr("activation.feedback.cleared")
     }
 
     @ViewBuilder

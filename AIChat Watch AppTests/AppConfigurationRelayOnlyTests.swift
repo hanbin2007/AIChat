@@ -26,6 +26,7 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
 
     @MainActor
     func testServiceFactoryAlwaysCreatesRelayClient() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
         let configuration = AppConfiguration(
             backendMode: .relay,
             geminiAPIKey: "unused-direct-key",
@@ -37,8 +38,39 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
             appGroupIdentifier: nil
         )
 
-        let service = AIServiceFactory.makeService(configuration: configuration)
+        let service = AIServiceFactory.makeService(
+            configuration: configuration,
+            relayAccessRootURL: relayAccessRootURL
+        )
+        let client = try XCTUnwrap(service as? RelayAIClient)
 
-        XCTAssertTrue(service is RelayAIClient)
+        XCTAssertEqual(client.relayAccessRootURL, relayAccessRootURL)
+    }
+
+    @MainActor
+    func testRelayBearerTokenCanResolveFromExplicitAccessRoot() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = RelayAccessRepository(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        let status = makeManagedRelayAccessStatus()
+
+        try await repository.saveStatus(status)
+
+        XCTAssertEqual(
+            configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL),
+            status.key?.keyValue
+        )
     }
 }

@@ -14,31 +14,27 @@ struct ConversationSettingsView: View {
 
     let conversationID: UUID
 
-    @State private var draftTitle = ""
-    @State private var draftSystemPrompt = ""
-    @State private var promptSaveTask: Task<Void, Never>?
+    @State private var draft = ConversationSettingsDraft(title: "", systemPrompt: "")
     @State private var isShowingPromptPresetPicker = false
+    @State private var pendingDestructiveAction: DestructiveAction?
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Conversation") {
-                    TextField("Title", text: $draftTitle)
+                    TextField("Title", text: $draft.title)
                         .disabled(chatStore.isReadOnlyMode)
 
                     Button("Save Title") {
                         Task {
-                            await chatStore.renameConversation(id: conversationID, title: draftTitle)
+                            await chatStore.renameConversation(id: conversationID, title: draft.title)
                             dismiss()
                         }
                     }
-                    .disabled(chatStore.isReadOnlyMode || draftTitle.trimmed.isEmpty)
+                    .disabled(chatStore.isReadOnlyMode || draft.title.trimmed.isEmpty)
 
                     Button("Clear Messages", role: .destructive) {
-                        Task {
-                            await chatStore.clearConversation(id: conversationID)
-                            dismiss()
-                        }
+                        pendingDestructiveAction = .clearMessages
                     }
                     .disabled(chatStore.isReadOnlyMode)
                 }
@@ -63,7 +59,7 @@ struct ConversationSettingsView: View {
 
                             TextField(
                                 "Use the built-in prompt",
-                                text: $draftSystemPrompt,
+                                text: $draft.systemPrompt,
                                 axis: .vertical
                             )
                             .disabled(chatStore.isReadOnlyMode)
@@ -78,9 +74,23 @@ struct ConversationSettingsView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
 
-                            if chatStore.isReadOnlyMode == false, draftSystemPrompt.trimmed.isEmpty == false {
+                            if chatStore.isReadOnlyMode == false, draft.isSystemPromptDirty {
+                                Button("Save Prompt") {
+                                    Task {
+                                        await saveSystemPrompt()
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Button("Discard Prompt Changes") {
+                                    draft.revertSystemPrompt()
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+
+                            if chatStore.isReadOnlyMode == false, draft.systemPrompt.trimmed.isEmpty == false {
                                 Button {
-                                    draftSystemPrompt = ""
+                                    draft.systemPrompt = ""
                                 } label: {
                                     Label("Clear Prompt", systemImage: "xmark.circle.fill")
                                 }
@@ -121,9 +131,7 @@ struct ConversationSettingsView: View {
 
                                     if chatStore.isReadOnlyMode == false {
                                         Button("Remove", role: .destructive) {
-                                            Task {
-                                                await chatStore.removePinnedMemory(id: item.id, from: conversation.id)
-                                            }
+                                            pendingDestructiveAction = .removePinnedMemory(item.id)
                                         }
                                         .font(.caption2)
                                     }
@@ -136,10 +144,7 @@ struct ConversationSettingsView: View {
 
                 Section("Danger Zone") {
                     Button("Delete Conversation", role: .destructive) {
-                        Task {
-                            await chatStore.deleteConversation(id: conversationID)
-                            dismiss()
-                        }
+                        pendingDestructiveAction = .deleteConversation
                     }
                     .accessibilityIdentifier("conversation.settings.delete")
                 }
@@ -151,22 +156,27 @@ struct ConversationSettingsView: View {
                     kind: .conversation,
                     title: L10n.tr("prompt_preset.library.title"),
                     onSelect: { preset in
-                        draftSystemPrompt = preset.content
+                        draft.systemPrompt = preset.content
                     }
                 )
             }
+            .alert(item: $pendingDestructiveAction) { action in
+                Alert(
+                    title: Text(action.title),
+                    message: Text(action.message),
+                    primaryButton: .destructive(Text(action.confirmTitle)) {
+                        Task {
+                            await performDestructiveAction(action)
+                        }
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
             .onAppear {
-                draftTitle = chatStore.conversation(id: conversationID)?.title ?? ""
-                draftSystemPrompt = chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
-            }
-            .onChange(of: draftSystemPrompt) { _, newValue in
-                schedulePromptSave(newValue)
-            }
-            .onDisappear {
-                promptSaveTask?.cancel()
-                Task {
-                    await chatStore.updateCustomSystemPrompt(draftSystemPrompt, for: conversationID)
-                }
+                draft = ConversationSettingsDraft(
+                    title: chatStore.conversation(id: conversationID)?.title ?? "",
+                    systemPrompt: chatStore.aiConfiguration(for: conversationID).customSystemPrompt ?? ""
+                )
             }
         }
     }
@@ -180,19 +190,27 @@ struct ConversationSettingsView: View {
         return L10n.tr("system_prompt.hint.builtin")
     }
 
-    private func schedulePromptSave(_ prompt: String) {
-        promptSaveTask?.cancel()
-        guard chatStore.isReadOnlyMode == false else {
+    private func saveSystemPrompt() async {
+        guard chatStore.isReadOnlyMode == false,
+              let prompt = draft.systemPromptSavePayload()
+        else {
             return
         }
 
-        promptSaveTask = Task { [conversationID, prompt] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard Task.isCancelled == false else {
-                return
-            }
+        await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
+        draft.markSystemPromptSaved()
+    }
 
-            await chatStore.updateCustomSystemPrompt(prompt, for: conversationID)
+    private func performDestructiveAction(_ action: DestructiveAction) async {
+        switch action {
+        case .clearMessages:
+            await chatStore.clearConversation(id: conversationID)
+            dismiss()
+        case .deleteConversation:
+            await chatStore.deleteConversation(id: conversationID)
+            dismiss()
+        case .removePinnedMemory(let memoryID):
+            await chatStore.removePinnedMemory(id: memoryID, from: conversationID)
         }
     }
 
@@ -205,6 +223,56 @@ struct ConversationSettingsView: View {
                 chatStore.setUsesGlobalPinnedMemory(newValue, for: conversationID)
             }
         )
+    }
+
+    private enum DestructiveAction: Identifiable {
+        case clearMessages
+        case deleteConversation
+        case removePinnedMemory(UUID)
+
+        var id: String {
+            switch self {
+            case .clearMessages:
+                return "clearMessages"
+            case .deleteConversation:
+                return "deleteConversation"
+            case .removePinnedMemory(let memoryID):
+                return "removePinnedMemory-\(memoryID.uuidString)"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .clearMessages:
+                return "Clear messages?"
+            case .deleteConversation:
+                return "Delete conversation?"
+            case .removePinnedMemory:
+                return "Remove pinned memory?"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .clearMessages:
+                return "This removes all messages in the conversation."
+            case .deleteConversation:
+                return "This conversation will be removed from this device."
+            case .removePinnedMemory:
+                return "This memory will no longer be pinned to this chat."
+            }
+        }
+
+        var confirmTitle: String {
+            switch self {
+            case .clearMessages:
+                return "Clear Messages"
+            case .deleteConversation:
+                return "Delete Conversation"
+            case .removePinnedMemory:
+                return "Remove"
+            }
+        }
     }
 }
 #endif

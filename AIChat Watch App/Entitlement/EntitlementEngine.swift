@@ -3,7 +3,7 @@ import Foundation
 /// Pure functional core of the activation system. Zero IO, zero side effects.
 /// `reduce` evolves persisted state; `derive` produces the single decision every
 /// consumer reads (spec §4/§5/§6). Time is injected via parameters (replayable).
-enum EntitlementEngine {
+nonisolated enum EntitlementEngine {
     static let defaultGraceWindow: TimeInterval = 7 * 24 * 3600  // spec §13: 7 days
 
     // MARK: - Derive (single decision outlet)

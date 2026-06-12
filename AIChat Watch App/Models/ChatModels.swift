@@ -629,7 +629,7 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable, Sendable {
             return nil
         }
 
-        return UIImage(data: data)
+        return ChatAttachmentPreviewImageCache.shared.image(for: self)
     }
 
     var sizeInBytes: Int {
@@ -793,6 +793,54 @@ nonisolated struct ChatAttachment: Identifiable, Codable, Hashable, Sendable {
 }
 
 typealias ChatImageAttachment = ChatAttachment
+
+nonisolated private final class ChatAttachmentPreviewImageCache: @unchecked Sendable {
+    static let shared = ChatAttachmentPreviewImageCache()
+
+    private let cache = NSCache<NSString, UIImage>()
+
+    private init() {
+        cache.countLimit = 96
+        cache.totalCostLimit = ChatAttachment.maximumImagePayloadBytes * 24
+    }
+
+    func image(for attachment: ChatAttachment) -> UIImage? {
+        let key = cacheKey(for: attachment)
+        if let cachedImage = cache.object(forKey: key) {
+            return cachedImage
+        }
+
+        guard let image = UIImage(data: attachment.data) else {
+            return nil
+        }
+
+        cache.setObject(image, forKey: key, cost: attachment.data.count)
+        return image
+    }
+
+    private func cacheKey(for attachment: ChatAttachment) -> NSString {
+        [
+            attachment.id.uuidString,
+            attachment.kind.rawValue,
+            attachment.mimeType,
+            "\(attachment.data.count)",
+            "\(attachment.pixelWidth ?? -1)",
+            "\(attachment.pixelHeight ?? -1)",
+            dataFingerprint(for: attachment.data)
+        ]
+        .joined(separator: "|") as NSString
+    }
+
+    private func dataFingerprint(for data: Data) -> String {
+        guard data.isEmpty == false else {
+            return "empty"
+        }
+
+        let middleIndex = data.index(data.startIndex, offsetBy: data.count / 2)
+        let lastIndex = data.index(before: data.endIndex)
+        return "\(data[data.startIndex])-\(data[middleIndex])-\(data[lastIndex])"
+    }
+}
 
 nonisolated struct ChatMessage: Identifiable, Codable, Hashable {
     let id: UUID
@@ -1089,7 +1137,7 @@ nonisolated struct ChatMessageRenderSignature: Equatable {
     let attachments: [ChatAttachmentRenderSignature]
 }
 
-extension ChatAttachment {
+nonisolated extension ChatAttachment {
     var renderSignature: ChatAttachmentRenderSignature {
         ChatAttachmentRenderSignature(
             id: id,
@@ -1105,7 +1153,7 @@ extension ChatAttachment {
     }
 }
 
-extension String {
+nonisolated extension String {
     private enum AssistantMessageRenderingThreshold {
         static let maximumMarkdownCharacters = 2_400
         static let maximumMarkdownLines = 48

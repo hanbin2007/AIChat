@@ -36,8 +36,23 @@ enum RelayAPIError: LocalizedError, Equatable {
     }
 }
 
-struct RelayAIClient: AIStreamingService {
+protocol RelayCredentialProviding {
+    nonisolated func relayBearerToken() -> String?
+}
+
+struct StoredRelayCredentialProvider: RelayCredentialProviding {
     let configuration: AppConfiguration
+    var rootURL: URL?
+
+    func relayBearerToken() -> String? {
+        configuration.resolvedRelayBearerToken(rootURL: rootURL)
+    }
+}
+
+nonisolated struct RelayAIClient: AIStreamingService {
+    let configuration: AppConfiguration
+    var relayAccessRootURL: URL? = nil
+    var credentialProvider: (any RelayCredentialProviding)?
     var session: URLSession = .shared
     var maxContextMessages: Int = 12
     var maxCharacterBudget: Int = 12_000
@@ -51,21 +66,7 @@ struct RelayAIClient: AIStreamingService {
     func streamReply(for conversation: ConversationThread) -> AsyncThrowingStream<AIStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             do {
-                guard let url = configuration.relayStreamURL,
-                      let bearerToken = configuration.resolvedRelayBearerToken
-                else {
-                    throw RelayAPIError.missingConfiguration
-                }
-
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
-                request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-
-                let encoder = JSONEncoder()
-                encoder.keyEncodingStrategy = .convertToSnakeCase
-                request.httpBody = try encoder.encode(makeRelayRequest(for: conversation))
+                let request = try makeStreamRequest(for: conversation)
 
                 statusHandler?.report(.connecting)
 
@@ -90,6 +91,25 @@ struct RelayAIClient: AIStreamingService {
                 continuation.finish(throwing: error)
             }
         }
+    }
+
+    func makeStreamRequest(for conversation: ConversationThread) throws -> URLRequest {
+        guard let url = configuration.relayStreamURL,
+              let bearerToken = resolvedCredentialProvider.relayBearerToken()
+        else {
+            throw RelayAPIError.missingConfiguration
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        request.httpBody = try encoder.encode(makeRelayRequest(for: conversation))
+        return request
     }
 
     func makeRelayRequest(for conversation: ConversationThread) -> RelayChatRequest {
@@ -138,10 +158,19 @@ struct RelayAIClient: AIStreamingService {
 
         return "Listen to the attached audio, infer the user's request, and answer it directly."
     }
+
+    private var resolvedCredentialProvider: any RelayCredentialProviding {
+        credentialProvider ?? StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+    }
 }
 
-struct RelayTranscriptionService: AITranscriptionService {
+nonisolated struct RelayTranscriptionService: AITranscriptionService {
     let configuration: AppConfiguration
+    var relayAccessRootURL: URL? = nil
+    var credentialProvider: (any RelayCredentialProviding)?
     var session: URLSession = .shared
     var maxContextMessages: Int = 8
     var maxContextCharacters: Int = 2_400
@@ -156,7 +185,7 @@ struct RelayTranscriptionService: AITranscriptionService {
         }
 
         guard let url = configuration.relayTranscriptionURL,
-              let bearerToken = configuration.resolvedRelayBearerToken
+              let bearerToken = resolvedCredentialProvider.relayBearerToken()
         else {
             throw RelayAPIError.missingConfiguration
         }
@@ -285,6 +314,13 @@ struct RelayTranscriptionService: AITranscriptionService {
                 )
             )
         }.value
+    }
+
+    private var resolvedCredentialProvider: any RelayCredentialProviding {
+        credentialProvider ?? StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
     }
 }
 

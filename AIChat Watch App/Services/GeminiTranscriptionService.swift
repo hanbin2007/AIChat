@@ -7,7 +7,7 @@
 
 import Foundation
 
-private enum VoiceTranscriptionLimits {
+nonisolated private enum VoiceTranscriptionLimits {
     static let maxOutputTokens = 5_120
 }
 

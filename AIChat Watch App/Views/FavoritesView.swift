@@ -9,6 +9,7 @@ import SwiftUI
 
 #if os(watchOS)
 struct FavoritesView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var chatStore: ChatStore
     @Binding var navigationPath: [UUID]
 
@@ -55,20 +56,22 @@ struct FavoritesView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("favorites.empty.title"))
                 .font(.headline)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
 
             Text(L10n.tr("favorites.empty.message"))
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.42))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
+        .accessibilityIdentifier("favorites.empty-state")
     }
 }
 #endif

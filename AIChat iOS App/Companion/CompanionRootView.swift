@@ -17,6 +17,7 @@ struct CompanionBottomSurfaceHeightKey: PreferenceKey {
 }
 
 struct CompanionRootView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var chatStore: ChatStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -42,18 +43,19 @@ struct CompanionRootView: View {
             } else {
                 CompanionEmptySelectionView(
                     isReadOnlyMode: chatStore.isReadOnlyMode,
-                    onCreateConversation: createConversation
+                    hasSyncedConversations: chatStore.conversations.isEmpty == false,
+                    onPrimaryAction: handleEmptySelectionPrimaryAction
                 )
             }
         }
         .background(alignment: .bottom) {
             if shouldExtendBottomSurface {
                 Rectangle()
-                    .fill(Color.black.opacity(0.78))
+                    .fill(DS.Surface.elevatedStrongFill(for: colorScheme))
                     .frame(height: bottomSurfaceHeight)
                     .overlay(alignment: .top) {
                         Rectangle()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(DS.Surface.elevatedStroke(for: colorScheme))
                             .frame(height: 1)
                     }
                     .ignoresSafeArea(.container, edges: .bottom)
@@ -82,10 +84,10 @@ struct CompanionRootView: View {
 
             handleDeepLink(deepLink)
         }
-        .onChange(of: chatStore.conversations.map(\.id)) { ids in
+        .onChange(of: chatStore.conversations.map(\.id)) { _, ids in
             reconcileSelection(with: ids)
         }
-        .onChange(of: selectedConversationID) { conversationID in
+        .onChange(of: selectedConversationID) { _, conversationID in
             if conversationID == nil {
                 bottomSurfaceHeight = 0
             }
@@ -105,6 +107,19 @@ struct CompanionRootView: View {
                     selectedConversationID = conversationID
                 }
             }
+        }
+    }
+
+    private func handleEmptySelectionPrimaryAction() {
+        guard chatStore.isReadOnlyMode else {
+            createConversation()
+            return
+        }
+
+        if let conversationID = chatStore.conversations.first?.id {
+            selectedConversationID = conversationID
+        } else {
+            isShowingActivationCenter = true
         }
     }
 
@@ -136,8 +151,11 @@ struct CompanionRootView: View {
 }
 
 private struct CompanionEmptySelectionView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let isReadOnlyMode: Bool
-    let onCreateConversation: () -> Void
+    let hasSyncedConversations: Bool
+    let onPrimaryAction: () -> Void
 
     var body: some View {
         ZStack {
@@ -146,18 +164,18 @@ private struct CompanionEmptySelectionView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("AIChat")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                 Text(
                     isReadOnlyMode ?
-                    "当前会话已同步到 iPhone。完成当前设备激活后，你可以在这里直接继续发消息、录音和传图。" :
+                    readOnlyMessage :
                     "左侧选择一个会话，或直接新建一条对话，在 iPhone 上继续和手表保持同步。"
                 )
                 .font(.body)
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
-                Button(action: onCreateConversation) {
-                    Label(isReadOnlyMode ? "查看已同步会话" : "开始新会话", systemImage: "square.and.pencil")
+                Button(action: onPrimaryAction) {
+                    Label(primaryActionTitle, systemImage: primaryActionIconName)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -167,15 +185,39 @@ private struct CompanionEmptySelectionView: View {
             .frame(maxWidth: 520, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(Color.black.opacity(0.4))
+                    .fill(DS.Surface.elevatedFill(for: colorScheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                     )
             )
             .padding(24)
         }
         .accessibilityIdentifier("companion.empty-selection")
+    }
+
+    private var readOnlyMessage: String {
+        if hasSyncedConversations {
+            return "当前会话已同步到 iPhone。选择已有同步会话查看历史；完成当前设备激活后即可继续发消息、录音和传图。"
+        }
+
+        return "当前设备尚未激活。完成激活后，你可以在这里继续发消息、录音和传图。"
+    }
+
+    private var primaryActionTitle: String {
+        if isReadOnlyMode {
+            return hasSyncedConversations ? "查看已同步会话" : "激活当前设备"
+        }
+
+        return "开始新会话"
+    }
+
+    private var primaryActionIconName: String {
+        if isReadOnlyMode {
+            return hasSyncedConversations ? "bubble.left.and.bubble.right.fill" : "key.fill"
+        }
+
+        return "square.and.pencil"
     }
 }
 #endif

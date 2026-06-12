@@ -217,7 +217,7 @@ struct RelayAccountService {
     }
 
     private func storedBearerToken() async -> String? {
-        await repository.storedRelayKey() ?? configuration.resolvedRelayBearerToken
+        await repository.storedRelayKey()
     }
 
     private func performJSONRequest<T: Decodable, Body: Encodable>(

@@ -148,6 +148,8 @@ struct GeminiMemoryExtractionClient: AIMemoryExtractionClient {
 
 struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
     let configuration: AppConfiguration
+    var relayAccessRootURL: URL? = nil
+    var credentialProvider: (any RelayCredentialProviding)?
     var session: URLSession = .shared
 
     func extractMemory(
@@ -155,7 +157,7 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
     ) async throws -> ConversationMemoryExtractionResponse {
         guard let url = configuration.relayMemoryExtractURL,
               let relayBaseURL = configuration.relayBaseURL,
-              let bearerToken = configuration.resolvedRelayBearerToken
+              let bearerToken = resolvedCredentialProvider.relayBearerToken()
         else {
             throw RelayAPIError.missingConfiguration
         }
@@ -211,6 +213,13 @@ struct RelayMemoryExtractionClient: AIMemoryExtractionClient {
         }
 
         return RelayAPIError.invalidResponse
+    }
+
+    private var resolvedCredentialProvider: any RelayCredentialProviding {
+        credentialProvider ?? StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
     }
 }
 

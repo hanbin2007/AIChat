@@ -89,6 +89,8 @@ private actor AssistantMessageMarkdownCache {
 }
 
 struct AssistantMessageMarkdownView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let text: String
 
     @State private var preparedContent: MarkdownContent?
@@ -156,7 +158,7 @@ struct AssistantMessageMarkdownView: View {
                 "正在渲染内容"
             )
             .font(.footnote)
-            .foregroundStyle(.white.opacity(0.8))
+            .foregroundStyle(DS.Text.muted(for: colorScheme))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -178,9 +180,8 @@ struct AssistantMessageMarkdownView: View {
             .font(.footnote.weight(.semibold), for: .tableHeader)
             .tint(Color(red: 0.57, green: 0.82, blue: 0.97), for: .link)
             .tint(Color(red: 0.97, green: 0.73, blue: 0.40), for: .inlineCodeBlock)
-            .tint(Color.white.opacity(0.7), for: .blockQuote)
+            .tint(DS.Text.secondary(for: colorScheme), for: .blockQuote)
             .mathFont(mathFont)
-            .environment(\.colorScheme, .dark)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 

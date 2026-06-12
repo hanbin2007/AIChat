@@ -3,7 +3,7 @@ import Foundation
 typealias ModelID = String
 
 /// Pure projection of the server account+key+catalog, decoupled from wire Codable types.
-struct RelaySnapshot: Codable, Equatable {
+nonisolated struct RelaySnapshot: Codable, Equatable {
     var accountID: UUID
     var accountState: RelayAccountState
     var source: RelayAccessSource
@@ -15,7 +15,7 @@ struct RelaySnapshot: Codable, Equatable {
     var rates: [ModelID: ModelRate]
 }
 
-struct ModelRate: Codable, Equatable {
+nonisolated struct ModelRate: Codable, Equatable {
     var inputCreditsPerMillion: Int
     var outputCreditsPerMillion: Int
     var searchSurchargeCredits: Int
@@ -23,8 +23,8 @@ struct ModelRate: Codable, Equatable {
 
 // MARK: - Decision (the single consumption outlet, spec §4)
 
-struct EntitlementDecision: Equatable {
-    enum Capability: Equatable {
+nonisolated struct EntitlementDecision: Equatable {
+    nonisolated enum Capability: Equatable {
         case ready
         case readOnly(LockReason)
         case bootstrapping
@@ -35,7 +35,7 @@ struct EntitlementDecision: Equatable {
     var cta: ActionableCTA?
 }
 
-enum LockReason: Equatable {
+nonisolated enum LockReason: Equatable {
     case platformNotConfigured
     case noAccount
     case revoked
@@ -44,12 +44,12 @@ enum LockReason: Equatable {
     case offlineGraceElapsed
 }
 
-struct CreditView: Equatable {
+nonisolated struct CreditView: Equatable {
     var balance: Int            // effective = server balance - localSpend
     var expiresAt: Date?
 }
 
-enum ActionableCTA: Equatable {
+nonisolated enum ActionableCTA: Equatable {
     case configurePlatform
     case activate
     case reenterCode
@@ -59,17 +59,17 @@ enum ActionableCTA: Equatable {
 
 // MARK: - State (persisted, spec §5)
 
-struct OfflineCode: Codable, Equatable {
+nonisolated struct OfflineCode: Codable, Equatable {
     var raw: String
     var issuedAt: Date
 }
 
-struct PairingToken: Codable, Equatable {
+nonisolated struct PairingToken: Codable, Equatable {
     var token: String
     var issuedAt: Date
 }
 
-enum PendingBootstrap: Codable, Equatable {
+nonisolated enum PendingBootstrap: Codable, Equatable {
     case offlineCode(OfflineCode)
     case pairedToken(PairingToken)
 
@@ -81,13 +81,13 @@ enum PendingBootstrap: Codable, Equatable {
     }
 }
 
-enum RelayHardFailure: String, Codable, Equatable {
+nonisolated enum RelayHardFailure: String, Codable, Equatable {
     case revoked
     case paused
     case accountMissing
 }
 
-struct EntitlementState: Codable, Equatable {
+nonisolated struct EntitlementState: Codable, Equatable {
     var account: RelaySnapshot?
     var lastVerifiedAt: Date?
     var localSpend: Int
@@ -114,7 +114,7 @@ struct EntitlementState: Codable, Equatable {
 
 // MARK: - Events (spec §5)
 
-enum EntitlementEvent {
+nonisolated enum EntitlementEvent {
     case relayRefreshed(RelaySnapshot, now: Date)
     case relayRefreshFailed(hard: RelayHardFailure?, now: Date)  // hard != nil for 401/revoke
     case offlineCodeEntered(OfflineCode)

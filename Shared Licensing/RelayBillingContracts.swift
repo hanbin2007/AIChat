@@ -5,9 +5,9 @@ import os
 /// be swallowed by `try?`; we now at least emit a fault so a wire-format drift
 /// (new enum value, format change) is visible instead of silently nuking the
 /// account/key into nil.
-let relayBillingLog = Logger(subsystem: "com.aichat.relay", category: "billing-decode")
+nonisolated let relayBillingLog = Logger(subsystem: "com.aichat.relay", category: "billing-decode")
 
-enum RelayDateDecoding {
+nonisolated enum RelayDateDecoding {
     /// Parses ISO 8601 dates from the Next.js relay, which emits **millisecond**
     /// precision (`Date.toISOString()` → `2026-06-11T03:11:30.075Z`). The
     /// `.iso8601` strategy rejects fractional seconds on watchOS 11-12 / iOS
@@ -46,7 +46,7 @@ enum RelayDateDecoding {
 
 extension JSONDecoder {
     /// Applies the relay's lenient millisecond/second ISO 8601 date strategy.
-    func applyRelayDateDecoding() {
+    nonisolated func applyRelayDateDecoding() {
         dateDecodingStrategy = RelayDateDecoding.strategy
     }
 }

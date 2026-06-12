@@ -62,8 +62,32 @@ private final class ScrollGeometryTracker {
     var distanceFromBottom: CGFloat = 0
 }
 
+enum ConversationDetailPrivacyPolicy {
+    static let genericNavigationTitle = "Chat"
+
+    static func navigationTitle(
+        actualTitle: String?,
+        isLuminanceReduced: Bool,
+        redactionReasons: RedactionReasons
+    ) -> String {
+        if isLuminanceReduced || redactionReasons.contains(.privacy) {
+            return genericNavigationTitle
+        }
+
+        let trimmedTitle = actualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedTitle, trimmedTitle.isEmpty == false else {
+            return genericNavigationTitle
+        }
+
+        return trimmedTitle
+    }
+}
+
 struct ConversationDetailView: View {
     @EnvironmentObject private var chatStore: ChatStore
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+    @Environment(\.redactionReasons) private var redactionReasons
+    @Environment(\.colorScheme) private var colorScheme
 
     let conversationID: UUID
 
@@ -144,7 +168,7 @@ struct ConversationDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(chatStore.conversation(id: conversationID)?.title ?? "Chat")
+        .navigationTitle(conversationNavigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -224,6 +248,14 @@ struct ConversationDetailView: View {
         } else {
             composerView()
         }
+    }
+
+    private var conversationNavigationTitle: String {
+        ConversationDetailPrivacyPolicy.navigationTitle(
+            actualTitle: chatStore.conversation(id: conversationID)?.title,
+            isLuminanceReduced: isLuminanceReduced,
+            redactionReasons: redactionReasons
+        )
     }
 
     private func messagesView(conversation: ConversationThread) -> some View {
@@ -495,10 +527,10 @@ struct ConversationDetailView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.35))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }
@@ -509,7 +541,7 @@ struct ConversationDetailView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .tint(.white.opacity(0.8))
+        .tint(DS.Text.muted(for: colorScheme))
         .font(.caption2)
     }
 
@@ -522,11 +554,11 @@ struct ConversationDetailView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("正在准备历史消息")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                 Text("先显示最近 \(visibleCount) / \(totalCount) 条。")
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(DS.Text.secondary(for: colorScheme))
             }
 
             Spacer(minLength: 0)
@@ -534,10 +566,10 @@ struct ConversationDetailView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.black.opacity(0.32))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }
@@ -550,11 +582,11 @@ struct ConversationDetailView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("加载更早消息")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                     Text("还有 \(hiddenMessageCount) 条未显示。")
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 }
 
                 Spacer(minLength: 0)
@@ -567,10 +599,10 @@ struct ConversationDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.28))
+                    .fill(DS.Surface.elevatedFill(for: colorScheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                     )
             )
         }
@@ -649,7 +681,7 @@ struct ConversationDetailView: View {
                     title: voiceRecorder.isRecording ?
                         recordingStatusTitle() :
                         L10n.tr("conversation.microphone.preparing"),
-                    tint: voiceRecorder.isRecording ? .red : .white.opacity(0.82)
+                    tint: voiceRecorder.isRecording ? .red : DS.Text.muted(for: colorScheme)
                 )
             } else if isTranscribing {
                 RecordingStatusBanner(
@@ -697,11 +729,8 @@ struct ConversationDetailView: View {
                                 Color.red.opacity(0.94) :
                                 Color.cyan.opacity((sendEnabled || canRestorePreviousMessage) ? 0.96 : 0.42)
                         ),
-                        strokeColor: Color.white.opacity(
-                            isSendingReply ?
-                                0.16 :
-                                ((sendEnabled || canRestorePreviousMessage) ? 0.10 : 0.05)
-                        )
+                        strokeColor: DS.Surface.elevatedStroke(for: colorScheme)
+                            .opacity(isSendingReply || sendEnabled || canRestorePreviousMessage ? 1 : 0.62)
                     )
                 }
                 .buttonStyle(.plain)
@@ -720,7 +749,7 @@ struct ConversationDetailView: View {
                     ComposerFlatActionButtonLabel(
                         systemName: voiceRecorder.isRecording ? "stop.fill" : "waveform.badge.mic",
                         title: voiceButtonLabel,
-                        tintColor: voiceRecorder.isRecording ? .red : .white
+                        tintColor: voiceRecorder.isRecording ? .red : DS.Text.primary(for: colorScheme)
                     )
                 }
                 .buttonStyle(.plain)
@@ -759,13 +788,17 @@ struct ConversationDetailView: View {
         .padding(.bottom, (hasAttachments ? 4 : 5) + ComposerLayout.composerInnerBottomPadding)
         .background(
             RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)
-                .fill(Color.black.opacity(0.5))
+                .fill(DS.Surface.elevatedStrongFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
         .contentShape(isComposerExpanded ? AnyShape(RoundedRectangle(cornerRadius: hasAttachments ? 20 : 22, style: .continuous)) : AnyShape(Rectangle().size(.zero)))
+        // Draft text, picked images/audio, recording/transcription state, and
+        // voice fallback notices can all reveal unsent user intent. Keep the
+        // whole composer eligible for watchOS privacy redaction in AOD.
+        .privacySensitive()
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
@@ -821,7 +854,7 @@ struct ConversationDetailView: View {
         } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
                 .frame(width: 46, height: 46)
                 .background(
                     Circle()
@@ -829,9 +862,9 @@ struct ConversationDetailView: View {
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.28), radius: 10, y: 4)
+                .shadow(color: Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.16), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open composer")
@@ -844,17 +877,17 @@ struct ConversationDetailView: View {
         } label: {
             Image(systemName: "arrow.clockwise")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
                 .frame(width: 36, height: 36)
                 .background(
                     Circle()
-                        .fill(Color.black.opacity(0.68))
+                        .fill(DS.Surface.elevatedStrongFill(for: colorScheme))
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
-                .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+                .shadow(color: Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.16), radius: 10, y: 4)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Retry last reply")
@@ -1658,7 +1691,7 @@ struct ConversationDetailView: View {
     }
 
     private func toolButtonTint(for configuration: ConversationAIConfiguration) -> Color {
-        (configuration.usesGoogleSearch || configuration.usesCodeExecution) ? .cyan : .white
+        (configuration.usesGoogleSearch || configuration.usesCodeExecution) ? .cyan : DS.Text.primary(for: colorScheme)
     }
 
     private func toolButtonAccessibilityLabel(for configuration: ConversationAIConfiguration) -> String {
@@ -1705,6 +1738,8 @@ private struct ConversationBottomAnchorMaxYPreferenceKey: PreferenceKey {
 }
 
 private struct CompactMenuButtonLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let iconName: String
     let title: String
     let isDense: Bool
@@ -1736,7 +1771,7 @@ private struct CompactMenuButtonLabel: View {
 
             Text(title)
                 .font(.system(size: titlePointSize, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
                 .allowsTightening(true)
@@ -1749,21 +1784,23 @@ private struct CompactMenuButtonLabel: View {
                 .frame(width: isDense ? 8 : 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(.white)
+        .foregroundStyle(DS.Text.primary(for: colorScheme))
         .padding(.horizontal, isDense ? 6 : 8)
         .padding(.vertical, isDense ? 6 : 8)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.07))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
         )
     }
 }
 
 private struct ComposerActionButtonLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let systemName: String
     let dimension: CGFloat
     let fillStyle: AnyShapeStyle
@@ -1779,13 +1816,14 @@ private struct ComposerActionButtonLabel: View {
             .overlay {
                 Image(systemName: systemName)
                     .font(.system(size: dimension * 0.40, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
             }
     }
 }
 
 private struct ComposerFlatActionButtonLabel: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
 
     let systemName: String
     let title: String
@@ -1793,10 +1831,10 @@ private struct ComposerFlatActionButtonLabel: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 15, style: .continuous)
-            .fill(Color.white.opacity(isEnabled ? 0.08 : 0.04))
+            .fill(DS.Surface.subtleFill(for: colorScheme).opacity(isEnabled ? 1 : 0.58))
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(Color.white.opacity(isEnabled ? 0.08 : 0.05), lineWidth: 1)
+                    .stroke(DS.Surface.subtleStroke(for: colorScheme).opacity(isEnabled ? 1 : 0.65), lineWidth: 1)
             )
             .frame(height: ComposerLayout.flatActionButtonHeight)
             .overlay {
@@ -1818,16 +1856,17 @@ private struct ComposerFlatActionButtonLabel: View {
 
 private struct ComposerToolButtonLabel: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
 
     let symbolNames: [String]
     let tintColor: Color
 
     var body: some View {
         RoundedRectangle(cornerRadius: 15, style: .continuous)
-            .fill(Color.white.opacity(isEnabled ? 0.08 : 0.04))
+            .fill(DS.Surface.subtleFill(for: colorScheme).opacity(isEnabled ? 1 : 0.58))
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(Color.white.opacity(isEnabled ? 0.08 : 0.05), lineWidth: 1)
+                    .stroke(DS.Surface.subtleStroke(for: colorScheme).opacity(isEnabled ? 1 : 0.65), lineWidth: 1)
             )
             .frame(height: ComposerLayout.flatActionButtonHeight)
             .overlay {
@@ -1844,6 +1883,8 @@ private struct ComposerToolButtonLabel: View {
 }
 
 private struct RecordingStatusBanner: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let iconName: String
     let title: String
     let tint: Color
@@ -1857,7 +1898,7 @@ private struct RecordingStatusBanner: View {
             OverflowScrollingText(
                 text: title,
                 font: .caption2.weight(.semibold),
-                color: .white.opacity(0.88),
+                color: DS.Text.muted(for: colorScheme),
                 gap: 14,
                 speed: 24,
                 expandsHorizontally: true
@@ -1869,11 +1910,11 @@ private struct RecordingStatusBanner: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
         )
     }
 }
@@ -1908,12 +1949,12 @@ private struct DraftAttachmentPill: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Image(systemName: attachment.isAudio ? "waveform" : "paperclip")
                                 .font(size <= ComposerLayout.compactAttachmentSize ? .caption2 : .caption)
-                                .foregroundStyle(.white.opacity(0.9))
+                                .foregroundStyle(DS.Theme.palette(for: DS.Theme.Scheme.dark).primaryText.color.opacity(0.9))
 
                             if let durationText = formattedDuration {
                                 Text(durationText)
                                     .font(.system(size: size <= ComposerLayout.compactAttachmentSize ? 9 : 10, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.82))
+                                    .foregroundStyle(DS.Theme.palette(for: DS.Theme.Scheme.dark).secondaryText.color)
                             }
                         }
                         .padding(size <= ComposerLayout.compactAttachmentSize ? 6 : 8)
@@ -1927,6 +1968,7 @@ private struct DraftAttachmentPill: View {
             }
             .offset(x: size <= ComposerLayout.compactAttachmentSize ? 3 : 4, y: size <= ComposerLayout.compactAttachmentSize ? -3 : -4)
         }
+        .privacySensitive()
     }
 
     private static let durationFormatter: DateComponentsFormatter = {

@@ -233,7 +233,14 @@ nonisolated struct AppConfiguration: Equatable {
     }
 
     var resolvedRelayBearerToken: String? {
-        RelayAccessRepository.storedRelayKey(appGroupIdentifier: appGroupIdentifier)
+        resolvedRelayBearerToken(rootURL: nil)
+    }
+
+    func resolvedRelayBearerToken(rootURL: URL?) -> String? {
+        RelayAccessRepository.storedRelayKey(
+            appGroupIdentifier: appGroupIdentifier,
+            rootURL: rootURL
+        )
     }
 
     private var hasValidRelayBaseURL: Bool {

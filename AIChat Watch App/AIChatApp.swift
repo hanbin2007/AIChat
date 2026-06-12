@@ -35,10 +35,17 @@ struct AIChat_Watch_AppApp: App {
         let relayConnectionStatusHandler = RelayConnectionStatusHandler()
         let service = AIServiceFactory.makeService(
             configuration: configuration,
-            relayConnectionStatusHandler: relayConnectionStatusHandler
+            relayConnectionStatusHandler: relayConnectionStatusHandler,
+            relayAccessRootURL: repository.resolvedRootURL
         )
-        let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
-        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
+        let transcriptionService = AIServiceFactory.makeTranscriptionService(
+            configuration: configuration,
+            relayAccessRootURL: repository.resolvedRootURL
+        )
+        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(
+            configuration: configuration,
+            relayAccessRootURL: repository.resolvedRootURL
+        )
         let syncBridge = CompanionSyncBridge()
         let cloudSyncService = ICloudConversationSyncService(configuration: configuration)
         _chatStore = StateObject(
@@ -71,6 +78,7 @@ struct AIChat_Watch_AppApp: App {
                 }
             }
             .environmentObject(chatStore)
+            .preferredColorScheme(uiTestPreferredColorScheme)
             .background(WatchDisplayStateObserver())
             .overlay(alignment: .topLeading) {
                 #if DEBUG
@@ -87,6 +95,21 @@ struct AIChat_Watch_AppApp: App {
                 }
             }
         }
+    }
+
+    private var uiTestPreferredColorScheme: ColorScheme? {
+        #if DEBUG
+        switch ProcessInfo.processInfo.environment["AIChat_UI_TEST_COLOR_SCHEME"] {
+        case "light":
+            return .light
+        case "dark":
+            return .dark
+        default:
+            return nil
+        }
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -909,8 +932,14 @@ private struct UITestBootstrap {
 
         let store = ChatStore(
             repository: repository,
-            aiService: AIServiceFactory.makeService(configuration: configuration),
-            transcriptionService: AIServiceFactory.makeTranscriptionService(configuration: configuration),
+            aiService: AIServiceFactory.makeService(
+                configuration: configuration,
+                relayAccessRootURL: repository.resolvedRootURL
+            ),
+            transcriptionService: AIServiceFactory.makeTranscriptionService(
+                configuration: configuration,
+                relayAccessRootURL: repository.resolvedRootURL
+            ),
             configuration: configuration,
             syncBridge: CompanionSyncBridge(isEnabled: false),
             activationRepository: activationRepository,

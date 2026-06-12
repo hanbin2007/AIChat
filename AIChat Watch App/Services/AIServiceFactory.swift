@@ -53,28 +53,59 @@ protocol AITranscriptionService {
 enum AIServiceFactory {
     static func makeService(
         configuration: AppConfiguration,
-        relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil
+        relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil,
+        relayAccessRootURL: URL? = nil
     ) -> AIStreamingService {
-        var client = RelayAIClient(configuration: configuration)
+        let credentialProvider = StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        var client = RelayAIClient(
+            configuration: configuration,
+            relayAccessRootURL: relayAccessRootURL,
+            credentialProvider: credentialProvider
+        )
         client.statusHandler = relayConnectionStatusHandler
         return client
     }
 
-    static func makeTranscriptionService(configuration: AppConfiguration) -> AITranscriptionService? {
+    static func makeTranscriptionService(
+        configuration: AppConfiguration,
+        relayAccessRootURL: URL? = nil
+    ) -> AITranscriptionService? {
         guard configuration.relayBaseURL != nil else {
             return nil
         }
 
-        return RelayTranscriptionService(configuration: configuration)
+        let credentialProvider = StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        return RelayTranscriptionService(
+            configuration: configuration,
+            relayAccessRootURL: relayAccessRootURL,
+            credentialProvider: credentialProvider
+        )
     }
 
-    static func makeMemoryMaintenanceService(configuration: AppConfiguration) -> any AIMemoryMaintenanceService {
+    static func makeMemoryMaintenanceService(
+        configuration: AppConfiguration,
+        relayAccessRootURL: URL? = nil
+    ) -> any AIMemoryMaintenanceService {
         guard configuration.relayMemoryExtractURL != nil else {
             return HeuristicMemoryMaintenanceService()
         }
 
+        let credentialProvider = StoredRelayCredentialProvider(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
         return ModelBackedMemoryMaintenanceService(
-            extractor: RelayMemoryExtractionClient(configuration: configuration),
+            extractor: RelayMemoryExtractionClient(
+                configuration: configuration,
+                relayAccessRootURL: relayAccessRootURL,
+                credentialProvider: credentialProvider
+            ),
             defaultModel: configuration.geminiModel
         )
     }

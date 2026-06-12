@@ -1,7 +1,7 @@
 import Foundation
 
 /// JSON-file persistence of EntitlementState with a schema-version guard.
-struct EntitlementCache {
+nonisolated struct EntitlementCache {
     static let currentSchemaVersion = 1
     let directory: URL
     var cacheDirectoryURL: URL {

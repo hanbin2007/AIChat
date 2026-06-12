@@ -528,6 +528,15 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertNotNil(extraction.attachments.first?.previewImage)
     }
 
+    func testPreviewImageReusesDecodedImageForRepeatedAccess() throws {
+        let attachment = try makeOnePixelImageAttachment()
+
+        let firstPreview = try XCTUnwrap(attachment.previewImage)
+        let secondPreview = try XCTUnwrap(attachment.previewImage)
+
+        XCTAssertTrue(firstPreview === secondPreview)
+    }
+
     func testAssistantMessageContentNormalizerNormalizesConversationHistory() {
         let conversation = ConversationThread(
             messages: [
@@ -1894,7 +1903,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let conversationIDOrNil = await watchStore.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
-        let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
+        let sharedConversationCandidate = watchStore.conversation(id: conversationID)
         let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
         let iphoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)
@@ -1979,7 +1988,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let conversationIDOrNil = await watchStore.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
-        let sharedConversationCandidate = await watchStore.conversation(id: conversationID)
+        let sharedConversationCandidate = watchStore.conversation(id: conversationID)
         let sharedConversation = try XCTUnwrap(sharedConversationCandidate)
 
         let iphoneRepository = ConversationRepository(configuration: configuration, rootURL: iphoneRepositoryRootURL)

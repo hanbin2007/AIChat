@@ -253,6 +253,22 @@ final class StreamingTextPacerTests: XCTestCase {
 
         XCTAssertEqual(pacer.revealedText, input)
     }
+
+    @MainActor
+    func testLongUnicodeRevealDoesNotRescanFromBufferStartEachTick() async throws {
+        let pacer = StreamingTextPacer(configuration: .fastTestConfiguration)
+        pacer.begin(messageID: UUID())
+
+        let input = String(repeating: "👨‍👩‍👧‍👦 cafe\u{301} 你好 ", count: 12_000)
+        pacer.appendAnswer(input)
+
+        let start = CFAbsoluteTimeGetCurrent()
+        pacer.revealSynchronouslyForTesting(maxChunkSize: 1)
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+        XCTAssertEqual(pacer.revealedText, input)
+        XCTAssertLessThan(elapsed, 0.35)
+    }
 }
 
 private extension StreamingTextPacer.Configuration {

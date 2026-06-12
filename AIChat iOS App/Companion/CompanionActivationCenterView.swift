@@ -20,6 +20,7 @@ struct CompanionActivationCenterView: View {
     @State private var feedbackMessage: String?
     @State private var isSubmitting = false
     @State private var hasAttemptedAutomaticWatchTransfer = false
+    @State private var isShowingClearActivationConfirmation = false
 
     init(
         prefilledActivationCode: String = "",
@@ -152,11 +153,7 @@ struct CompanionActivationCenterView: View {
                 if chatStore.activationState != nil {
                     Section {
                         Button("清除当前授权", role: .destructive) {
-                            Task {
-                                await chatStore.clearActivation()
-                                refreshRequestCode()
-                                feedbackMessage = L10n.tr("activation.feedback.cleared")
-                            }
+                            isShowingClearActivationConfirmation = true
                         }
                     }
                 }
@@ -170,6 +167,16 @@ struct CompanionActivationCenterView: View {
                     }
                 }
             }
+            .alert("清除当前授权？", isPresented: $isShowingClearActivationConfirmation) {
+                Button("清除当前授权", role: .destructive) {
+                    Task {
+                        await clearActivation()
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("清除后，这台设备会回到未授权状态，需要重新导入或申请授权。")
+            }
             .onAppear {
                 refreshRequestCode()
                 attemptAutomaticWatchTransferIfNeeded()
@@ -178,6 +185,12 @@ struct CompanionActivationCenterView: View {
                 }
             }
         }
+    }
+
+    private func clearActivation() async {
+        await chatStore.clearActivation()
+        refreshRequestCode()
+        feedbackMessage = L10n.tr("activation.feedback.cleared")
     }
 
     @ViewBuilder

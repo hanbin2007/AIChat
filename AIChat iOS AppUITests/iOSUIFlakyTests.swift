@@ -125,6 +125,16 @@ final class iOSUIFlakyTests: iOSUIPerformanceTestCase {
         XCTAssertTrue(waitForHittable(deleteButton, timeout: 5))
         deleteButton.tap()
 
+        let alert = app.alerts["删除会话？"].firstMatch
+        if !alert.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing companion delete confirmation hierarchy")
+            XCTFail("Deleting from companion settings did not show a confirmation alert.")
+            return
+        }
+
+        attachScreenshot(app, named: "companion-conversation-settings-delete-confirmation")
+        alert.buttons["删除会话"].tap()
+
         let notFoundState = app.descendants(matching: .any)["companion.conversation.not-found"].firstMatch
         let emptySelectionState = app.descendants(matching: .any)["companion.empty-selection"].firstMatch
         XCTAssertTrue(

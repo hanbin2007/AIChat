@@ -44,6 +44,83 @@ final class AIChat_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationSurfaceCapturesLightAndDarkModeEvidence() throws {
+        for colorScheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_navigation"
+            app.launchEnvironment["AIChat_UI_TEST_COLOR_SCHEME"] = colorScheme
+            if let artifactsRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"] {
+                app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] = artifactsRoot
+            }
+            app.launch()
+
+            let row = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000201"]
+            if !revealConversationRowIfNeeded(row, in: app) {
+                attachDebugHierarchy(app, named: "Missing \(colorScheme) conversation row hierarchy")
+                XCTFail("Missing seeded conversation row in \(colorScheme) mode.")
+                return
+            }
+
+            attachScreenshot(app, named: "conversation-list-\(colorScheme)-mode")
+            row.tap()
+
+            let backButton = app.buttons["BackButton"].firstMatch
+            if !backButton.waitForExistence(timeout: 5) {
+                attachDebugHierarchy(app, named: "Missing \(colorScheme) conversation detail hierarchy")
+                XCTFail("Conversation detail did not open in \(colorScheme) mode.")
+                return
+            }
+
+            attachScreenshot(app, named: "conversation-detail-\(colorScheme)-mode")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testFavoritesSurfaceCapturesLightAndDarkModeEvidence() throws {
+        for colorScheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_navigation"
+            app.launchEnvironment["AIChat_UI_TEST_COLOR_SCHEME"] = colorScheme
+            if let artifactsRoot = ProcessInfo.processInfo.environment["AIChat_UI_TEST_ARTIFACTS_ROOT"] {
+                app.launchEnvironment["AIChat_UI_TEST_ARTIFACTS_ROOT"] = artifactsRoot
+            }
+            app.launch()
+
+            let emptyState = app.descendants(matching: .any)["favorites.empty-state"]
+            if !revealFavoritesEmptyState(emptyState, in: app) {
+                attachDebugHierarchy(app, named: "Missing \(colorScheme) favorites empty-state hierarchy")
+                XCTFail("Favorites empty state did not appear in \(colorScheme) mode.")
+                return
+            }
+
+            attachScreenshot(app, named: "favorites-empty-\(colorScheme)-mode")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func revealFavoritesEmptyState(
+        _ emptyState: XCUIElement,
+        in app: XCUIApplication
+    ) -> Bool {
+        if emptyState.waitForExistence(timeout: 1) {
+            return true
+        }
+
+        for _ in 0..<2 {
+            app.swipeRight()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+
+            if emptyState.waitForExistence(timeout: 2) {
+                return true
+            }
+        }
+
+        return emptyState.exists
+    }
+
+    @MainActor
     func testFormulaCanOpenZoomSheetAndScrollHorizontally() throws {
         // Pre-existing watchOS 26 simulator flake — verified failing on
         // baseline (commit 5bc21d6) without any code from issue #2.
@@ -267,6 +344,47 @@ final class AIChat_Watch_AppUITests: XCTestCase {
         }
 
         XCTAssertTrue(backButton.isHittable)
+    }
+
+    @MainActor
+    func testConversationSettingsDeleteRequiresConfirmation() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["AIChat_UI_TEST_SCENARIO"] = "conversation_navigation"
+        app.launch()
+
+        let row = app.descendants(matching: .any)["conversation.row.00000000-0000-0000-0000-000000000201"]
+        if !revealConversationRowIfNeeded(row, in: app) {
+            attachDebugHierarchy(app, named: "Missing settings-confirmation row hierarchy")
+            XCTFail("Missing conversation row for settings confirmation test.")
+            return
+        }
+        row.tap()
+
+        let settingsButton = app.buttons["conversation.settings.open"].firstMatch
+        if !settingsButton.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing watch settings button hierarchy")
+            XCTFail("Conversation settings button did not appear.")
+            return
+        }
+        settingsButton.tap()
+
+        let deleteButton = app.buttons["conversation.settings.delete"].firstMatch
+        if !revealElement(deleteButton, in: app, directions: [.up], timeout: 8) {
+            attachDebugHierarchy(app, named: "Missing watch settings delete hierarchy")
+            XCTFail("Conversation settings delete action did not appear.")
+            return
+        }
+        deleteButton.tap()
+
+        let alert = app.alerts["Delete conversation?"].firstMatch
+        if !alert.waitForExistence(timeout: 5) {
+            attachDebugHierarchy(app, named: "Missing watch delete confirmation hierarchy")
+            XCTFail("Deleting from settings did not show a confirmation alert.")
+            return
+        }
+
+        attachScreenshot(app, named: "watch-conversation-settings-delete-confirmation")
+        alert.buttons["Delete Conversation"].tap()
     }
 
     @MainActor

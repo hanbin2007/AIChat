@@ -435,7 +435,7 @@ private func mergeEquivalentGeminiStreamPart(
     return incomingTextCount >= previousTextCount ? incomingPart : previousPart
 }
 
-func mergedGeminiText(
+nonisolated func mergedGeminiText(
     from parts: [GeminiPartPayload],
     includeThoughts: Bool
 ) -> String? {

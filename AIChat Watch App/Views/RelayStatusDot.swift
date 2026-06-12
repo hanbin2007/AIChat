@@ -55,13 +55,13 @@ struct RelayStatusDot: View {
     private func accessibilityLabel(for status: RelayConnectionStatus) -> String {
         switch status {
         case .unknown:
-            return "Relay status unknown"
+            return L10n.tr("relay.connection.accessibility.unknown")
         case .connecting:
-            return "Relay connecting"
+            return L10n.tr("relay.connection.accessibility.connecting")
         case .online:
-            return "Relay online"
+            return L10n.tr("relay.connection.accessibility.online")
         case .offline(let reason):
-            return "Relay offline: \(reason)"
+            return L10n.format("relay.connection.accessibility.offline", reason)
         }
     }
 }
@@ -77,10 +77,10 @@ private struct RelayStatusDetailSheet: View {
                 Divider()
                 serverRow
                 if let lastSuccess = chatStore.relayLastSuccessAt {
-                    timestampRow(label: "Last success", value: lastSuccess)
+                    timestampRow(label: L10n.tr("relay.connection.last_success"), value: lastSuccess)
                 }
                 if let lastFailure = chatStore.relayLastFailureAt {
-                    timestampRow(label: "Last failure", value: lastFailure)
+                    timestampRow(label: L10n.tr("relay.connection.last_failure"), value: lastFailure)
                 }
                 if case .offline(let reason) = chatStore.relayConnectionStatus {
                     Text(reason)
@@ -94,7 +94,7 @@ private struct RelayStatusDetailSheet: View {
                         isPresented = false
                     }
                 } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
+                    Label(L10n.tr("relay.connection.retry"), systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -104,7 +104,7 @@ private struct RelayStatusDetailSheet: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
         }
-        .navigationTitle("Relay Status")
+        .navigationTitle(L10n.tr("relay.connection.title"))
     }
 
     private var statusHeader: some View {
@@ -121,13 +121,13 @@ private struct RelayStatusDetailSheet: View {
     private var headerTitle: String {
         switch chatStore.relayConnectionStatus {
         case .unknown:
-            return "Unknown"
+            return L10n.tr("relay.connection.status.unknown")
         case .connecting:
-            return "Connecting"
+            return L10n.tr("relay.connection.status.connecting")
         case .online:
-            return "Online"
+            return L10n.tr("relay.connection.status.online")
         case .offline:
-            return "Offline"
+            return L10n.tr("relay.connection.status.offline")
         }
     }
 
@@ -144,7 +144,7 @@ private struct RelayStatusDetailSheet: View {
 
     private var serverRow: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Server")
+            Text(L10n.tr("relay.connection.server"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(serverHostText)

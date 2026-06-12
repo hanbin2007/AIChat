@@ -26,7 +26,7 @@ import SwiftUI
 @MainActor
 final class StreamingTextPacer: ObservableObject {
 
-    struct Configuration {
+    nonisolated struct Configuration {
         var tickInterval: TimeInterval = 1.0 / 30.0
         /// When pending > this, use finalize-style aggressive drain even while streaming.
         var drainOverflowThreshold: Int = 400
@@ -45,12 +45,8 @@ final class StreamingTextPacer: ObservableObject {
     @Published private(set) var isActive: Bool = false
 
     private var configuration: Configuration
-    private var bufferedText: String = ""
-    private var bufferedThoughtSummary: String = ""
-    private var bufferedTextCount: Int = 0
-    private var bufferedThoughtCount: Int = 0
-    private var revealedTextCount: Int = 0
-    private var revealedThoughtCount: Int = 0
+    private var answerBuffer = GraphemeRevealBuffer()
+    private var thoughtBuffer = GraphemeRevealBuffer()
     private var isFinalizing: Bool = false
     private var isPaused: Bool = false
     private var tickerTask: Task<Void, Never>?
@@ -69,20 +65,15 @@ final class StreamingTextPacer: ObservableObject {
         targetMessageID = messageID
         revealedText = ""
         revealedThoughtSummary = ""
-        bufferedText = ""
-        bufferedThoughtSummary = ""
-        bufferedTextCount = 0
-        bufferedThoughtCount = 0
-        revealedTextCount = 0
-        revealedThoughtCount = 0
+        answerBuffer.reset()
+        thoughtBuffer.reset()
         isFinalizing = false
         isActive = true
     }
 
     func appendAnswer(_ delta: String) {
         guard isActive, delta.isEmpty == false else { return }
-        bufferedText.append(delta)
-        bufferedTextCount += delta.count
+        answerBuffer.append(delta)
         ensureTickerRunning()
     }
 
@@ -101,8 +92,7 @@ final class StreamingTextPacer: ObservableObject {
 
     func appendThoughtSummary(_ delta: String) {
         guard isActive, delta.isEmpty == false else { return }
-        bufferedThoughtSummary.append(delta)
-        bufferedThoughtCount += delta.count
+        thoughtBuffer.append(delta)
         ensureTickerRunning()
     }
 
@@ -135,13 +125,13 @@ final class StreamingTextPacer: ObservableObject {
 
     // MARK: - Snapshot accessors (for persistence)
 
-    var bufferedAnswerText: String { bufferedText }
-    var bufferedThoughtText: String { bufferedThoughtSummary }
+    var bufferedAnswerText: String { answerBuffer.fullText }
+    var bufferedThoughtText: String { thoughtBuffer.fullText }
 
     // MARK: - Internals
 
     private var hasBufferPending: Bool {
-        bufferedTextCount > revealedTextCount || bufferedThoughtCount > revealedThoughtCount
+        answerBuffer.pendingCount > 0 || thoughtBuffer.pendingCount > 0
     }
 
     private func ensureTickerRunning() {
@@ -192,14 +182,14 @@ final class StreamingTextPacer: ObservableObject {
     private func tick() -> Bool {
         var didReveal = false
 
-        let thoughtPending = bufferedThoughtCount - revealedThoughtCount
+        let thoughtPending = thoughtBuffer.pendingCount
         if thoughtPending > 0 {
             let chunk = adaptiveChunkSize(pending: thoughtPending)
             appendRevealed(toThought: chunk)
             didReveal = true
         }
 
-        let textPending = bufferedTextCount - revealedTextCount
+        let textPending = answerBuffer.pendingCount
         if textPending > 0 {
             let chunk = adaptiveChunkSize(pending: textPending)
             appendRevealed(toAnswer: chunk)
@@ -210,24 +200,20 @@ final class StreamingTextPacer: ObservableObject {
     }
 
     private func revealFully() {
-        if bufferedTextCount > revealedTextCount {
-            appendRevealed(toAnswer: bufferedTextCount - revealedTextCount)
+        if answerBuffer.pendingCount > 0 {
+            appendRevealed(toAnswer: answerBuffer.pendingCount)
         }
-        if bufferedThoughtCount > revealedThoughtCount {
-            appendRevealed(toThought: bufferedThoughtCount - revealedThoughtCount)
+        if thoughtBuffer.pendingCount > 0 {
+            appendRevealed(toThought: thoughtBuffer.pendingCount)
         }
     }
 
     private func appendRevealed(toAnswer count: Int) {
-        let slice = graphemeSlice(from: bufferedText, skip: revealedTextCount, take: count)
-        revealedText.append(contentsOf: slice)
-        revealedTextCount += count
+        revealedText.append(contentsOf: answerBuffer.reveal(maxCount: count))
     }
 
     private func appendRevealed(toThought count: Int) {
-        let slice = graphemeSlice(from: bufferedThoughtSummary, skip: revealedThoughtCount, take: count)
-        revealedThoughtSummary.append(contentsOf: slice)
-        revealedThoughtCount += count
+        revealedThoughtSummary.append(contentsOf: thoughtBuffer.reveal(maxCount: count))
     }
 
     private func adaptiveChunkSize(pending: Int) -> Int {
@@ -241,14 +227,95 @@ final class StreamingTextPacer: ObservableObject {
         return min(pending, 16)
     }
 
-    private func graphemeSlice(from source: String, skip: Int, take: Int) -> Substring {
-        guard take > 0, skip >= 0 else { return "" }
-        guard let start = source.index(source.startIndex, offsetBy: skip, limitedBy: source.endIndex) else {
-            return ""
+    #if DEBUG
+    func revealSynchronouslyForTesting(maxChunkSize: Int) {
+        let chunkSize = max(maxChunkSize, 1)
+        while hasBufferPending {
+            let thoughtChunk = min(thoughtBuffer.pendingCount, chunkSize)
+            if thoughtChunk > 0 {
+                appendRevealed(toThought: thoughtChunk)
+            }
+
+            let answerChunk = min(answerBuffer.pendingCount, chunkSize)
+            if answerChunk > 0 {
+                appendRevealed(toAnswer: answerChunk)
+            }
         }
-        guard let end = source.index(start, offsetBy: take, limitedBy: source.endIndex) else {
-            return source[start..<source.endIndex]
+    }
+    #endif
+}
+
+private struct GraphemeRevealBuffer {
+    private(set) var fullText: String = ""
+
+    private var chunks: [String] = []
+    private var headChunkOffset: Int = 0
+    private var headIndex: String.Index?
+    private var totalCount: Int = 0
+    private var revealedCount: Int = 0
+
+    var pendingCount: Int {
+        totalCount - revealedCount
+    }
+
+    mutating func reset() {
+        fullText = ""
+        chunks.removeAll(keepingCapacity: true)
+        headChunkOffset = 0
+        headIndex = nil
+        totalCount = 0
+        revealedCount = 0
+    }
+
+    mutating func append(_ delta: String) {
+        guard delta.isEmpty == false else { return }
+
+        fullText.append(delta)
+        chunks.append(delta)
+        totalCount += delta.count
+    }
+
+    mutating func reveal(maxCount: Int) -> String {
+        guard maxCount > 0, pendingCount > 0 else { return "" }
+
+        var remaining = min(maxCount, pendingCount)
+        var revealed = String()
+        revealed.reserveCapacity(remaining)
+
+        while remaining > 0, headChunkOffset < chunks.count {
+            let chunk = chunks[headChunkOffset]
+            let start = headIndex ?? chunk.startIndex
+
+            if start == chunk.endIndex {
+                advanceHeadChunk()
+                continue
+            }
+
+            let end = chunk.index(start, offsetBy: remaining, limitedBy: chunk.endIndex) ?? chunk.endIndex
+            let slice = chunk[start..<end]
+            let count = slice.count
+
+            revealed.append(contentsOf: slice)
+            revealedCount += count
+            remaining -= count
+
+            if end == chunk.endIndex {
+                advanceHeadChunk()
+            } else {
+                headIndex = end
+            }
         }
-        return source[start..<end]
+
+        return revealed
+    }
+
+    private mutating func advanceHeadChunk() {
+        headChunkOffset += 1
+        headIndex = nil
+
+        if headChunkOffset >= 32 {
+            chunks.removeFirst(headChunkOffset)
+            headChunkOffset = 0
+        }
     }
 }

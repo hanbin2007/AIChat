@@ -25,7 +25,7 @@ private enum RelayAccessRepositoryError: LocalizedError {
 ///     open and safe to share), and
 ///   - the last resolved relay key per app-group identifier,
 /// invalidated whenever the status is saved or cleared.
-private final class RelayAccessStoreCache: @unchecked Sendable {
+private nonisolated final class RelayAccessStoreCache: @unchecked Sendable {
     static let shared = RelayAccessStoreCache()
 
     private let lock = NSLock()
@@ -78,6 +78,7 @@ actor RelayAccessRepository {
     private let modelContainer: ModelContainer?
     private let initializationError: Error?
     private let appGroupIdentifier: String?
+    private let resolvedRootURL: URL?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -98,11 +99,13 @@ actor RelayAccessRepository {
             )
             self.modelContainer = store.container
             self.initializationError = nil
+            self.resolvedRootURL = store.rootURL
         } catch {
             self.modelContainer = nil
             self.initializationError = RelayAccessRepositoryError.storageInitializationFailed(
                 error.localizedDescription
             )
+            self.resolvedRootURL = nil
         }
     }
 
@@ -136,7 +139,7 @@ actor RelayAccessRepository {
         try context.save()
         // The persisted key just changed — drop the cached resolution so the
         // next `resolvedRelayBearerToken` re-reads it.
-        RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
+        invalidateResolvedKeyCache()
     }
 
     func clear() throws {
@@ -145,7 +148,7 @@ actor RelayAccessRepository {
             context.delete(record)
             try context.save()
         }
-        RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
+        invalidateResolvedKeyCache()
     }
 
     /// Clears only the stored relay key (used when the relay returns 401 for a
@@ -165,22 +168,25 @@ actor RelayAccessRepository {
         record.relayKeyValue = nil
         record.updatedAt = .now
         try context.save()
-        RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
+        invalidateResolvedKeyCache()
     }
 
-    nonisolated static func storedState(appGroupIdentifier: String?) -> RelayAccessState? {
+    nonisolated static func storedState(
+        appGroupIdentifier: String?,
+        rootURL overrideRootURL: URL? = nil
+    ) -> RelayAccessState? {
         do {
             // Resolve the root URL cheaply (no container open) so a warm cache
             // skips opening a fresh SQLite handle entirely.
             let rootURL = BillingActivationStoreSupport.defaultRootURL(
                 fileManager: .default,
                 appGroupIdentifier: appGroupIdentifier,
-                overrideRootURL: nil
+                overrideRootURL: overrideRootURL
             )
             let container = try RelayAccessStoreCache.shared.container(for: rootURL) {
                 try BillingActivationStoreSupport.makeContainer(
                     appGroupIdentifier: appGroupIdentifier,
-                    overrideRootURL: nil,
+                    overrideRootURL: overrideRootURL,
                     fileManager: .default
                 ).container
             }
@@ -205,20 +211,24 @@ actor RelayAccessRepository {
         }
     }
 
-    nonisolated static func storedRelayKey(appGroupIdentifier: String?) -> String? {
+    nonisolated static func storedRelayKey(
+        appGroupIdentifier: String?,
+        rootURL overrideRootURL: URL? = nil
+    ) -> String? {
         // Hot path: invoked from `resolvedRelayBearerToken` on every SwiftUI
         // body eval. Serve from the in-memory cache when warm; only touch
         // SQLite on a cold cache (or after an explicit invalidation).
-        if let cached = RelayAccessStoreCache.shared.cachedResolvedKey(for: appGroupIdentifier) {
+        let cacheKey = overrideRootURL?.path ?? appGroupIdentifier
+        if let cached = RelayAccessStoreCache.shared.cachedResolvedKey(for: cacheKey) {
             return cached
         }
 
-        let resolved = storedState(appGroupIdentifier: appGroupIdentifier)?
+        let resolved = storedState(appGroupIdentifier: appGroupIdentifier, rootURL: overrideRootURL)?
             .status?
             .key?
             .keyValue
             .nonEmptyTrimmed
-        RelayAccessStoreCache.shared.storeResolvedKey(resolved, for: appGroupIdentifier)
+        RelayAccessStoreCache.shared.storeResolvedKey(resolved, for: cacheKey)
         return resolved
     }
 
@@ -234,6 +244,11 @@ actor RelayAccessRepository {
         }
 
         return ModelContext(modelContainer)
+    }
+
+    private nonisolated func invalidateResolvedKeyCache() {
+        RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
+        RelayAccessStoreCache.shared.invalidateResolvedKey(for: resolvedRootURL?.path)
     }
 
     private func fetchRelayAccessStateRecord(in context: ModelContext) throws -> RelayAccessStateRecord? {

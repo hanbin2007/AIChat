@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct ActivationStatusCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let message: String
     let iconName: String
@@ -40,14 +42,14 @@ struct ActivationStatusCard: View {
 
                 Text(title)
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                 Spacer(minLength: 0)
             }
 
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
@@ -59,10 +61,10 @@ struct ActivationStatusCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.4))
+                .fill(DS.Surface.elevatedFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(DS.Surface.elevatedStroke(for: colorScheme), lineWidth: 1)
                 )
         )
     }

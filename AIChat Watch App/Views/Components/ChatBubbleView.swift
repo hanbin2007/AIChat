@@ -16,6 +16,8 @@ private enum MessageBubbleInteraction {
 }
 
 struct ChatBubbleView: View, Equatable {
+    @Environment(\.colorScheme) private var colorScheme
+
     let conversationID: UUID
     let message: ChatMessage
     let suspendStreamingRender: Bool
@@ -236,7 +238,7 @@ struct ChatBubbleView: View, Equatable {
                 if message.status == .failed, displayedText.isEmpty {
                     Text("Stopped")
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(DS.Text.muted(for: colorScheme))
                 } else if displayedText.isEmpty == false {
                     if isUser == false, isLatestReplyAnchorTarget {
                         MessageAnchorMarker(
@@ -260,12 +262,12 @@ struct ChatBubbleView: View, Equatable {
             HStack(spacing: 6) {
                 Text(message.createdAt, style: .time)
                     .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.68))
+                    .foregroundStyle(DS.Text.secondary(for: colorScheme))
 
                 if message.status == .streaming {
                     Image(systemName: "waveform.and.magnifyingglass")
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.68))
+                        .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 } else if message.status == .failed {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption2)
@@ -281,7 +283,7 @@ struct ChatBubbleView: View, Equatable {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(DS.Text.tertiary(for: colorScheme))
                             .frame(width: 28, height: 20)
                             .contentShape(Rectangle())
                     }
@@ -298,7 +300,7 @@ struct ChatBubbleView: View, Equatable {
         .contentShape(bubbleShape)
         .overlay(
             bubbleShape
-                .stroke(isUser ? DS.Bubble.userStroke : DS.Bubble.assistantStroke, lineWidth: 1)
+                .stroke(isUser ? DS.Bubble.userStroke : DS.Bubble.assistantStroke(for: colorScheme), lineWidth: 1)
         )
         // Redact message content (user text, assistant answer, thought summary,
         // attachments) during watchOS Always-On Display. The system injects
@@ -498,7 +500,7 @@ struct ChatBubbleView: View, Equatable {
         if isUser {
             return AnyShapeStyle(DS.Bubble.userFill)
         }
-        return AnyShapeStyle(DS.Bubble.assistantFill)
+        return AnyShapeStyle(DS.Bubble.assistantFill(for: colorScheme))
     }
 }
 
@@ -518,6 +520,8 @@ private struct MessageAnchorMarker: View {
 }
 
 private struct ThoughtSummaryCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let thoughtSummary: String
     let isStreaming: Bool
     let toggleAccessibilityIdentifier: String
@@ -546,13 +550,13 @@ private struct ThoughtSummaryCard: View {
 
                     Text(isStreaming ? "Thinking" : "Summary")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.88))
+                        .foregroundStyle(DS.Text.primary(for: colorScheme))
 
                     Spacer(minLength: 0)
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.66))
+                        .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 }
             }
             .buttonStyle(.plain)
@@ -561,7 +565,7 @@ private struct ThoughtSummaryCard: View {
 
             Text(normalizedSummary)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.76))
+                .foregroundStyle(DS.Text.secondary(for: colorScheme))
                 .multilineTextAlignment(.leading)
                 .lineLimit(isExpanded ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -576,11 +580,11 @@ private struct ThoughtSummaryCard: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.07))
+                .fill(DS.Surface.subtleFill(for: colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(DS.Surface.subtleStroke(for: colorScheme), lineWidth: 1)
         )
     }
 }
@@ -605,6 +609,8 @@ private extension String {
 }
 
 private struct MessageBodyTextView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let text: String
     let forceExpanded: Bool
     let accessibilityIdentifier: String
@@ -632,7 +638,7 @@ private struct MessageBodyTextView: View {
         VStack(alignment: .leading, spacing: shouldCollapse ? 8 : 0) {
             Text(text)
                 .font(.body)
-                .foregroundStyle(.white)
+                .foregroundStyle(DS.Text.primary(for: colorScheme))
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(shouldCollapse && isExpanded == false ? MessageBodyLayout.collapsedLineLimit : nil)
@@ -659,6 +665,8 @@ private struct MessageBodyTextView: View {
 }
 
 private struct CollapsibleAssistantMessageMarkdownView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let text: String
     let forceExpanded: Bool
     let accessibilityIdentifier: String
@@ -687,7 +695,7 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
             if shouldCollapse, isExpanded == false {
                 Text(text)
                     .font(.body)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(DS.Text.primary(for: colorScheme))
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(MessageBodyLayout.collapsedLineLimit)
@@ -734,6 +742,8 @@ private struct CollapsibleAssistantMessageMarkdownView: View {
 /// checkpoint), so its partial reply never disappears when the user
 /// navigates between them.
 private struct StreamingAssistantBodyView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @ObservedObject var pacer: StreamingTextPacer
 
     let messageID: UUID
@@ -778,10 +788,10 @@ private struct StreamingAssistantBodyView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.mini)
-                        .tint(.white.opacity(0.8))
+                        .tint(DS.Text.muted(for: colorScheme))
                     Text(revealedThoughtSummary.isEmpty ? "Thinking" : "Replying")
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(DS.Text.muted(for: colorScheme))
                 }
             } else {
                 if isLatestReplyAnchorTarget {
@@ -803,6 +813,8 @@ private struct StreamingAssistantBodyView: View {
 }
 
 private struct StreamingReplyStatusView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let animatesTrack: Bool
     let isPaused: Bool
@@ -814,7 +826,7 @@ private struct StreamingReplyStatusView: View {
     }
 
     private var highlightTint: Color {
-        isPaused ? Color.white.opacity(0.82) : Color.white.opacity(0.95)
+        isPaused ? DS.Status.pausedHighlight(for: colorScheme) : DS.Status.liveHighlight(for: colorScheme)
     }
 
     var body: some View {
@@ -826,7 +838,7 @@ private struct StreamingReplyStatusView: View {
 
                 Text(title)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.84))
+                    .foregroundStyle(DS.Text.muted(for: colorScheme))
             }
 
             GeometryReader { proxy in
@@ -875,9 +887,9 @@ private struct StreamingReplyStatusView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.05),
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.06)
+                            DS.Surface.trackGradientColors(for: colorScheme)[0],
+                            DS.Surface.trackGradientColors(for: colorScheme)[1],
+                            DS.Surface.trackGradientColors(for: colorScheme)[2]
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -947,6 +959,8 @@ private struct StreamingReplyStatusView: View {
 /// the streaming glow track — cheaper on watchOS where TimelineView + blur
 /// consumes significant GPU budget.
 private struct StreamingTrackAnimator: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let trackWidth: CGFloat
     let leadingCoreWidth: CGFloat
     let trailingCoreWidth: CGFloat
@@ -966,9 +980,9 @@ private struct StreamingTrackAnimator: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.05),
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.06)
+                            DS.Surface.trackGradientColors(for: colorScheme)[0],
+                            DS.Surface.trackGradientColors(for: colorScheme)[1],
+                            DS.Surface.trackGradientColors(for: colorScheme)[2]
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -1140,16 +1154,16 @@ private struct AttachmentThumbnailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Image(systemName: attachment.isAudio ? "waveform" : "photo")
                         .font(.headline)
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(DS.Theme.palette(for: DS.Theme.Scheme.dark).primaryText.color.opacity(0.92))
 
                     Text(attachment.isAudio ? "Voice note" : "Attachment")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Theme.palette(for: DS.Theme.Scheme.dark).primaryText.color)
 
                     if let durationText = formattedDuration(for: attachment.durationSeconds) {
                         Text(durationText)
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.78))
+                            .foregroundStyle(DS.Theme.palette(for: DS.Theme.Scheme.dark).secondaryText.color)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)

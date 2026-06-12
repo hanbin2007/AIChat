@@ -17,25 +17,25 @@ struct CompanionGlobalSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("新建会话默认参数") {
-                    Picker("默认模型", selection: defaultModelBinding()) {
+                Section(L10n.tr("settings.section.new_conversation_defaults")) {
+                    Picker(L10n.tr("settings.ai.default_model"), selection: defaultModelBinding()) {
                         ForEach(chatStore.availableModelOptions()) { option in
                             Text(option.title).tag(option.id)
                         }
                     }
 
-                    Picker("默认 Thinking", selection: defaultThinkingBinding()) {
+                    Picker(L10n.tr("settings.ai.thinking"), selection: defaultThinkingBinding()) {
                         ForEach(chatStore.availableDefaultThinkingIntensities()) { intensity in
                             Text(intensity.displayName).tag(intensity)
                         }
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("默认系统提示词")
+                        Text(L10n.tr("settings.ai.system_prompt"))
                             .font(.headline)
 
                         TextField(
-                            "留空则使用内置系统提示词",
+                            L10n.tr("settings.ai.system_prompt.placeholder"),
                             text: defaultSystemPromptBinding(),
                             axis: .vertical
                         )
@@ -46,27 +46,27 @@ struct CompanionGlobalSettingsView: View {
                         }
                         .disabled(chatStore.promptPresets(of: .conversation).isEmpty)
 
-                        Text("新建对话时会自动带上这里的系统提示词；留空时继续使用应用内置提示词。")
+                        Text(L10n.tr("settings.ai.system_prompt.footnote"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("语音识别") {
-                    Picker("语音识别模型", selection: transcriptionModelBinding()) {
+                Section(L10n.tr("settings.voice.title")) {
+                    Picker(L10n.tr("settings.voice.model"), selection: transcriptionModelBinding()) {
                         ForEach(chatStore.availableTranscriptionModelOptions()) { option in
                             Text(option.title).tag(option.id)
                         }
                     }
 
-                    Toggle("包含上下文", isOn: transcriptionContextBinding())
+                    Toggle(L10n.tr("settings.voice.include_context"), isOn: transcriptionContextBinding())
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("自定义提示词")
+                        Text(L10n.tr("settings.voice.custom_prompt"))
                             .font(.headline)
 
                         TextField(
-                            "例如人名、术语、品牌名",
+                            L10n.tr("settings.voice.custom_prompt.placeholder"),
                             text: transcriptionPromptBinding(),
                             axis: .vertical
                         )
@@ -77,19 +77,28 @@ struct CompanionGlobalSettingsView: View {
                         }
                         .disabled(chatStore.promptPresets(of: .transcription).isEmpty)
 
-                        Text("会附加到语音识别提示词里，用来帮助识别专有名词、口头习惯或领域术语。")
+                        Text(L10n.tr("settings.voice.custom_prompt.footnote"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("请求") {
+                Section(L10n.tr("settings.section.behavior")) {
+                    Toggle(L10n.tr("settings.behavior.auto_scroll"), isOn: globalAutoScrollBinding())
+                        .accessibilityIdentifier("companion.settings.auto-scroll")
+
+                    Text(L10n.tr("settings.behavior.auto_scroll.footnote"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section(L10n.tr("settings.section.requests")) {
                     Stepper(
                         value: sendFailureRetryLimitBinding(),
                         in: ChatStore.minimumSendFailureRetryLimit...ChatStore.maximumSendFailureRetryLimit
                     ) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("请求失败自动重试")
+                            Text(L10n.tr("settings.behavior.retry_limit"))
                             Text(L10n.format("settings.retry.ios", chatStore.sendFailureRetryLimit))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
@@ -97,9 +106,9 @@ struct CompanionGlobalSettingsView: View {
                     }
                 }
 
-                Section("全局记忆") {
+                Section(L10n.tr("settings.memory.global_title")) {
                     if chatStore.globalPinnedMemories.isEmpty {
-                        Text("还没有全局固定记忆。把消息固定为全局记忆后，就能在开启开关的其他会话里复用。")
+                        Text(L10n.tr("settings.memory.empty"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -113,7 +122,7 @@ struct CompanionGlobalSettingsView: View {
                                     .foregroundStyle(.secondary)
 
                                 if chatStore.isReadOnlyMode == false {
-                                    Button("删除全局记忆", role: .destructive) {
+                                    Button(L10n.tr("settings.memory.delete_global"), role: .destructive) {
                                         Task {
                                             await chatStore.removeGlobalPinnedMemory(id: item.id)
                                         }
@@ -125,15 +134,15 @@ struct CompanionGlobalSettingsView: View {
                     }
                 }
 
-                Section("关于") {
-                    LabeledContent("版本", value: chatStore.appVersionDescription)
+                Section(L10n.tr("settings.about.title")) {
+                    LabeledContent(L10n.tr("settings.about.version"), value: chatStore.appVersionDescription)
                 }
             }
-            .navigationTitle("全局设置")
+            .navigationTitle(L10n.tr("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") {
+                    Button(L10n.tr("common.close")) {
                         dismiss()
                     }
                 }
@@ -157,6 +166,7 @@ struct CompanionGlobalSettingsView: View {
                 )
             }
         }
+        .accessibilityIdentifier("companion.global-settings")
     }
 
     private func defaultModelBinding() -> Binding<String> {
@@ -221,6 +231,17 @@ struct CompanionGlobalSettingsView: View {
             },
             set: { newValue in
                 chatStore.updateTranscriptionIncludesContext(newValue)
+            }
+        )
+    }
+
+    private func globalAutoScrollBinding() -> Binding<Bool> {
+        Binding(
+            get: {
+                chatStore.isGlobalAutoScrollEnabled
+            },
+            set: { newValue in
+                chatStore.updateGlobalAutoScrollEnabled(newValue)
             }
         )
     }
