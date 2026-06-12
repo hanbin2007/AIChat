@@ -48,6 +48,46 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
     }
 
     @MainActor
+    func testRuntimeServicesResolveRelayCredentialsFromRepositoryRootEntitlementCache() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = ConversationRepository(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        let snapshot = makeManagedRelaySnapshot()
+        let state = EntitlementState(
+            account: snapshot,
+            lastVerifiedAt: Date(),
+            localSpend: 0,
+            pending: nil,
+            lastError: nil
+        )
+        try EntitlementCache(directory: repository.resolvedRootURL).save(state)
+
+        let services = AIServiceFactory.makeRuntimeServices(
+            configuration: configuration,
+            repository: repository
+        )
+        let client = try XCTUnwrap(services.streamingService as? RelayAIClient)
+        let request = try client.makeStreamRequest(
+            for: ConversationThread(messages: [ChatMessage(role: .user, text: "Hello")])
+        )
+
+        XCTAssertEqual(client.relayAccessRootURL, repository.resolvedRootURL)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(snapshot.keyValue)")
+    }
+
+    @MainActor
     func testRelayBearerTokenCanResolveFromExplicitAccessRoot() async throws {
         let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
         let configuration = AppConfiguration(
@@ -104,6 +144,43 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
     }
 
     @MainActor
+    func testClearedRelayAccessKeyDoesNotFallBackToEntitlementSnapshot() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = RelayAccessRepository(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        let snapshot = makeManagedRelaySnapshot()
+        let state = EntitlementState(
+            account: snapshot,
+            lastVerifiedAt: Date(),
+            localSpend: 0,
+            pending: nil,
+            lastError: nil
+        )
+        try EntitlementCache(directory: relayAccessRootURL).save(state)
+
+        XCTAssertEqual(
+            configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL),
+            snapshot.keyValue
+        )
+
+        try await repository.clearStoredKey()
+
+        XCTAssertNil(configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL))
+    }
+
+    @MainActor
     func testRelayBearerTokenDoesNotUseUnavailableEntitlementSnapshot() async throws {
         let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
         let configuration = AppConfiguration(
@@ -127,6 +204,45 @@ final class AppConfigurationRelayOnlyTests: XCTestCase {
             lastError: nil
         )
         try EntitlementCache(directory: relayAccessRootURL).save(state)
+
+        XCTAssertNil(configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL))
+    }
+
+    @MainActor
+    func testClearingStoredRelayKeyRevokesEntitlementFallbackKey() async throws {
+        let relayAccessRootURL = makeTemporaryRootURL(prefix: "RelayAccessRoot")
+        let configuration = AppConfiguration(
+            backendMode: .relay,
+            geminiAPIKey: nil,
+            geminiModel: "gemini-3-flash-preview",
+            geminiTranscriptionModel: "gemini-3-flash-preview",
+            relayBaseURL: URL(string: "https://relay.example.test"),
+            relayBearerToken: nil,
+            relayStreamPath: "v1/chat/stream",
+            appGroupIdentifier: nil
+        )
+        let repository = RelayAccessRepository(
+            configuration: configuration,
+            rootURL: relayAccessRootURL
+        )
+        let status = makeManagedRelayAccessStatus()
+        let snapshot = makeManagedRelaySnapshot()
+        let state = EntitlementState(
+            account: snapshot,
+            lastVerifiedAt: Date(),
+            localSpend: 0,
+            pending: nil,
+            lastError: nil
+        )
+        try await repository.saveStatus(status)
+        try EntitlementCache(directory: relayAccessRootURL).save(state)
+
+        XCTAssertEqual(
+            configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL),
+            status.key?.keyValue
+        )
+
+        try await repository.clearStoredKey()
 
         XCTAssertNil(configuration.resolvedRelayBearerToken(rootURL: relayAccessRootURL))
     }

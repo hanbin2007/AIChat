@@ -33,27 +33,19 @@ struct AIChat_Watch_AppApp: App {
         let configuration = AppConfiguration.load()
         let repository = ConversationRepository(configuration: configuration)
         let relayConnectionStatusHandler = RelayConnectionStatusHandler()
-        let service = AIServiceFactory.makeService(
+        let services = AIServiceFactory.makeRuntimeServices(
             configuration: configuration,
+            repository: repository,
             relayConnectionStatusHandler: relayConnectionStatusHandler,
-            relayAccessRootURL: repository.resolvedRootURL
-        )
-        let transcriptionService = AIServiceFactory.makeTranscriptionService(
-            configuration: configuration,
-            relayAccessRootURL: repository.resolvedRootURL
-        )
-        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(
-            configuration: configuration,
-            relayAccessRootURL: repository.resolvedRootURL
         )
         let syncBridge = CompanionSyncBridge()
         let cloudSyncService = ICloudConversationSyncService(configuration: configuration)
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
-                aiService: service,
-                transcriptionService: transcriptionService,
-                memoryMaintenanceService: memoryMaintenanceService,
+                aiService: services.streamingService,
+                transcriptionService: services.transcriptionService,
+                memoryMaintenanceService: services.memoryMaintenanceService,
                 configuration: configuration,
                 syncBridge: syncBridge,
                 cloudSyncService: cloudSyncService,

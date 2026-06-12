@@ -28,6 +28,15 @@ nonisolated struct EntitlementCache {
         return state
     }
 
+    func markRelayKeyRevoked() throws {
+        guard var state = load() else {
+            return
+        }
+
+        state.lastError = .revoked
+        try save(state)
+    }
+
     func clear() throws {
         try? FileManager.default.removeItem(at: fileURL)
     }

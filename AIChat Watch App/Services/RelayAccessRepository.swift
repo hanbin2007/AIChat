@@ -155,6 +155,10 @@ actor RelayAccessRepository {
     /// revoked/expired key) while leaving the rest of the cached status intact.
     /// Falls back to a full `clear()` when no record exists.
     func clearStoredKey() throws {
+        defer {
+            markEntitlementRelayKeyRevoked()
+        }
+
         let context = try makeContext()
         guard let record = try fetchRelayAccessStateRecord(in: context) else {
             RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
@@ -249,6 +253,14 @@ actor RelayAccessRepository {
     private nonisolated func invalidateResolvedKeyCache() {
         RelayAccessStoreCache.shared.invalidateResolvedKey(for: appGroupIdentifier)
         RelayAccessStoreCache.shared.invalidateResolvedKey(for: resolvedRootURL?.path)
+    }
+
+    private nonisolated func markEntitlementRelayKeyRevoked() {
+        guard let resolvedRootURL else {
+            return
+        }
+
+        try? EntitlementCache(directory: resolvedRootURL).markRelayKeyRevoked()
     }
 
     private func fetchRelayAccessStateRecord(in context: ModelContext) throws -> RelayAccessStateRecord? {

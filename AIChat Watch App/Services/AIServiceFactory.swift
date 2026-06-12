@@ -50,7 +50,36 @@ protocol AITranscriptionService {
     ) async throws -> VoiceTranscriptionResult
 }
 
+struct AIRuntimeServices {
+    let streamingService: AIStreamingService
+    let transcriptionService: AITranscriptionService?
+    let memoryMaintenanceService: any AIMemoryMaintenanceService
+}
+
 enum AIServiceFactory {
+    static func makeRuntimeServices(
+        configuration: AppConfiguration,
+        repository: ConversationRepository,
+        relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil
+    ) -> AIRuntimeServices {
+        let relayAccessRootURL = repository.resolvedRootURL
+        return AIRuntimeServices(
+            streamingService: makeService(
+                configuration: configuration,
+                relayConnectionStatusHandler: relayConnectionStatusHandler,
+                relayAccessRootURL: relayAccessRootURL
+            ),
+            transcriptionService: makeTranscriptionService(
+                configuration: configuration,
+                relayAccessRootURL: relayAccessRootURL
+            ),
+            memoryMaintenanceService: makeMemoryMaintenanceService(
+                configuration: configuration,
+                relayAccessRootURL: relayAccessRootURL
+            )
+        )
+    }
+
     static func makeService(
         configuration: AppConfiguration,
         relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil,

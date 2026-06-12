@@ -1491,12 +1491,14 @@ private struct CompanionDraftAttachmentCard: View {
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.white, .black.opacity(0.72))
                         .shadow(radius: 6)
                 }
                 .buttonStyle(.plain)
                 .offset(x: 6, y: -6)
+                .accessibilityIdentifier("conversation.draft-attachment.remove")
             }
+            .accessibilityIdentifier("conversation.draft-attachment.preview")
 
             OverflowScrollingText(
                 text: attachment.filename,

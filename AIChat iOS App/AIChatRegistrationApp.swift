@@ -27,17 +27,18 @@ struct AIChatRegistrationApp: App {
 
         let configuration = AppConfiguration.load()
         let repository = ConversationRepository(configuration: configuration)
-        let service = AIServiceFactory.makeService(configuration: configuration)
-        let transcriptionService = AIServiceFactory.makeTranscriptionService(configuration: configuration)
-        let memoryMaintenanceService = AIServiceFactory.makeMemoryMaintenanceService(configuration: configuration)
+        let services = AIServiceFactory.makeRuntimeServices(
+            configuration: configuration,
+            repository: repository
+        )
         let syncBridge = CompanionSyncBridge()
         let cloudSyncService = ICloudConversationSyncService(configuration: configuration)
         _chatStore = StateObject(
             wrappedValue: ChatStore(
                 repository: repository,
-                aiService: service,
-                transcriptionService: transcriptionService,
-                memoryMaintenanceService: memoryMaintenanceService,
+                aiService: services.streamingService,
+                transcriptionService: services.transcriptionService,
+                memoryMaintenanceService: services.memoryMaintenanceService,
                 configuration: configuration,
                 syncBridge: syncBridge,
                 cloudSyncService: cloudSyncService
@@ -111,6 +112,22 @@ private struct CompanionUITestBootstrap {
             return CompanionUITestBootstrap(
                 store: MainActor.assumeIsolated {
                     ChatStore.previewStore(conversations: [conversation])
+                },
+                initialConversationID: conversation.id,
+                launchDestination: .conversationDetail(conversation.id)
+            )
+        case "companion_draft_image_attachment":
+            let conversation = draftImageAttachmentConversation()
+            return CompanionUITestBootstrap(
+                store: MainActor.assumeIsolated {
+                    let store = ChatStore.previewStore(conversations: [conversation])
+                    let imageData = Data(base64Encoded: onePixelPNGBase64) ?? Data()
+                    try? store.addAttachment(
+                        from: imageData,
+                        suggestedFilename: "white-draft-image",
+                        to: conversation.id
+                    )
+                    return store
                 },
                 initialConversationID: conversation.id,
                 launchDestination: .conversationDetail(conversation.id)
@@ -189,6 +206,21 @@ private struct CompanionUITestBootstrap {
                     role: .assistant,
                     text: "这里有一张生成图片，确认 iPhone 侧可以直接显示并点开查看。",
                     attachments: [attachment]
+                )
+            ]
+        )
+    }
+
+    private static func draftImageAttachmentConversation() -> ConversationThread {
+        let conversationID = UUID(uuidString: "00000000-0000-0000-0000-000000000431") ?? UUID()
+        return ConversationThread(
+            id: conversationID,
+            title: "Companion Draft Attachment",
+            messages: [
+                ChatMessage(
+                    id: UUID(uuidString: "00000000-0000-0000-0000-000000000432") ?? UUID(),
+                    role: .assistant,
+                    text: "草稿区有一张浅色图片，确认移除按钮在浅色内容上仍然清晰。"
                 )
             ]
         )
