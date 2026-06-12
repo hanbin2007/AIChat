@@ -4,7 +4,7 @@
 //
 //  Toolbar indicator that surfaces `ChatStore.relayConnectionStatus`
 //  with a 7pt colored dot inside a 44pt hitbox. Relay mode only — the
-//  caller gates visibility on `configuration.backendMode == .relay`.
+//  Relay-only connectivity indicator.
 //
 
 #if os(watchOS)

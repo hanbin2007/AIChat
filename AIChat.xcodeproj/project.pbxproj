@@ -992,13 +992,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/WatchApp-Info.plist";
-				INFOPLIST_KEY_AI_BACKEND_MODE = "$(AI_BACKEND_MODE)";
 				INFOPLIST_KEY_AI_RELAY_BASE_URL = "$(AI_RELAY_BASE_URL)";
-				INFOPLIST_KEY_AI_RELAY_BEARER_TOKEN = "$(AI_RELAY_BEARER_TOKEN)";
 				INFOPLIST_KEY_AI_RELAY_STREAM_PATH = "$(AI_RELAY_STREAM_PATH)";
 				INFOPLIST_KEY_APP_GROUP_IDENTIFIER = "$(APP_GROUP_IDENTIFIER)";
 				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
-				INFOPLIST_KEY_GEMINI_API_KEY = "$(GEMINI_API_KEY)";
 				INFOPLIST_KEY_GEMINI_MODEL = "$(GEMINI_MODEL)";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Select photos to send with your AI prompts.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -1037,13 +1034,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/WatchApp-Info.plist";
-				INFOPLIST_KEY_AI_BACKEND_MODE = "$(AI_BACKEND_MODE)";
 				INFOPLIST_KEY_AI_RELAY_BASE_URL = "$(AI_RELAY_BASE_URL)";
-				INFOPLIST_KEY_AI_RELAY_BEARER_TOKEN = "$(AI_RELAY_BEARER_TOKEN)";
 				INFOPLIST_KEY_AI_RELAY_STREAM_PATH = "$(AI_RELAY_STREAM_PATH)";
 				INFOPLIST_KEY_APP_GROUP_IDENTIFIER = "$(APP_GROUP_IDENTIFIER)";
 				INFOPLIST_KEY_CFBundleDisplayName = AIChat;
-				INFOPLIST_KEY_GEMINI_API_KEY = "$(GEMINI_API_KEY)";
 				INFOPLIST_KEY_GEMINI_MODEL = "$(GEMINI_MODEL)";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Select photos to send with your AI prompts.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";

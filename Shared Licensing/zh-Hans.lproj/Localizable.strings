@@ -30,20 +30,15 @@
 "favorites.remove" = "取消收藏";
 "favorites.empty.title" = "还没有收藏";
 "favorites.empty.message" = "在会话列表里向左滑动并加入收藏，收藏过的会话会显示在这里。";
-"backend.direct" = "直连 Gemini";
 "backend.relay" = "Relay 网关";
 "backend.relay.summary" = "Relay 网关 • %@";
 "backend.url_invalid" = "URL 无效";
 "storage.app_group.requested" = "已请求 App Group：%@";
 "storage.local.watch" = "手表本地存储";
 "storage.local.iphone" = "iPhone 本地存储";
-"configuration.gemini.ready" = "Gemini 已就绪。";
-"configuration.gemini.missing_api_key" = "发送前请在 Config/Secrets.xcconfig 或 Scheme 环境变量中补充 GEMINI_API_KEY。";
 "configuration.relay.ready" = "Relay 网关已就绪。";
 "configuration.relay.missing_base_url" = "Relay 模式需要在 Config/Secrets.xcconfig 中配置 AI_RELAY_BASE_URL。";
 "configuration.relay.invalid_base_url" = "AI_RELAY_BASE_URL 无效。在 xcconfig 里请写成 http:/$()/127.0.0.1:8787，而不是 http://127.0.0.1:8787。";
-"configuration.relay.missing_bearer" = "Relay 模式需要在 Config/Secrets.xcconfig 中配置 AI_RELAY_BEARER_TOKEN。";
-"configuration.voice.needs_api_key" = "语音转录依赖 GEMINI_API_KEY，因为音频会先交给 Gemini 转录后再发送。";
 "sync.unavailable.watch" = "电话同步不可用";
 "sync.unavailable.iphone" = "手表同步不可用";
 "sync.not_paired.watch" = "手表未配对";
@@ -324,7 +319,7 @@
 "Summary" = "摘要";
 "Stopped" = "已停止";
 "Voice note" = "语音附件";
-"Gemini Setup" = "Gemini 配置";
+"Gemini Setup" = "Relay 配置";
 
 /* iPhone */
 "Apple Watch 备用导入" = "Apple Watch 备用导入";

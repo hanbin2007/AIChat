@@ -55,55 +55,27 @@ enum AIServiceFactory {
         configuration: AppConfiguration,
         relayConnectionStatusHandler: RelayConnectionStatusHandler? = nil
     ) -> AIStreamingService {
-        switch configuration.backendMode {
-        case .direct:
-            // Direct mode never observes or emits relay connection
-            // status — the handler is ignored on this path by design.
-            return GeminiAPIClient(configuration: configuration)
-        case .relay:
-            var client = RelayAIClient(configuration: configuration)
-            client.statusHandler = relayConnectionStatusHandler
-            return client
-        }
+        var client = RelayAIClient(configuration: configuration)
+        client.statusHandler = relayConnectionStatusHandler
+        return client
     }
 
     static func makeTranscriptionService(configuration: AppConfiguration) -> AITranscriptionService? {
-        switch configuration.backendMode {
-        case .direct:
-            guard configuration.geminiAPIKey != nil else {
-                return nil
-            }
-
-            return GeminiTranscriptionService(configuration: configuration)
-        case .relay:
-            guard configuration.relayBaseURL != nil else {
-                return nil
-            }
-
-            return RelayTranscriptionService(configuration: configuration)
+        guard configuration.relayBaseURL != nil else {
+            return nil
         }
+
+        return RelayTranscriptionService(configuration: configuration)
     }
 
     static func makeMemoryMaintenanceService(configuration: AppConfiguration) -> any AIMemoryMaintenanceService {
-        switch configuration.backendMode {
-        case .direct:
-            guard configuration.geminiAPIKey != nil else {
-                return HeuristicMemoryMaintenanceService()
-            }
-
-            return ModelBackedMemoryMaintenanceService(
-                extractor: GeminiMemoryExtractionClient(configuration: configuration),
-                defaultModel: configuration.geminiModel
-            )
-        case .relay:
-            guard configuration.relayMemoryExtractURL != nil else {
-                return HeuristicMemoryMaintenanceService()
-            }
-
-            return ModelBackedMemoryMaintenanceService(
-                extractor: RelayMemoryExtractionClient(configuration: configuration),
-                defaultModel: configuration.geminiModel
-            )
+        guard configuration.relayMemoryExtractURL != nil else {
+            return HeuristicMemoryMaintenanceService()
         }
+
+        return ModelBackedMemoryMaintenanceService(
+            extractor: RelayMemoryExtractionClient(configuration: configuration),
+            defaultModel: configuration.geminiModel
+        )
     }
 }

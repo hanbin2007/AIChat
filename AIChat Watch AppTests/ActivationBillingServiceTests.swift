@@ -48,6 +48,7 @@ final class ActivationBillingServiceTests: XCTestCase {
     private func makeStatus(
         accountState: RelayAccountState = .active,
         keyState: RelayKeyState = .active,
+        keyValue: String = "server-issued-key",
         creditBalance: Int = 100,
         creditExpiresAt: Date? = nil
     ) -> RelayAccountStatusResponse {
@@ -68,7 +69,7 @@ final class ActivationBillingServiceTests: XCTestCase {
             device: nil,
             key: RelayKeySummary(
                 keyID: UUID(),
-                keyValue: "server-issued-key",
+                keyValue: keyValue,
                 state: keyState,
                 source: .subscription,
                 note: nil,
@@ -103,6 +104,18 @@ final class ActivationBillingServiceTests: XCTestCase {
         await service.updateRelayAccountStatus(status, shareToCompanion: false)
 
         XCTAssertTrue(service.hasManagedRelayAccess)
+    }
+
+    func testHasManagedRelayAccessIsFalseWhenServerRedactsKeyValue() async {
+        let service = makeService()
+        let status = makeStatus(
+            keyValue: "",
+            creditBalance: 500,
+            creditExpiresAt: Date().addingTimeInterval(3600)
+        )
+        await service.updateRelayAccountStatus(status, shareToCompanion: false)
+
+        XCTAssertFalse(service.hasManagedRelayAccess)
     }
 
     func testHasManagedRelayAccessIsFalseWhenCreditsHaveExpired() async {

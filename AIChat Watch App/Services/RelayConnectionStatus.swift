@@ -3,8 +3,7 @@
 //  AIChat Watch App
 //
 //  Tracks the relay backend's health so the toolbar dot can reflect it
-//  without waiting for a user-visible send failure. Relay-mode only —
-//  never observed by direct-mode code paths.
+//  without waiting for a user-visible send failure.
 //
 
 import Foundation

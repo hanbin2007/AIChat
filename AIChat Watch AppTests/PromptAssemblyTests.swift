@@ -22,7 +22,7 @@ final class PromptAssemblyTests: XCTestCase {
         )
 
         let client = GeminiAPIClient(
-            configuration: makeDirectModeAppConfiguration(geminiModel: "gemini-3.1-pro-preview")
+            configuration: makeGeminiRequestTestConfiguration(geminiModel: "gemini-3.1-pro-preview")
         )
 
         let requestBody = client.makeRequestBody(for: conversation)
@@ -113,7 +113,7 @@ final class PromptAssemblyTests: XCTestCase {
         )
 
         let client = GeminiAPIClient(
-            configuration: makeDirectModeAppConfiguration(geminiModel: "gemini-3-flash-preview")
+            configuration: makeGeminiRequestTestConfiguration(geminiModel: "gemini-3-flash-preview")
         )
 
         let requestBody = client.makeRequestBody(for: conversation)

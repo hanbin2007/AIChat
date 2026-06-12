@@ -218,9 +218,7 @@ final class RelayServerController: ObservableObject {
 
     var clientConfigurationSnippet: String {
         """
-        AI_BACKEND_MODE = relay
         AI_RELAY_BASE_URL = \(Self.xcconfigEscaped(recommendedClientBaseURL))
-        AI_RELAY_BEARER_TOKEN = \(settings.runtimeConfiguration.relayBearerToken)
         GEMINI_MODEL = gemini-3-flash-preview
         """
     }

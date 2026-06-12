@@ -8,7 +8,7 @@
 - 流式回复显示，而不是整段返回
 - Gemini thinking 摘要展示与会话级思考强度切换
 - 会话内快速模型切换，支持 `Gemini 3 Flash` / `Gemini 3.1 Pro`
-- 可切换 `Direct Gemini` 和 `Relay Gateway`
+- 通过 `Relay Gateway` 统一访问 Gemini 上游
 - 新增 `AIChat Relay` macOS 原生桌面服务端，带 UI、日志、LAN 地址展示和一键启动
 - 为未来 iPhone 伴生端准备的共享存储与 `WatchConnectivity` 同步桥
 
@@ -32,22 +32,10 @@
 ## 本地配置
 
 1. 复制 `Config/Secrets.xcconfig.example` 为 `Config/Secrets.xcconfig`
-2. 选择一种模式
-
-开发直连 Gemini：
+2. 配置 relay 连接：
 
 ```xcconfig
-AI_BACKEND_MODE = direct
-GEMINI_API_KEY = your-gemini-api-key
-GEMINI_MODEL = gemini-3-flash-preview
-```
-
-生产推荐 relay：
-
-```xcconfig
-AI_BACKEND_MODE = relay
 AI_RELAY_BASE_URL = http:/$()/127.0.0.1:8787
-AI_RELAY_BEARER_TOKEN = your-relay-token
 GEMINI_MODEL = gemini-3-flash-preview
 ```
 
@@ -61,7 +49,7 @@ APP_GROUP_IDENTIFIER = group.your.company.aichat
 
 - `Config/Secrets.xcconfig` 已经被 `.gitignore` 忽略
 - `Config/Secrets.xcconfig.example` 里已经演示了 relay URL 的 `xcconfig` 写法；不要直接写 `http://...`，因为 `//` 会被当成注释
-- 直连 Gemini 只适合开发，不适合真正上线
+- Watch 客户端是 relay-only；Gemini API key 和 relay admin bearer token 只应配置在 relay 服务端
 - 如果要让 iPhone 和 Watch 真正共享文件存储，需要再给 target 配好 App Group entitlement
 - `Gemini 3` 会走 `thinkingLevel`，`Gemini 2.5` 会自动映射到 `thinkingBudget`
 

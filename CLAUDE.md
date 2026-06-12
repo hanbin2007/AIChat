@@ -35,7 +35,7 @@ xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,n
 ## Local Configuration
 
 1. Copy `Config/Secrets.xcconfig.example` → `Config/Secrets.xcconfig` (gitignored)
-2. Set `AI_BACKEND_MODE` to `direct` (dev) or `relay` (production)
+2. Configure `AI_RELAY_BASE_URL`; do not put upstream Gemini keys or relay admin bearer tokens in client config
 3. In xcconfig, URLs must use `http:/$()/...` — `//` is treated as a comment
 
 ## Architecture
@@ -58,18 +58,16 @@ xcodebuild -scheme "AIChat iOS UITests"   -destination "platform=iOS Simulator,n
 ### Watch App Layers
 
 - **Models/** — `ConversationThread`, `ChatMessage`, `ChatAttachment`, `PromptPreset`, `AIModelCatalog` — plain `Codable` structs
-- **Services/** — `GeminiAPIClient` (direct), `RelayAIClient` (relay proxy), `ConversationRepository` (JSON file persistence), `ICloudConversationSyncService`, `CompanionSyncBridge` (WatchConnectivity), `VoiceRecorder`, `AIContextBuilder`, `AIMemoryMaintenanceService`
+- **Services/** — `RelayAIClient` (relay proxy), Gemini request-shaping helpers, `ConversationRepository` (JSON file persistence), `ICloudConversationSyncService`, `CompanionSyncBridge` (WatchConnectivity), `VoiceRecorder`, `AIContextBuilder`, `AIMemoryMaintenanceService`
 - **ViewModels/** — `ChatStore` only
 - **Views/** — SwiftUI views; `ContentView` is a root `TabView` (Favorites / PromptLibrary / Conversations)
 
-### AI Backend Modes
+### AI Backend
 
-Controlled by `AI_BACKEND_MODE` in xcconfig, read at launch via `AppConfiguration.load()`:
-
-- **direct** — watch calls Gemini API directly (dev only)
-- **relay** — watch calls a relay server that holds the API key and forwards SSE streams as `answer_delta` / `thought_delta` events
-
-`AIServiceFactory` creates the appropriate `AIStreamingService` implementation based on the mode.
+The Watch app is relay-only. `AIServiceFactory` always creates `RelayAIClient`,
+and the relay server holds the upstream Gemini API key and forwards SSE streams
+as `answer_delta` / `thought_delta` events. `AI_BACKEND_MODE` is no longer read
+by `AppConfiguration.load()`.
 
 ### Local Swift Packages
 

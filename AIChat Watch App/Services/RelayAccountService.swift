@@ -24,10 +24,6 @@ struct RelayAccountService {
     var session: URLSession = .shared
 
     func refreshOrBootstrapStatus(forceBootstrap: Bool = false) async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         if forceBootstrap == false,
            let status = try await fetchAccountStatusIfPossible() {
             try await repository.saveStatus(status)
@@ -58,9 +54,7 @@ struct RelayAccountService {
     }
 
     func fetchAccountStatusIfPossible() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay,
-              configuration.relayAccountStatusURL != nil
-        else {
+        guard configuration.relayAccountStatusURL != nil else {
             return nil
         }
 

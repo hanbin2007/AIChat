@@ -37,19 +37,98 @@ func makeTemporaryRootURL(prefix: String = "AIChatTests") -> URL {
         .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
 }
 
-/// Default `AppConfiguration` used in tests that exercise the direct (non-relay) Gemini path.
-func makeDirectModeAppConfiguration(
+/// Default `AppConfiguration` used in tests that exercise Gemini request
+/// shaping helpers directly. Runtime service creation is relay-only; these
+/// tests instantiate Gemini helper types explicitly and do not exercise the
+/// backend factory.
+func makeGeminiRequestTestConfiguration(
     geminiAPIKey: String = "test",
     geminiModel: String = "gemini-2.5-flash",
     geminiTranscriptionModel: String = "gemini-3-flash-preview"
 ) -> AppConfiguration {
     AppConfiguration(
-        backendMode: .direct,
+        backendMode: .relay,
         geminiAPIKey: geminiAPIKey,
         geminiModel: geminiModel,
         geminiTranscriptionModel: geminiTranscriptionModel,
         relayBaseURL: nil,
         relayBearerToken: nil,
+        relayStreamPath: "v1/chat/stream",
+        appGroupIdentifier: nil
+    )
+}
+
+/// Builds a server account-status response that grants active managed relay
+/// access (active account + active key + a positive, non-expired credit
+/// balance). Seeding this into a `ChatStore`'s `ActivationBillingService` is the
+/// relay-mode equivalent of applying an offline activation code: it flips
+/// `hasManagedRelayAccess` to `true` and `isReadOnlyMode` to `false`, so the
+/// store can create conversations and send messages.
+@MainActor
+func makeManagedRelayAccessStatus(
+    creditBalance: Int = 1_000,
+    creditExpiresAt: Date? = nil
+) -> RelayAccountStatusResponse {
+    RelayAccountStatusResponse(
+        account: RelayAccountSummary(
+            accountID: UUID(),
+            displayName: nil,
+            adminNote: nil,
+            state: .active,
+            source: .subscription,
+            planID: nil,
+            originalTransactionID: nil,
+            appAccountToken: nil,
+            creditBalance: creditBalance,
+            creditExpiresAt: creditExpiresAt,
+            lastUsageAt: nil
+        ),
+        device: nil,
+        key: RelayKeySummary(
+            keyID: UUID(),
+            keyValue: "test-server-issued-key",
+            state: .active,
+            source: .subscription,
+            note: nil,
+            issuedAt: Date(timeIntervalSince1970: 0)
+        ),
+        grants: [],
+        recentUsage: []
+    )
+}
+
+/// Seeds active managed relay access into a `ChatStore` so relay-mode tests can
+/// exercise generic create/send/retry behavior. Replaces the old offline
+/// `applyActivationCode` setup, which no longer grants send access in the
+/// relay-only app.
+@MainActor
+func seedManagedRelayAccess(
+    into store: ChatStore,
+    creditBalance: Int = 1_000,
+    creditExpiresAt: Date? = nil
+) async {
+    await store.activationBilling.seedManagedRelayAccessForTesting(
+        makeManagedRelayAccessStatus(
+            creditBalance: creditBalance,
+            creditExpiresAt: creditExpiresAt
+        )
+    )
+}
+
+/// Relay-mode `AppConfiguration` used by tests that build a `ChatStore` and
+/// then seed managed relay access. `relayBaseURL` is non-nil so the relay
+/// transcription/streaming services resolve their URLs.
+func makeRelayModeAppConfiguration(
+    geminiModel: String = "gemini-2.5-flash",
+    geminiTranscriptionModel: String = "gemini-3-flash-preview"
+) -> AppConfiguration {
+    AppConfiguration(
+        backendMode: .relay,
+        geminiAPIKey: nil,
+        geminiModel: geminiModel,
+        geminiTranscriptionModel: geminiTranscriptionModel,
+        relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+        relayBearerToken: "test-token",
         relayStreamPath: "v1/chat/stream",
         appGroupIdentifier: nil
     )

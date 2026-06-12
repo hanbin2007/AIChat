@@ -79,9 +79,7 @@ final class ActivationBillingService: ObservableObject {
         )
 
         #if canImport(StoreKit)
-        if configuration.backendMode == .relay {
-            startTransactionUpdatesListener()
-        }
+        startTransactionUpdatesListener()
         #endif
     }
 
@@ -110,10 +108,6 @@ final class ActivationBillingService: ObservableObject {
     private func handleTransactionUpdate(
         _ verificationResult: VerificationResult<Transaction>
     ) async {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         guard case .verified(let transaction) = verificationResult else {
             // Unverified transactions can't be trusted for billing; leave them
             // unfinished so StoreKit re-delivers once it can verify them.
@@ -152,9 +146,7 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var relayAccessStatusTitle: String? {
-        guard configuration.backendMode == .relay,
-              let account = relayAccountStatus?.account
-        else {
+        guard let account = relayAccountStatus?.account else {
             return nil
         }
 
@@ -177,9 +169,7 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var relayAccessStatusMessage: String? {
-        guard configuration.backendMode == .relay,
-              let account = relayAccountStatus?.account
-        else {
+        guard let account = relayAccountStatus?.account else {
             return nil
         }
 
@@ -210,26 +200,13 @@ final class ActivationBillingService: ObservableObject {
     }
 
     var isReadOnlyMode: Bool {
-        if hasManagedRelayAccess {
-            return false
-        }
-
-        // In relay mode the server account is the single source of truth for
-        // sending: offline activation is only a stepping stone that must be
-        // exchanged for managed relay access (see `applyActivationCode`). If we
-        // don't have managed access, every send is blocked server-side — so the
-        // composer must stay read-only rather than pretending to be editable
-        // while `activationFailureMessage` rejects each send (M1).
-        if configuration.backendMode == .relay {
-            return true
-        }
-
-        switch activationStatus {
-        case .active:
-            return false
-        case .inactive, .pending, .expired, .exhausted, .invalid:
-            return true
-        }
+        // The server account is the single source of truth for sending:
+        // offline activation is only a stepping stone that must be exchanged
+        // for managed relay access (see `applyActivationCode`). Without managed
+        // access every send is blocked server-side — so the composer stays
+        // read-only rather than pretending to be editable while
+        // `activationFailureMessage` rejects each send (M1).
+        hasManagedRelayAccess == false
     }
 
     var activationStatusTitle: String {
@@ -333,10 +310,6 @@ final class ActivationBillingService: ObservableObject {
         activationState = activationRepository.loadState()
         relayAccountStatus = await relayAccessRepository.loadState()?.status
 
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         do {
             let status = try await relayAccountService.fetchAccountStatusIfPossible()
             if status != nil {
@@ -390,13 +363,11 @@ final class ActivationBillingService: ObservableObject {
         try activationRepository.saveState(nextState)
         activationState = nextState
 
-        if configuration.backendMode == .relay {
-            let status = try await relayAccountService.exchangeOfflineActivation(
-                code: rawCode,
-                state: nextState
-            )
-            await updateRelayAccountStatus(status, shareToCompanion: true)
-        }
+        let status = try await relayAccountService.exchangeOfflineActivation(
+            code: rawCode,
+            state: nextState
+        )
+        await updateRelayAccountStatus(status, shareToCompanion: true)
     }
 
     func clearActivation() throws {
@@ -408,6 +379,58 @@ final class ActivationBillingService: ObservableObject {
         activationState = state
     }
 
+    /// Synchronously seeds an account status into the published state for
+    /// previews and tests. The relay-only app derives send access from managed
+    /// relay status rather than offline activation, so preview/test stores that
+    /// need an editable composer use this instead of applying an offline code.
+    func setRelayAccountStatusForPreview(_ status: RelayAccountStatusResponse?) {
+        relayAccountStatus = status
+    }
+
+    /// Seeds managed relay access for tests, persisting the status through the
+    /// relay-access repository so a later `refreshActivationState()` (which
+    /// reloads the cached status from disk) preserves it instead of wiping the
+    /// in-memory seed. This mirrors how production code persists a fetched
+    /// status before any refresh round-trip.
+    func seedManagedRelayAccessForTesting(_ status: RelayAccountStatusResponse) async {
+        try? await relayAccessRepository.saveStatus(status)
+        relayAccountStatus = status
+    }
+
+    /// Builds an active managed-access status (active account + key + positive,
+    /// non-expired credit balance) for previews and tests.
+    static func previewManagedRelayAccessStatus(
+        creditBalance: Int = 1_000,
+        creditExpiresAt: Date? = nil
+    ) -> RelayAccountStatusResponse {
+        RelayAccountStatusResponse(
+            account: RelayAccountSummary(
+                accountID: UUID(),
+                displayName: nil,
+                adminNote: nil,
+                state: .active,
+                source: .subscription,
+                planID: nil,
+                originalTransactionID: nil,
+                appAccountToken: nil,
+                creditBalance: creditBalance,
+                creditExpiresAt: creditExpiresAt,
+                lastUsageAt: nil
+            ),
+            device: nil,
+            key: RelayKeySummary(
+                keyID: UUID(),
+                keyValue: "preview-server-issued-key",
+                state: .active,
+                source: .subscription,
+                note: nil,
+                issuedAt: Date(timeIntervalSince1970: 0)
+            ),
+            grants: [],
+            recentUsage: []
+        )
+    }
+
     func sendActivationCodeToPairedWatch(_ rawCode: String) {
         syncBridge.pushActivationCodeImport(rawCode)
     }
@@ -417,19 +440,11 @@ final class ActivationBillingService: ObservableObject {
     }
 
     func refreshRelayCatalog() async throws {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         relayCatalog = try await relayAccountService.fetchCatalog()
     }
 
     @discardableResult
     func requestManagedRelayAccess() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         let status = try await relayAccountService.refreshOrBootstrapStatus(forceBootstrap: true)
         await updateRelayAccountStatus(status, shareToCompanion: true)
         return status
@@ -437,10 +452,6 @@ final class ActivationBillingService: ObservableObject {
 
     @discardableResult
     func purchaseRelayPlan(id planID: String) async throws -> RelayStorePurchaseOutcome {
-        guard configuration.backendMode == .relay else {
-            throw RelayAPIError.missingConfiguration
-        }
-
         relayBillingBusy = true
         defer { relayBillingBusy = false }
 
@@ -489,10 +500,6 @@ final class ActivationBillingService: ObservableObject {
 
     @discardableResult
     func restoreRelayPurchases() async throws -> RelayAccountStatusResponse? {
-        guard configuration.backendMode == .relay else {
-            return nil
-        }
-
         relayBillingBusy = true
         defer { relayBillingBusy = false }
 
@@ -552,46 +559,29 @@ final class ActivationBillingService: ObservableObject {
     }
 
     func activationFailureMessage(for modelID: String) -> String? {
-        if configuration.backendMode == .relay {
-            if hasManagedRelayAccess {
-                return nil
-            }
-
-            guard let account = relayAccountStatus?.account else {
-                // No managed access and no online account yet: the device needs
-                // to bind online. Surface an actionable CTA instead of a
-                // permanent "verifying…" message that never resolves (M1).
-                return L10n.tr("relay.access.needs_online_binding")
-            }
-
-            switch account.state {
-            case .active:
-                if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
-                    return L10n.tr("relay.failure.credits_expired")
-                }
-                return account.creditBalance > 0 ? nil : L10n.tr("relay.failure.credits_exhausted")
-            case .paused:
-                return L10n.tr("relay.failure.key_paused")
-            case .expired:
-                return L10n.tr("relay.failure.credits_expired")
-            case .inactive, .unknown:
-                return L10n.tr("relay.failure.device_inactive")
-            }
+        if hasManagedRelayAccess {
+            return nil
         }
 
-        switch activationStatus {
-        case .inactive:
-            return OfflineActivationError.notActivated.localizedDescription
-        case .pending(let state):
-            return OfflineActivationError.notYetActive(startDate: state.license.validFrom).localizedDescription
+        guard let account = relayAccountStatus?.account else {
+            // No managed access and no online account yet: the device needs
+            // to bind online. Surface an actionable CTA instead of a
+            // permanent "verifying…" message that never resolves (M1).
+            return L10n.tr("relay.access.needs_online_binding")
+        }
+
+        switch account.state {
+        case .active:
+            if let expiresAt = account.creditExpiresAt, expiresAt <= .now {
+                return L10n.tr("relay.failure.credits_expired")
+            }
+            return account.creditBalance > 0 ? nil : L10n.tr("relay.failure.credits_exhausted")
+        case .paused:
+            return L10n.tr("relay.failure.key_paused")
         case .expired:
-            return OfflineActivationError.licenseExpired.localizedDescription
-        case .exhausted:
-            return OfflineActivationError.messageLimitReached.localizedDescription
-        case .invalid(let message):
-            return message
-        case .active(let state, _):
-            return state.license.allows(modelID: modelID) ? nil : OfflineActivationError.modelNotAllowed.localizedDescription
+            return L10n.tr("relay.failure.credits_expired")
+        case .inactive, .unknown:
+            return L10n.tr("relay.failure.device_inactive")
         }
     }
 
@@ -702,13 +692,13 @@ final class ActivationBillingService: ObservableObject {
         for status: RelayAccountStatusResponse?,
         now: Date = .now
     ) -> Bool {
-        guard configuration.backendMode == .relay else {
-            return false
-        }
-
         guard let account = status?.account,
               let key = status?.key
         else {
+            return false
+        }
+
+        guard key.keyValue.nonEmptyTrimmed != nil else {
             return false
         }
 
@@ -720,8 +710,7 @@ final class ActivationBillingService: ObservableObject {
     }
 
     private func shareManagedRelayAccessToCompanionIfPossible() async {
-        guard configuration.backendMode == .relay,
-              configuration.relayBearerToken == nil,
+        guard configuration.relayBearerToken == nil,
               canTransferActivationCodeToPairedWatch,
               isManagedRelayAccessActive(for: relayAccountStatus)
         else {
@@ -740,10 +729,6 @@ final class ActivationBillingService: ObservableObject {
     }
 
     private func consumeRelayPairingToken(_ token: String, expiresAt: Date?) async {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         if let expiresAt, expiresAt <= .now {
             return
         }

@@ -31,7 +31,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-2.5-flash",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -66,7 +66,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -94,7 +94,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -240,7 +240,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -344,7 +344,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -380,7 +380,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-2.5-flash",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -423,7 +423,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3-flash-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -451,7 +451,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-2.5-flash",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -704,7 +704,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let client = GeminiAPIClient(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -838,7 +838,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         XCTAssertTrue(configuration.configurationMessage.contains("http:/$()/127.0.0.1:8787"))
     }
 
-    func testRelayModeReportsMissingBearerTokenSeparately() {
+    func testRelayModeIsConfiguredWithOnlyRelayBaseURL() {
         let configuration = AppConfiguration(
             backendMode: .relay,
             geminiAPIKey: nil,
@@ -850,10 +850,10 @@ final class AIChat_Watch_AppTests: XCTestCase {
             appGroupIdentifier: nil
         )
 
-        XCTAssertFalse(configuration.isAIConfigured)
+        XCTAssertTrue(configuration.isAIConfigured)
         XCTAssertEqual(
             configuration.configurationMessage,
-            L10n.tr("configuration.relay.missing_bearer")
+            L10n.tr("configuration.relay.ready")
         )
     }
 
@@ -918,7 +918,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let service = GeminiTranscriptionService(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -966,7 +966,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
         let service = GeminiTranscriptionService(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1001,7 +1001,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         let conversation = ConversationThread(messages: [])
         let service = GeminiTranscriptionService(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1028,7 +1028,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     func testTranscriptionResponseCanSucceedWithoutFinishReason() throws {
         let service = GeminiTranscriptionService(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1067,7 +1067,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     func testTranscriptionResponseCanDecodeLoggedGeminiPayload() throws {
         let service = GeminiTranscriptionService(
             configuration: AppConfiguration(
-                backendMode: .direct,
+                backendMode: .relay,
                 geminiAPIKey: "test",
                 geminiModel: "gemini-3.1-pro-preview",
                 geminiTranscriptionModel: "gemini-3.1-pro-preview",
@@ -1182,14 +1182,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioIsTranscribedIntoDraftWithoutSending() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1206,16 +1205,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
@@ -1234,14 +1224,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioTranscriptionTriggersCompletionFeedback() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1259,16 +1248,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
@@ -1285,14 +1265,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioTranscriptionAppendsToExistingDraft() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1309,16 +1288,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Keep the first instruction", for: conversationID)
@@ -1339,14 +1309,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioCanBeSentDirectlyWithoutClearingDraft() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1364,16 +1333,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Keep this draft", for: conversationID)
@@ -1402,14 +1362,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRestoreLatestUserMessageToDraftUsesMostRecentUserText() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1426,16 +1385,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
 
@@ -1451,14 +1401,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testSendMessageTriggersAssistantReplyCompletionFeedback() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1476,16 +1425,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Ping", for: conversationID)
@@ -1498,19 +1438,18 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioRetriesBeforeFailing() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let defaultsSuiteName = "AIChatTests.TranscriptionRetry.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
         defer {
             defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1533,16 +1472,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults: defaults,
             sendRetryDelayNanoseconds: { _ in 0 }
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
@@ -1567,7 +1497,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1608,7 +1538,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1661,12 +1591,12 @@ final class AIChat_Watch_AppTests: XCTestCase {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1684,22 +1614,9 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults: defaults
         )
 
-        // Activate so isReadOnlyMode is false and createConversation succeeds.
-        store.activationBilling.setActivationStateForPreview(
-            OfflineActivationState(
-                license: OfflineActivationLicense(
-                    deviceToken: store.deviceIdentity.deviceToken,
-                    requestIssuedAt: .now,
-                    validFrom: .distantPast,
-                    validUntil: .distantFuture,
-                    messageLimit: nil,
-                    modelMask: 0xFFFF
-                ),
-                activationCodeFingerprint: "test-fingerprint",
-                activatedAt: .now,
-                usedMessageCount: 0
-            )
-        )
+        // Grant managed relay access so isReadOnlyMode is false and
+        // createConversation succeeds.
+        await seedManagedRelayAccess(into: store)
 
         store.updateDefaultConversationModel("gemini-3.1-pro-preview")
         store.updateDefaultConversationThinkingIntensity(.deep)
@@ -1716,7 +1633,6 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRecordedAudioUsesSelectedTranscriptionModel() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let suiteName = "AIChatTests.TranscriptionSelection.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer {
@@ -1724,12 +1640,12 @@ final class AIChat_Watch_AppTests: XCTestCase {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1750,16 +1666,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             syncBridge: CompanionSyncBridge(),
             defaults: defaults
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         let audioAttachment = try ChatAttachment.makeRecordedAudio(
@@ -1778,7 +1685,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     func testConversationRepositoryExcludesGlobalPinnedMemorySidecarFromConversationList() async throws {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1815,14 +1722,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testDeletedConversationDoesNotReturnFromOlderRemoteSnapshotAfterRestart() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_200)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1854,16 +1760,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             deviceIdentity: deviceIdentity,
             defaults: defaults
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
 
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -1898,7 +1795,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     @MainActor
     func testReadOnlyStoreCanDeleteConversation() async throws {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -1952,14 +1849,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRemoteDeletionTombstoneRemovesStaleLocalConversation() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_260)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -1994,16 +1890,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             deviceIdentity: deviceIdentity,
             defaults: defaults
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: watchStore.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await watchStore.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: watchStore)
 
         let conversationIDOrNil = await watchStore.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -2047,14 +1934,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRemoteDeletionTombstoneRemovesLocallyModifiedConversation() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_320)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2089,16 +1975,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             deviceIdentity: deviceIdentity,
             defaults: defaults
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: watchStore.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await watchStore.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: watchStore)
 
         let conversationIDOrNil = await watchStore.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -2138,7 +2015,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     @MainActor
     func testRemoteConversationSnapshotHydratesImportedAttachmentBlob() async throws {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -2206,14 +2083,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testDeletedConversationDoesNotReturnWhenBackgroundRefreshFinishesLate() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_400_320)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2248,16 +2124,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             deviceIdentity: deviceIdentity,
             defaults: defaults
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
 
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -2299,14 +2166,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testGlobalPinnedMemoryIsInjectedOnlyWhenConversationOptsIn() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2324,16 +2190,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
 
         let sourceConversationIDOrNil = await store.createConversation()
         let sourceConversationID = try XCTUnwrap(sourceConversationIDOrNil)
@@ -2364,14 +2221,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testConversationToolTogglesUpdateImmediatelyAndPersistLatestState() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_990)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2388,16 +2244,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
 
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -2428,7 +2275,6 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testSendMessageRetriesBeforeReportingFailure() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let suiteName = "AIChatTests.SendRetry.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer {
@@ -2436,12 +2282,12 @@ final class AIChat_Watch_AppTests: XCTestCase {
         }
 
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2461,16 +2307,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             defaults: defaults,
             sendRetryDelayNanoseconds: { _ in 0 }
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Retry this send", for: conversationID)
@@ -2490,14 +2327,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testRetryLatestReplyReplacesLatestAssistantMessage() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2515,16 +2351,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Retry this answer", for: conversationID)
@@ -2545,14 +2372,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testStopSendingKeepsPartialAssistantReplyWithoutErrorBanner() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2569,16 +2395,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             configuration: configuration,
             syncBridge: CompanionSyncBridge()
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
         store.updateDraftText("Stop this answer", for: conversationID)
@@ -2616,14 +2433,13 @@ final class AIChat_Watch_AppTests: XCTestCase {
 
     @MainActor
     func testSendMessagePersistsStreamingReplyProgressAndReleasesReplyPersistenceController() async throws {
-        let now = Date(timeIntervalSince1970: 1_762_399_980)
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "test-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2643,16 +2459,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
             syncBridge: CompanionSyncBridge(),
             replyPersistenceController: replyPersistenceController
         )
-        let activationCode = try OfflineActivation.makeActivationCode(
-            requestCode: store.activationRequestCode(now: now),
-            policy: OfflineActivationPolicy(
-                validFrom: now,
-                validUntil: nil,
-                messageLimit: nil,
-                allowedModelIDs: nil
-            )
-        )
-        try await store.applyActivationCode(activationCode, now: now)
+        await seedManagedRelayAccess(into: store)
 
         let conversationIDOrNil = await store.createConversation()
         let conversationID = try XCTUnwrap(conversationIDOrNil)
@@ -2703,7 +2510,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     @MainActor
     func testLoadConversationsRecoversPersistedStreamingReplyAsFailed() async throws {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
@@ -2757,7 +2564,7 @@ final class AIChat_Watch_AppTests: XCTestCase {
     @MainActor
     func testLoadConversationsDropsEmptyRecoveredStreamingReply() async throws {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",

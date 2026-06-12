@@ -30,20 +30,15 @@
 "favorites.remove" = "Remove Favorite";
 "favorites.empty.title" = "No Favorites Yet";
 "favorites.empty.message" = "Swipe left on a conversation and add it to favorites. Favorited chats show up here.";
-"backend.direct" = "Direct Gemini";
 "backend.relay" = "Relay Gateway";
 "backend.relay.summary" = "Relay Gateway • %@";
 "backend.url_invalid" = "Invalid URL";
 "storage.app_group.requested" = "App Group requested: %@";
 "storage.local.watch" = "Local watch storage";
 "storage.local.iphone" = "Local iPhone storage";
-"configuration.gemini.ready" = "Gemini is ready.";
-"configuration.gemini.missing_api_key" = "Add GEMINI_API_KEY in Config/Secrets.xcconfig or the scheme environment before sending.";
 "configuration.relay.ready" = "Relay gateway is ready.";
 "configuration.relay.missing_base_url" = "Relay mode needs AI_RELAY_BASE_URL in Config/Secrets.xcconfig.";
 "configuration.relay.invalid_base_url" = "AI_RELAY_BASE_URL is invalid. In xcconfig, write http:/$()/127.0.0.1:8787 instead of http://127.0.0.1:8787.";
-"configuration.relay.missing_bearer" = "Relay mode needs AI_RELAY_BEARER_TOKEN in Config/Secrets.xcconfig.";
-"configuration.voice.needs_api_key" = "Voice transcription needs GEMINI_API_KEY because audio is transcribed before sending.";
 "sync.unavailable.watch" = "Phone sync unavailable";
 "sync.unavailable.iphone" = "Watch sync unavailable";
 "sync.not_paired.watch" = "Watch not paired";
@@ -324,7 +319,7 @@
 "Summary" = "Summary";
 "Stopped" = "Stopped";
 "Voice note" = "Voice note";
-"Gemini Setup" = "Gemini Setup";
+"Gemini Setup" = "Relay Setup";
 
 /* iPhone */
 "Apple Watch 备用导入" = "Apple Watch Fallback Import";

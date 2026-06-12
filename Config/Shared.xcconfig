@@ -3,7 +3,6 @@
 APP_MARKETING_VERSION = 2.2
 APP_BUILD_VERSION = 7
 
-AI_BACKEND_MODE = relay
 GEMINI_MODEL = gemini-3-flash-preview
 GEMINI_TRANSCRIPTION_MODEL = gemini-3-flash-preview
 AI_RELAY_STREAM_PATH = v1/chat/stream

@@ -24,9 +24,9 @@
 
 - `isReadOnlyMode`（`ActivationBillingService:212-233`）
 - `activationFailureMessage(for:)`（`:554-596`，还额外按 model 许可判断）
-- `canRetryLatestReply` / 各处 `isAIConfigured`（`ChatStore:1134` 等，混进无关的"平台配没配"）
+- `canRetryLatestReply` / 各处 `isAIConfigured`（`ChatStore:1134` 等，混进无关的"relay 配置是否完整"）
 
-加上三个独立真相源（离线 `activationState`、在线 `relayAccountStatus`、配置 `isAIConfigured`）被各 consumer 单独咨询，视图自己重算图标/文案/状态。8 条排序后的消费侧问题（HIGH：判据打架；MEDIUM：多真相源、双重 send 检查、relay 在线/离线只读矛盾、发送时不复检；LOW：视图重算、`isAIConfigured` 混淆、backend mode 散落）均源于**消费侧没有单一决策出口**。
+加上三个独立真相源（离线 `activationState`、在线 `relayAccountStatus`、配置 `isAIConfigured`）被各 consumer 单独咨询，视图自己重算图标/文案/状态。8 条排序后的消费侧问题（HIGH：判据打架；MEDIUM：多真相源、双重 send 检查、relay 在线/离线只读矛盾、发送时不复检；LOW：视图重算、`isAIConfigured` 混淆、历史 backend mode 分支散落）均源于**消费侧没有单一决策出口**。
 
 ## 3. 架构
 
@@ -87,7 +87,7 @@ enum LockReason: Equatable {
 **两条铁律：**
 
 1. **单一计算点。** `EntitlementDecision` 只在 `EntitlementStore`（经 `EntitlementEngine.derive`）算出一次。任何 consumer——输入框锁定、发送门、报错文案、状态卡图标、retry 能否点、model 过滤——**只读它，禁止自行判断**。
-2. **平台配置与用户授权正交。** "平台配没配"（API key / relay 配置，原 `isAIConfigured`）作为 `LockReason.platformNotConfigured` 统一进同一决策值，不再在 `send()` 里做两道独立检查、报错顺序不定。
+2. **平台配置与用户授权正交。** "平台配没配"（relay base URL / token 等，原 `isAIConfigured`）作为 `LockReason.platformNotConfigured` 统一进同一决策值，不再在 `send()` 里做两道独立检查、报错顺序不定。
 
 **这两条如何消解 8 条问题：**
 
@@ -97,7 +97,7 @@ enum LockReason: Equatable {
 - 双重 send 检查、报错顺序不定（MEDIUM）：平台/授权正交 + 单一决策，一处出 CTA。
 - 在线/离线只读矛盾（MEDIUM）：`bootstrapping` 是显式过渡态，带"去绑定"CTA，不再"锁着却提示去设置"。
 - 视图重算（LOW）：`decision` 自带渲染所需一切，视图不再 switch 枚举。
-- backend mode 散落（LOW）：mode 只在 engine 内影响派生，UI 不感知。
+- 历史 backend mode 分支散落（LOW）：direct 后端模式已移除；UI 不再感知后端模式。
 
 ## 5. 状态机
 

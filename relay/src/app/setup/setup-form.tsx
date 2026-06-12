@@ -18,9 +18,7 @@ import AlertTitle from "@mui/material/AlertTitle";
 const STEPS = ["欢迎", "管理员账户", "上游 Gemini", "Bearer Token", "完成"];
 
 const XCCONFIG_SNIPPET = `// AIChat 客户端 — 在 Config/Secrets.xcconfig 中设置
-AI_BACKEND_MODE = relay
-RELAY_BASE_URL = http:/$()/<your-relay-host>:8787
-RELAY_BEARER_TOKEN = <您在 .env 中配置的 RELAY_BEARER_TOKEN>`;
+AI_RELAY_BASE_URL = http:/$()/<your-relay-host>:8787`;
 
 export default function SetupForm() {
   const router = useRouter();

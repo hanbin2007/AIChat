@@ -355,9 +355,8 @@ final class ChatStore: ObservableObject {
     @Published private(set) var sendingConversationIDs: Set<UUID> = []
     @Published private(set) var transcribingConversationIDs: Set<UUID> = []
     @Published private(set) var conversationErrors: [UUID: String] = [:]
-    /// Live relay-backend connectivity indicator. Only mutated when the
-    /// active configuration runs in relay mode — `.direct` callers keep
-    /// it at `.unknown` and the UI layer hides the dot entirely.
+    /// Live relay-backend connectivity indicator. The relay-only client reports
+    /// request lifecycle transitions through this status handler.
     @Published private(set) var relayConnectionStatus: RelayConnectionStatus = .unknown
     /// Timestamp of the last successful relay round-trip. Surfaced in
     /// the status detail sheet for the tester.
@@ -545,10 +544,7 @@ final class ChatStore: ObservableObject {
                 self?.rebuildConversationListCaches()
             }
 
-        // Relay-mode only. In direct mode there is no handler attached
-        // and `relayConnectionStatus` stays at `.unknown` — the UI layer
-        // hides the indicator entirely by gating on `backendMode`.
-        if configuration.backendMode == .relay, let relayConnectionStatusHandler {
+        if let relayConnectionStatusHandler {
             relayConnectionStatusHandler.setOnChange { [weak self] status in
                 self?.applyRelayConnectionStatus(status)
             }
@@ -571,13 +567,7 @@ final class ChatStore: ObservableObject {
 
     /// Manually retries the latest assistant reply whose relay request
     /// failed. Called from the status detail sheet's "Retry" button.
-    /// Safe to call in any backend mode — in direct mode the detail
-    /// sheet never appears, so this is effectively relay-only.
     func retryLatestRelayFailure() async {
-        guard configuration.backendMode == .relay else {
-            return
-        }
-
         // Prefer the most recently updated conversation whose last
         // assistant reply is in the `.failed` state. Keeps scope tight
         // — we don't track a per-request identifier.
@@ -2576,10 +2566,8 @@ final class ChatStore: ObservableObject {
                 // the just-completed request. Server is the source of truth for
                 // deduction; the local cache would otherwise stay stale until
                 // the next launch.
-                if configuration.backendMode == .relay {
-                    Task { [weak self] in
-                        await self?.activationBilling.refreshActivationState()
-                    }
+                Task { [weak self] in
+                    await self?.activationBilling.refreshActivationState()
                 }
                 return
             } catch {
@@ -2905,12 +2893,12 @@ extension ChatStore {
         transcriptionService: AITranscriptionService? = PreviewAITranscriptionService(),
         completionFeedbackProvider: (any CompletionFeedbackProviding)? = nil,
         configuration: AppConfiguration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "preview-key",
             geminiModel: "gemini-3-flash-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
-            relayBaseURL: nil,
-            relayBearerToken: nil,
+            relayBaseURL: URL(string: "http://127.0.0.1:8787"),
+            relayBearerToken: "preview-token",
             relayStreamPath: "v1/chat/stream",
             appGroupIdentifier: nil
         )
@@ -2955,6 +2943,16 @@ extension ChatStore {
                 )
             }
         )
+        // The relay-only app derives send access from managed relay status, not
+        // offline activation. Preview/test stores that ask for an active
+        // activation state (the default) get matching managed relay access so
+        // the composer stays editable and send/retry paths run. Scenarios that
+        // explicitly pass `activationState: nil` stay read-only.
+        if activationState != nil {
+            store.activationBilling.setRelayAccountStatusForPreview(
+                ActivationBillingService.previewManagedRelayAccessStatus()
+            )
+        }
         store.rebuildConversationListCaches()
         store.hasLoadedConversations = true
         return store

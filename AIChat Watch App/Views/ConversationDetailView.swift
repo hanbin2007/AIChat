@@ -1555,8 +1555,7 @@ struct ConversationDetailView: View {
     }
 
     private var readOnlyActivationEntryTitle: String {
-        if chatStore.configuration.backendMode == .relay,
-           chatStore.hasManagedRelayAccess == false {
+        if chatStore.hasManagedRelayAccess == false {
             return "申请使用"
         }
 

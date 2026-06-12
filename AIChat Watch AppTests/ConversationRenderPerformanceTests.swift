@@ -113,7 +113,7 @@ final class ConversationRenderPerformanceTests: PerformanceTestCase {
         conversations: [ConversationThread]
     ) async throws -> ChatStore {
         let configuration = AppConfiguration(
-            backendMode: .direct,
+            backendMode: .relay,
             geminiAPIKey: "test",
             geminiModel: "gemini-3.1-pro-preview",
             geminiTranscriptionModel: "gemini-3-flash-preview",
