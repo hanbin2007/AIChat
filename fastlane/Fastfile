@@ -1,13 +1,15 @@
 require "open3"
+require "pathname"
 
 default_platform(:ios)
 
+PROJECT_ROOT = File.expand_path("..", __dir__)
 TESTFLIGHT_EXTERNAL_GROUP = ENV["TESTFLIGHT_EXTERNAL_GROUP"] || "PBTestGroup"
 INFO_PLISTS = [
   "Config/AIChatContainer-Info.plist",
   "Config/WatchApp-Info.plist",
   "Config/AIChatWatchWidget-Info.plist"
-].freeze
+].map { |path| File.join(PROJECT_ROOT, path) }.freeze
 
 def require_env!(name)
   value = ENV[name].to_s.strip
@@ -42,6 +44,7 @@ def preflight!(allow_dirty)
   key_path = require_env!("ASC_KEY_PATH")
   UI.user_error!("ASC_KEY_PATH does not exist: #{key_path}") unless File.file?(key_path)
   require_clean_git!(allow_dirty)
+  plist_build_versions
 end
 
 def release_notes(options)
@@ -50,6 +53,7 @@ def release_notes(options)
 
   file = options[:changelog_file].to_s.strip
   file = "TestFlight/WhatToTest.en.txt" if file.empty?
+  file = File.join(PROJECT_ROOT, file) unless Pathname.new(file).absolute?
   UI.user_error!("Missing changelog file: #{file}") unless File.file?(file)
 
   notes = File.read(file, encoding: "UTF-8").strip
@@ -123,12 +127,12 @@ platform :ios do
       set_plist_build_versions(build_number)
 
       build_app(
-        project: "AIChat.xcodeproj",
+        project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
         scheme: "AIChat",
         configuration: "Release",
         export_method: "app-store",
         clean: true,
-        output_directory: "build/fastlane",
+        output_directory: File.join(PROJECT_ROOT, "build/fastlane"),
         output_name: "AIChat-#{build_number}",
         silent: false
       )
