@@ -1,9 +1,15 @@
-# Xcode Cloud Setup
+# Xcode Cloud Setup (Retired For Releases)
 
-This file documents what you (a human) configured in App Store Connect →
-Xcode Cloud, so we have a snapshot to detect drift later. The actual
-workflow definitions live in ASC's Web UI; only the in-repo pieces
-(`ci_scripts/*`, `TestFlight/WhatToTest.*.txt`) are version-controlled.
+TestFlight publishing has moved to local manual fastlane. See
+`docs/manual-fastlane-release.md`.
+
+This file remains only as historical context for the old Xcode Cloud
+setup. Do not recreate the `Ship to TestFlight` workflow unless you are
+intentionally restoring cloud publishing.
+
+Repository backstop: `ci_scripts/ci_pre_xcodebuild.sh` now fails Xcode
+Cloud `archive` actions, so a forgotten ASC workflow cannot silently
+publish a build.
 
 ## One-time bootstrap
 
@@ -39,7 +45,7 @@ Pre-build script (`ci_post_clone.sh`) writes `Config/Secrets.xcconfig` from
 the env vars above. Build-number script (`ci_pre_xcodebuild.sh`) is a
 no-op for this workflow but harmless.
 
-### B. `Ship to TestFlight`
+### B. `Ship to TestFlight` (retired)
 
 | | |
 |---|---|
@@ -48,17 +54,5 @@ no-op for this workflow but harmless.
 | **Actions** | Archive `AIChat iOS App`, deployment preparation `TestFlight (External Testing)` |
 | **Post-actions** | TestFlight External Testing → group `PBTestGroup` |
 
-`ci_pre_xcodebuild.sh` aligns `CFBundleVersion` with `CI_BUILD_NUMBER` so
-each ship gets a unique build number with no commit-back loop. Changelog
-comes from `TestFlight/WhatToTest.<LOCALE>.txt` files in the repo —
-the `tf-ship` routine (see `.claude/routines/tf-ship.md`) writes these
-before pushing `main`.
-
-## Manual emergency-ship escape hatch
-
-`fastlane/Fastfile` stays in the repo as a manual-only escape hatch.
-If Xcode Cloud is unavailable and you need to ship a build immediately,
-run `fastlane beta changelog:"..."` from any Mac with Xcode + the ASC
-key. There is no automated path that invokes it — the old launchd
-`fastlane/nightly.sh` and its smee/webhook daemon are gone along with
-the local orchestrator.
+This workflow is retired. Local fastlane now owns build-number creation,
+archive, upload, and TestFlight distribution.

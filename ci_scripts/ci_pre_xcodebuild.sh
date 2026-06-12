@@ -1,13 +1,14 @@
 #!/bin/sh
 set -eu
 
-# Runs after dependency resolution, before xcodebuild. We use it to align
-# CFBundleVersion with Xcode Cloud's monotonic CI_BUILD_NUMBER so every
-# uploaded TestFlight build has a unique number without committing back
-# to the repo (which the old fastlane lane had to do).
+# Runs after dependency resolution, before xcodebuild.
 #
-# Only meaningful for archive workflows. PR/test workflows can run this
-# too — agvtool just no-ops if the value is unchanged.
+# TestFlight publishing is manual-only via fastlane. If an old Xcode Cloud
+# archive workflow still exists in App Store Connect, fail before upload so
+# the retired cloud release path cannot accidentally ship a build.
+#
+# For non-archive workflows, keep the old build-number alignment harmlessly
+# available for PR/build diagnostics.
 
 # Apple's test-without-building action runs on a fresh runner that never
 # had a clone, so CI_PRIMARY_REPOSITORY_PATH is unset there. Without this
@@ -20,6 +21,11 @@ if [ -z "${CI_PRIMARY_REPOSITORY_PATH:-}" ]; then
 fi
 
 cd "$CI_PRIMARY_REPOSITORY_PATH"
+
+if [ "${CI_XCODEBUILD_ACTION:-}" = "archive" ]; then
+  echo "ci_pre_xcodebuild: Xcode Cloud archive/upload is retired. Use docs/manual-fastlane-release.md."
+  exit 1
+fi
 
 if [ -z "${CI_BUILD_NUMBER:-}" ]; then
   echo "ci_pre_xcodebuild: CI_BUILD_NUMBER unset, skipping build-number bump"

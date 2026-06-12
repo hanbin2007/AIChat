@@ -5,24 +5,21 @@ is the prompt for one Claude Code Routine hosted on Anthropic
 infrastructure. There is no always-on daemon; every run is triggered
 by a GitHub webhook or a schedule.
 
-See `docs/xcode-cloud.md` for the Xcode Cloud side (build + TestFlight
-upload). This file covers the Routines side.
+See `docs/manual-fastlane-release.md` for the manual TestFlight release
+runbook. This file covers the feedback/autofix Routines side.
 
 ## Topology
 
-Two of the five prompts run as Claude Code Routines
-(cloud-hosted, event-triggered). The other three — `tf-react`,
-`tf-autofix`, and `tf-ship-finalize` — run as GitHub Actions workflows
-because they need events Routines does not expose: `issue_comment`
-(react) and `check_run.completed` (autofix, ship-finalize).
+One prompt runs as a Claude Code Routine (cloud-hosted,
+schedule-triggered). The other two — `tf-react` and `tf-autofix` — run
+as GitHub Actions workflows because they need events Routines does not
+expose: `issue_comment` (react) and `check_run.completed` (autofix).
 
 | File | Runner | Trigger | Purpose |
 |---|---|---|---|
 | `tf-triage.md` | Routine | Schedule: hourly (`0 * * * *` — Routines minimum) | Pull new TF feedback → file issues |
 | `tf-react.md`  | **GitHub Actions** (`.github/workflows/tf-react.yml`) | `issues.labeled` / `issues.closed` / `issue_comment.created` filtered by owner + `source:testflight-api` label | Process owner approvals / refinements |
 | `tf-autofix.md` | **GitHub Actions** (`.github/workflows/tf-autofix.yml`) | `issues.labeled` (`auto-fix-approved`) + `check_run.completed` on `autofix/issue-*` branches | Start, iterate, merge one fix |
-| `tf-ship.md` | Routine | GitHub `pull_request` closed + merged with PR label `auto-fix-ready` | Write WhatToTest → push main (no polling) |
-| `tf-ship-finalize.md` | **GitHub Actions** (`.github/workflows/tf-ship-finalize.yml`) | `check_run.completed` on `main` matching `Ship to TestFlight` | Close issues + clear `auto-fix-ready` after Xcode Cloud uploads |
 
 `_shared.md` is not a runnable prompt — it's prepended to every
 prompt above. The Routines deployment pastes it at the top of each
@@ -42,35 +39,29 @@ the routine file in their "Assemble prompt" step.
      full file contents (including the `BEGIN`/`END` lines) for the
      `ASC_PRIVATE_KEY` env var.
 
-3. **Find the Xcode Cloud product + ship workflow ids.** Once you've
-   set up Xcode Cloud (see `docs/xcode-cloud.md`), run these locally
-   or from a scratch routine:
+3. **Find the Xcode Cloud product id** if you keep Xcode Cloud PR checks
+   for autofix branches. Run this locally or from a scratch routine:
    ```bash
    export ASC_KEY_ID=... ASC_ISSUER_ID=... ASC_PRIVATE_KEY="$(cat AuthKey_*.p8)"
    python3 .claude/routines/scripts/asc.py get "/v1/ciProducts?filter[app]=6760607040" \
      | jq '.data[] | {id, name: .attributes.name}'
    # → note the product id
 
-   python3 .claude/routines/scripts/asc.py get "/v1/ciProducts/<PRODUCT_ID>/workflows" \
-     | jq '.data[] | {id, name: .attributes.name}'
-   # → note the "Ship to TestFlight" workflow id
    ```
 
-4. **Create the 2 routines** at claude.ai/code/routines (`tf-triage`,
-   `tf-ship`). For each:
+4. **Create the routine** at claude.ai/code/routines (`tf-triage`):
    - Paste `_shared.md` content at the top of the prompt.
    - Append the routine file's content below.
    - Set the trigger per the table above.
    - Attach the built-in GitHub MCP connector.
 
-   `tf-react`, `tf-autofix`, and `tf-ship-finalize` are **not** created
-   here — they run from `.github/workflows/`. Install the Claude GitHub App
-   on the repo by running `/install-github-app` from Claude Code;
-   that step also writes a `CLAUDE_CODE_OAUTH_TOKEN` repo secret
-   (no Anthropic API key needed — it bills against your Claude
-   subscription). The remaining secrets in step 5 must also be set
-   on the repo (Settings → Secrets and variables → Actions), not
-   just on the routines.
+   `tf-react` and `tf-autofix` are **not** created here — they run from
+   `.github/workflows/`. Install the Claude GitHub App on the repo by
+   running `/install-github-app` from Claude Code; that step also writes
+   a `CLAUDE_CODE_OAUTH_TOKEN` repo secret (no Anthropic API key needed
+   — it bills against your Claude subscription). The remaining secrets
+   in step 5 must also be set on the repo (Settings → Secrets and
+   variables → Actions), not just on the routine.
 
 5. **Configure env vars / secrets.** Mark all ASC vars secret in the
    Routines UI; in GitHub put them under repo Actions secrets.
@@ -81,7 +72,7 @@ the routine file in their "Assemble prompt" step.
    | `ASC_KEY_ID` | all routines + repo secrets | from step 2 |
    | `ASC_ISSUER_ID` | all routines + repo secrets | from step 2 |
    | `ASC_PRIVATE_KEY` | all routines + repo secrets | full `.p8` PEM contents |
-   | `ASC_PRODUCT_ID` | `tf-autofix` + `tf-ship-finalize` (repo secrets) | from step 3 |
+   | `ASC_PRODUCT_ID` | `tf-autofix` (repo secrets) | from step 3 |
 
    `ASC_APP_ID` (`6760607040`) is baked into `asc.py` as `DEFAULT_APP_ID`
    and does not need to be set as a secret. Only override via env var
@@ -108,7 +99,7 @@ Subcommands:
 | Command | Purpose | Used by |
 |---|---|---|
 | `asc.py jwt` | Print a fresh JWT (debug) | — |
-| `asc.py get <path>` | GET any ASC endpoint, print JSON | `tf-ship-finalize` (build-run lookup), ad-hoc |
+| `asc.py get <path>` | GET any ASC endpoint, print JSON | ad-hoc |
 | `asc.py feedback --since <iso>` | Normalized TF feedback list | `tf-triage` |
 | `asc.py build-log --run <id>` | Log download URLs for a failed run | `tf-autofix` (iterate) |
 
@@ -125,13 +116,13 @@ Claude Code Routines, on the current tier, supports `pull_request`,
   are observable, which is fine for autofix gating but kills the
   comment-driven react flow.
 - `check_run` / `workflow_run` / `check_suite` — the signal Xcode Cloud
-  emits when a build finishes. Without it, the autofix loop and
-  ship-finalize step have no native way to wake on cloud build outcomes.
+  emits when a build finishes. Without it, the autofix loop has no
+  native way to wake on cloud build outcomes.
 
 GitHub Actions receives all of these with sub-minute latency, so the
-prompts that need them (`tf-react`, `tf-autofix`, `tf-ship-finalize`)
-run there instead. Each Action assembles `_shared.md` + the routine
-prompt at job-start time and invokes
+prompts that need them (`tf-react`, `tf-autofix`) run there instead.
+Each Action assembles `_shared.md` + the routine prompt at job-start
+time and invokes
 [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action)
 with the pre-minted `CLAUDE_CODE_OAUTH_TOKEN`. No polling daemon,
 no label-toggle indirection.
@@ -140,14 +131,13 @@ no label-toggle indirection.
 
 The old `.claude/commands/tf-cycle.md` is now a pointer stub. Once
 these routines are live and have processed at least one full issue
-end-to-end (TF feedback → autofix → ship), you can:
+end-to-end (TF feedback → autofix), you can:
 
 1. `launchctl bootout gui/$(id -u)/com.user.aichat.gh-webhook` on
    the Mac (if it's still around)
 2. Delete the smee channel
-3. Keep `fastlane/Fastfile` + `fastlane/.env` locally as a manual
-   emergency-ship escape hatch. The `fastlane/nightly.sh` launchd
-   job can be removed entirely — nothing references it anymore.
+3. Use `fastlane/Fastfile` + `fastlane/.env` locally as the only
+   TestFlight publishing path.
 
 The `meta-state` issue replaces `tf-state.json`. The smee log
 (`/tmp/aichat-gh-events.log`) is no longer consulted by any routine

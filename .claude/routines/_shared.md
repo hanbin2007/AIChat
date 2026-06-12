@@ -22,9 +22,8 @@ the immediate symptom are not acceptable.
 2. **Cross-target audit.** AIChat has four targets: `AIChat Watch App`
    (watchOS primary), `AIChat iOS App` (companion), `AIChat Relay`
    (macOS), `Shared Licensing` (cross-platform). Any shared code
-   change is verified against every target that compiles it — the
-   Xcode Cloud `PR Build & Test` workflow builds all three app
-   targets. UI work must call out 46mm watch sizing + Digital Crown.
+   change is verified against every target that compiles it. UI work
+   must call out 46mm watch sizing + Digital Crown.
 3. **Concurrency / failure paths.** Call out `@MainActor` boundaries,
    `Task` lifetimes, async re-entrancy, cancellation, cold launch,
    low memory, bg→fg, iCloud latency, network timeout, empty input,
@@ -121,8 +120,8 @@ Everything else is derived from GitHub state directly — there is no
 | Autofix in progress | open PR on `autofix/issue-<N>` branch |
 | CI running | PR check `Xcode Cloud / PR Build & Test` status |
 | Attempts used | commit count on the `autofix/issue-<N>` branch |
-| Awaiting merge | PR label `auto-fix-ready` |
-| Fix shipped | issue label `shipped-to-testflight`, issue `closed` |
+| Awaiting release | merged PR / issue still open after autofix |
+| Fix shipped | manual fastlane release owner adds issue label `shipped-to-testflight` and closes issue |
 | Failed, needs human | issue label `auto-fix-failed` |
 
 ## Owner pings
@@ -138,7 +137,7 @@ no code blocks except in the final SUCCESS/FAILED report.
 - `needs-review` — awaiting owner approval
 - `needs-fix` — bug that should be fixed
 - `auto-fix-approved` — owner OK'd; on **issue**
-- `auto-fix-ready` — Xcode Cloud passed, awaiting merge; on **PR**
+- `auto-fix-ready` — deprecated; do not add to new PRs
 - `auto-fix-failed` — 3 attempts exhausted or cloud rejected; on **issue**
 - `shipped-to-testflight` — terminal success label
 - `meta-state` — the persistent-state issue (never close)

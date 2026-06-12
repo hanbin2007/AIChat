@@ -1,5 +1,5 @@
 ---
-description: Fix one approved TF issue end-to-end; iterates with Xcode Cloud
+description: Fix one approved TF issue end-to-end; iterates with Xcode Cloud checks, then waits for manual fastlane release
 runner: GitHub Actions (.github/workflows/tf-autofix.yml)
 triggers:
   - issues.labeled (auto-fix-approved)  — owner starts / re-starts
@@ -149,25 +149,18 @@ PR head — the merge is safe right now, no waiting. Don't use
 branch protection, so `--auto` would stall indefinitely. We already
 know the check is green from the trigger payload, so merge directly.
 
-1. On the **PR** (not the issue): add `auto-fix-ready` **before** the
-   merge. This is the label `tf-ship` filters on at
-   `pull_request closed+merged`; if we add it after the merge, the
-   webhook race could let tf-ship miss the PR.
-   ```bash
-   gh pr edit <PR> --repo hanbin2007/AIChat --add-label auto-fix-ready
-   ```
-2. Merge:
+1. Merge:
    ```bash
    gh pr merge <PR> --repo hanbin2007/AIChat --squash --delete-branch
    ```
    The repo has `delete_branch_on_merge=true`, so `--delete-branch`
    is belt-and-suspenders, but explicit is better.
-3. Comment on issue:
-   `@hanbin2007 Xcode Cloud ✅ → PR #<PR> merged.`
-4. Exit. The merged-PR webhook fires `tf-ship`, which writes
-   `WhatToTest.*.txt` and pushes main; Xcode Cloud's Ship workflow
-   then runs and `tf-ship-finalize.yml` closes this issue when it
-   reports success.
+2. Comment on issue:
+   `@hanbin2007 Xcode Cloud ✅ → PR #<PR> merged. It will ship with the next manual fastlane release.`
+3. Exit. TestFlight publishing is manual-only now: the next release is
+   shipped from a Mac with `bundle exec fastlane ios beta ...`. Leave the
+   source issue open until the manual release owner closes it or marks it
+   `shipped-to-testflight`.
 
 ## Fail mode
 
