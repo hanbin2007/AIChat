@@ -120,7 +120,7 @@ platform :ios do
       project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
       scheme: "AIChat",
       configuration: "Release",
-      export_method: "app-store-connect",
+      export_method: "app-store",
       export_options: {
         signingStyle: "automatic",
         teamID: APPLE_TEAM_ID
