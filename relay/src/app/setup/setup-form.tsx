@@ -1,144 +1,250 @@
 "use client";
-import * as React from "react";
-import { useRouter } from "next/navigation";
-import { Button, Card, CardContent, CardHeader, CardTitle, TextField, Banner, Icon } from "@/components/m3";
 
-const STEPS = ["欢迎", "管理员账户", "上游 Gemini", "Bearer Token", "完成"] as const;
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import { Stack } from "@/components/lib/stack";
+import Stepper from "@mui/material/Stepper";
+import Step from "@mui/material/Step";
+import StepLabel from "@mui/material/StepLabel";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
+
+const STEPS = ["欢迎", "管理员账户", "上游 Gemini", "Bearer Token", "完成"];
+
+const XCCONFIG_SNIPPET = `// AIChat 客户端 — 在 Config/Secrets.xcconfig 中设置
+AI_BACKEND_MODE = relay
+RELAY_BASE_URL = http:/$()/<your-relay-host>:8787
+RELAY_BEARER_TOKEN = <您在 .env 中配置的 RELAY_BEARER_TOKEN>`;
 
 export default function SetupForm() {
   const router = useRouter();
-  const [step, setStep] = React.useState(0);
-  const [username, setUsername] = React.useState("admin");
-  const [password, setPassword] = React.useState("");
-  const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
+  const [active, setActive] = useState(0);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function completeSetup() {
+  const passwordValid = password.length >= 8 && password === confirm;
+
+  function next() {
     setError(null);
-    setBusy(true);
-    const res = await fetch("/api/admin/setup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { message?: string };
-      setError(data.message ?? "初始化失败");
-      return;
+    setActive((s) => Math.min(s + 1, STEPS.length - 1));
+  }
+
+  function back() {
+    setError(null);
+    setActive((s) => Math.max(s - 1, 0));
+  }
+
+  async function submit() {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        setError(data.message ?? "初始化失败");
+        return;
+      }
+      const login = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!login.ok) {
+        setError("初始化成功，但自动登录失败，请手动登录");
+        return;
+      }
+      next();
+    } catch {
+      setError("网络错误，请重试");
+    } finally {
+      setLoading(false);
     }
-    setStep(4);
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-container-low p-6">
-      <Card variant="elevated" className="w-full max-w-2xl">
-        <CardHeader>
-          <CardTitle>AIChat Relay · 首次部署</CardTitle>
-          <div className="mt-4 flex items-center gap-2">
-            {STEPS.map((label, i) => (
-              <React.Fragment key={label}>
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-m3-label-m ${
-                    i === step
-                      ? "bg-primary text-on-primary"
-                      : i < step
-                        ? "bg-secondary-container text-on-secondary-container"
-                        : "bg-surface-container-high text-on-surface-variant"
-                  }`}
-                >
-                  {i < step ? <Icon name="check" size={16} /> : i + 1}
-                </div>
-                {i < STEPS.length - 1 && (
-                  <div className={`h-px flex-1 ${i < step ? "bg-primary" : "bg-outline-variant"}`} />
-                )}
-              </React.Fragment>
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        p: 3,
+      }}
+    >
+      <Card sx={{ width: "100%", maxWidth: 720 }}>
+        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+          <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
+            AIChat Relay 初始化
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            五步搞定首次部署
+          </Typography>
+
+          <Stepper activeStep={active} alternativeLabel sx={{ mb: 4 }}>
+            {STEPS.map((label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
             ))}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {step === 0 && (
-            <div>
-              <p className="text-m3-body-l text-on-surface">
-                欢迎使用 AIChat Relay。这是一台企业级中继网关，替 AIChat 客户端持有 Gemini API key、进行鉴权与额度管理。
-              </p>
-              <p className="mt-2 text-m3-body-m text-on-surface-variant">
-                接下来会花不到 1 分钟创建管理员账户、确认 Gemini 配置，并展示 Watch 客户端的接入片段。
-              </p>
-              <div className="mt-6 flex justify-end">
-                <Button onClick={() => setStep(1)} trailing="arrow_forward">开始</Button>
-              </div>
-            </div>
-          )}
-          {step === 1 && (
-            <div className="space-y-4">
-              <TextField label="管理员用户名" value={username} onChange={(e) => setUsername(e.target.value)} />
+          </Stepper>
+
+          {active === 0 ? (
+            <Stack spacing={2}>
+              <Typography>欢迎使用 AIChat Relay。本向导将协助您完成：</Typography>
+              <Box component="ul" sx={{ pl: 3, color: "text.secondary", m: 0 }}>
+                <li>创建管理员账户</li>
+                <li>确认上游 Gemini API Key 已就绪</li>
+                <li>确认客户端使用的 Bearer Token</li>
+              </Box>
+              <Button variant="contained" size="large" onClick={next}>
+                开始
+              </Button>
+            </Stack>
+          ) : null}
+
+          {active === 1 ? (
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                管理员账户
+              </Typography>
               <TextField
-                label="管理员密码"
+                label="用户名"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                fullWidth
+              />
+              <TextField
+                label="密码（至少 8 位）"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                supporting="至少 8 位；登录后可从 Settings 修改"
+                fullWidth
               />
-              {error && <Banner tone="error">{error}</Banner>}
-              <div className="flex justify-end gap-2">
-                <Button variant="text" onClick={() => setStep(0)}>上一步</Button>
+              <TextField
+                label="确认密码"
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                error={confirm.length > 0 && password !== confirm}
+                helperText={
+                  confirm.length > 0 && password !== confirm ? "两次输入不一致" : undefined
+                }
+                fullWidth
+              />
+              <Stack direction="row" spacing={1.5} justifyContent="flex-end">
+                <Button onClick={back}>上一步</Button>
                 <Button
-                  disabled={!username || password.length < 8}
-                  onClick={() => setStep(2)}
-                  trailing="arrow_forward"
+                  variant="contained"
+                  onClick={next}
+                  disabled={!username || !passwordValid}
                 >
                   下一步
                 </Button>
-              </div>
-            </div>
-          )}
-          {step === 2 && (
-            <div className="space-y-4">
-              <Banner tone="info" title="Gemini API key">
-                API key 需要通过环境变量 <code className="font-mono text-m3-label-l">GEMINI_API_KEY</code> 提供，
-                或启动前写入 <code className="font-mono text-m3-label-l">.env</code>。登录后可在 Settings 检查状态。
-              </Banner>
-              <div className="flex justify-between">
-                <Button variant="text" onClick={() => setStep(1)}>上一步</Button>
-                <Button onClick={() => setStep(3)} trailing="arrow_forward">下一步</Button>
-              </div>
-            </div>
-          )}
-          {step === 3 && (
-            <div className="space-y-4">
-              <Banner tone="info" title="Bearer Token">
-                启动时通过 <code className="font-mono text-m3-label-l">RELAY_BEARER_TOKEN</code> 提供主 bearer。
-                登录后可在 Settings → Auth & Tokens 签发额外 token（支持分 scope、限流、吊销）。
-              </Banner>
-              <div className="flex justify-between">
-                <Button variant="text" onClick={() => setStep(2)}>上一步</Button>
-                <Button onClick={completeSetup} loading={busy} trailing="check">
-                  创建并登录
+              </Stack>
+            </Stack>
+          ) : null}
+
+          {active === 2 ? (
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                上游 Gemini API Key
+              </Typography>
+              <Alert severity="info">
+                <AlertTitle>请在部署环境的 .env 中设置</AlertTitle>
+                <Typography
+                  variant="body2"
+                  component="code"
+                  sx={{ fontFamily: "var(--font-mono)", display: "block", mt: 1 }}
+                >
+                  GEMINI_API_KEY=your_gemini_api_key
+                </Typography>
+              </Alert>
+              <Stack direction="row" spacing={1.5} justifyContent="flex-end">
+                <Button onClick={back}>上一步</Button>
+                <Button variant="contained" onClick={next}>
+                  下一步
                 </Button>
-              </div>
-            </div>
-          )}
-          {step === 4 && (
-            <div className="space-y-4">
-              <Banner tone="success" title="部署完成">
-                管理员账户已建立。现在可以把 Watch 的 <code className="font-mono text-m3-label-l">AI_RELAY_BASE_URL</code> 指向本 relay。
-              </Banner>
-              <div className="rounded-m3-md bg-surface-container p-4 font-mono text-m3-body-s">
-                AI_BACKEND_MODE = relay<br />
-                AI_RELAY_BASE_URL = http:/$()/127.0.0.1:8787<br />
-                AI_RELAY_BEARER_TOKEN = &lt;RELAY_BEARER_TOKEN&gt;<br />
-                GEMINI_MODEL = gemini-3-flash-preview
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={() => router.push("/dashboard")} trailing="arrow_forward">
-                  进入 Dashboard
+              </Stack>
+            </Stack>
+          ) : null}
+
+          {active === 3 ? (
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Bearer Token
+              </Typography>
+              <Alert severity="info">
+                <AlertTitle>客户端 Bearer Token</AlertTitle>
+                请在部署环境的 .env 中设置{" "}
+                <Box component="code" sx={{ fontFamily: "var(--font-mono)" }}>
+                  RELAY_BEARER_TOKEN
+                </Box>
+                ；客户端将携带此值访问 /api/v1。点击「创建并登录」会创建管理员账户并自动登录。
+              </Alert>
+              {error ? <Alert severity="error">{error}</Alert> : null}
+              <Stack direction="row" spacing={1.5} justifyContent="flex-end">
+                <Button onClick={back} disabled={loading}>
+                  上一步
                 </Button>
-              </div>
-            </div>
-          )}
+                <Button variant="contained" onClick={submit} disabled={loading}>
+                  {loading ? "处理中…" : "创建并登录"}
+                </Button>
+              </Stack>
+            </Stack>
+          ) : null}
+
+          {active === 4 ? (
+            <Stack spacing={2}>
+              <Alert severity="success">
+                <AlertTitle>初始化完成</AlertTitle>
+                Relay 已就绪。下一步：把以下片段加入 AIChat 客户端的{" "}
+                <Box component="code" sx={{ fontFamily: "var(--font-mono)" }}>
+                  Config/Secrets.xcconfig
+                </Box>
+                。
+              </Alert>
+              <Box
+                component="pre"
+                sx={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "0.8125rem",
+                  bgcolor: "action.hover",
+                  p: 2,
+                  borderRadius: 1,
+                  m: 0,
+                  overflowX: "auto",
+                }}
+              >
+                {XCCONFIG_SNIPPET}
+              </Box>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => {
+                  router.push("/dashboard");
+                  router.refresh();
+                }}
+              >
+                进入控制台
+              </Button>
+            </Stack>
+          ) : null}
         </CardContent>
       </Card>
-    </div>
+    </Box>
   );
 }

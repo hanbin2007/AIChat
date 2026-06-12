@@ -44,7 +44,7 @@ describe("asc proxy", () => {
     const res = await ascGet(req, { params: Promise.resolve({ path: ["v1", "apps"] }) });
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [calledUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [calledUrl, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(calledUrl).toBe(
       "https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.foo&fields=name",
     );
@@ -91,7 +91,7 @@ describe("asc proxy", () => {
     });
     const res = await ascPost(req, { params: Promise.resolve({ path: ["v1", "apps"] }) });
     expect(res.status).toBe(201);
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const bodyBuf = init.body as ArrayBuffer;
     expect(Buffer.from(bodyBuf).toString("utf8")).toBe(payload);
   });

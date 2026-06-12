@@ -1,31 +1,43 @@
 import type { Metadata } from "next";
+import { Noto_Sans_SC, IBM_Plex_Mono } from "next/font/google";
+import InitColorSchemeScript from "@mui/material/InitColorSchemeScript";
 import "./globals.css";
-import { SnackbarProvider } from "@/components/m3/snackbar";
+import "katex/dist/katex.min.css";
+import { Providers } from "./providers";
+
+const body = Noto_Sans_SC({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-body",
+  display: "swap",
+});
+
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "AIChat Relay",
-  description: "Enterprise relay gateway for AIChat clients",
+  title: "AIChat Relay 控制台",
+  description: "AIChat 中继网关管理控制台",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-Hans" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&family=Roboto+Flex:opsz,wght@8..144,300..700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+    <html
+      lang="zh-Hans"
+      className={`${body.variable} ${mono.variable}`}
+      suppressHydrationWarning
+    >
+      <body>
+        <InitColorSchemeScript
+          attribute="class"
+          modeStorageKey="relay_theme"
+          defaultMode="system"
         />
-        <script
-          // Read stored theme before hydration to avoid flash.
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("relay_theme");var pref=t||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(pref==='dark')document.documentElement.classList.add('dark');}catch(e){}})();`,
-          }}
-        />
-      </head>
-      <body className="min-h-screen bg-surface text-on-surface">
-        <SnackbarProvider>{children}</SnackbarProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
