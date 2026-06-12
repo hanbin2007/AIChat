@@ -95,6 +95,26 @@ def archive_xcargs(build_number)
   ].join(" ")
 end
 
+def app_store_connect_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_filepath: ENV.fetch("ASC_KEY_PATH"),
+    duration: 1200,
+    in_house: false
+  )
+end
+
+def ensure_distribution_certificate!(api_key)
+  get_certificates(
+    api_key: api_key,
+    team_id: APPLE_TEAM_ID,
+    generate_apple_certs: true,
+    development: false,
+    output_path: File.join(PROJECT_ROOT, "build/fastlane/certificates")
+  )
+end
+
 platform :ios do
   desc "Verify local manual TestFlight release prerequisites without uploading"
   lane :preflight do |options|
@@ -108,13 +128,8 @@ platform :ios do
     changelog = release_notes(options)
     build_number = release_build_number(options)
 
-    app_store_connect_api_key(
-      key_id: ENV.fetch("ASC_KEY_ID"),
-      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
-      key_filepath: ENV.fetch("ASC_KEY_PATH"),
-      duration: 1200,
-      in_house: false
-    )
+    api_key = app_store_connect_key
+    ensure_distribution_certificate!(api_key)
 
     build_app(
       project: File.join(PROJECT_ROOT, "AIChat.xcodeproj"),
