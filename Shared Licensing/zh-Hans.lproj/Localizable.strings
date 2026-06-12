@@ -125,6 +125,7 @@
 "relay.failure.credits_exhausted" = "在线额度已用尽。";
 "relay.failure.key_paused" = "当前 relay key 已在服务端暂停。";
 "relay.failure.device_inactive" = "当前设备尚未完成在线激活。";
+"relay.failure.model_unavailable" = "当前 relay 授权不包含这个模型。";
 "relay.restore.no_grant" = "未找到可恢复的购买。";
 "relay.sync.share_failed" = "在线激活同步失败：%@";
 "relay.sync.joined" = "已同步配对设备的在线激活。";

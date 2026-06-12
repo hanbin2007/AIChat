@@ -1,17 +1,16 @@
 import Foundation
-import Observation
+import Combine
 
 /// Single @MainActor source of truth for entitlement state.
 /// Orchestrates RelayClient (network), EntitlementCache (persistence),
 /// and EntitlementEngine (pure functional core). No UI logic here.
 @MainActor
-@Observable
-final class EntitlementStore {
-    private(set) var state: EntitlementState
+final class EntitlementStore: ObservableObject {
+    @Published private(set) var state: EntitlementState
     private let client: RelayClient
     private let cache: EntitlementCache
     private let now: () -> Date
-    var platformConfigured: Bool
+    @Published var platformConfigured: Bool
 
     init(
         client: RelayClient,
@@ -45,6 +44,8 @@ final class EntitlementStore {
             apply(.relayRefreshed(snap, now: now()))
         } catch RelayError.unauthorized {
             apply(.relayRefreshFailed(hard: .revoked, now: now()))
+        } catch RelayError.notConfigured {
+            apply(.signedOut)
         } catch {
             apply(.relayRefreshFailed(hard: nil, now: now()))
         }

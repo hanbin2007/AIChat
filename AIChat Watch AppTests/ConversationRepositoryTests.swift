@@ -257,6 +257,21 @@ final class ConversationRepositoryTests: XCTestCase {
         let restartedConversations = try await restartedRepository.loadConversations()
         XCTAssertTrue(restartedConversations.isEmpty)
     }
+
+    func testLegacyJSONImportIgnoresRootEntitlementCache() async throws {
+        let rootURL = makeTemporaryRootURL()
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try Data(#"{"schemaVersion":1,"localSpend":0}"#.utf8).write(
+            to: rootURL.appendingPathComponent("entitlement-state.json", isDirectory: false),
+            options: [.atomic]
+        )
+
+        let repository = ConversationRepository(rootURL: rootURL)
+
+        let conversations = try await repository.loadConversations()
+
+        XCTAssertTrue(conversations.isEmpty)
+    }
 }
 
 private struct LegacyDeletedConversationTombstone: Codable {

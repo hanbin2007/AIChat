@@ -125,6 +125,7 @@
 "relay.failure.credits_exhausted" = "Your online credits are used up.";
 "relay.failure.key_paused" = "This relay key has been paused on the server.";
 "relay.failure.device_inactive" = "This device has not completed online activation.";
+"relay.failure.model_unavailable" = "This model is not included in the current relay entitlement.";
 "relay.restore.no_grant" = "No purchases were available to restore.";
 "relay.sync.share_failed" = "Failed to sync online activation: %@";
 "relay.sync.joined" = "Synced the paired device's online activation.";

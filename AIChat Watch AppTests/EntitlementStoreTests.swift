@@ -82,6 +82,31 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertEqual(store.decision.capability, .readOnly(.revoked))
     }
 
+    func testRefreshNotConfiguredClearsCachedAccount() async throws {
+        let snap = makeActiveSnapshot(creditBalance: 100)
+        let store = EntitlementStore(
+            client: FakeRelayClient(result: .success(snap)),
+            cache: EntitlementCache(directory: try tempDir()),
+            platformConfigured: true,
+            now: fixedNowClosure
+        )
+
+        await store.refresh()
+        XCTAssertEqual(store.decision.capability, .ready)
+
+        let restartedStore = EntitlementStore(
+            client: FakeRelayClient(result: .failure(.notConfigured)),
+            cache: EntitlementCache(directory: try tempDir()),
+            platformConfigured: true,
+            now: fixedNowClosure
+        )
+        restartedStore.apply(.relayRefreshed(snap, now: Self.fixedNow))
+
+        await restartedStore.refresh()
+
+        XCTAssertEqual(restartedStore.decision.capability, .readOnly(.noAccount))
+    }
+
     func testRecordSpendReducesEffectiveCredits() async throws {
         let snap = makeActiveSnapshot(creditBalance: 100)
         let store = EntitlementStore(

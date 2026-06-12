@@ -97,10 +97,43 @@ func makeManagedRelayAccessStatus(
     )
 }
 
+@MainActor
+func makeManagedRelaySnapshot(
+    creditBalance: Int = 1_000,
+    creditExpiresAt: Date? = nil,
+    modelIDs: [String] = [
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview"
+    ]
+) -> RelaySnapshot {
+    let status = makeManagedRelayAccessStatus(
+        creditBalance: creditBalance,
+        creditExpiresAt: creditExpiresAt
+    )
+    let rates = modelIDs.map { modelID in
+        RelayMeteringRate(
+            modelID: modelID,
+            inputCreditsPerMillion: 100,
+            inputCreditsPerMillionOver200k: nil,
+            outputCreditsPerMillion: 300,
+            outputCreditsPerMillionOver200k: nil,
+            audioInputCreditsPerMillion: nil,
+            searchSurchargeCredits: 14
+        )
+    }
+    return EntitlementEngine.project(
+        account: status.account!,
+        key: status.key!,
+        rates: rates
+    )
+}
+
 /// Seeds active managed relay access into a `ChatStore` so relay-mode tests can
 /// exercise generic create/send/retry behavior. Replaces the old offline
-/// `applyActivationCode` setup, which no longer grants send access in the
-/// relay-only app.
+/// `applyActivationCode` setup. Both the legacy billing facade and the new
+/// entitlement store are seeded so tests exercise the production consumption
+/// path while the old facade continues to back billing screens.
 @MainActor
 func seedManagedRelayAccess(
     into store: ChatStore,
@@ -111,6 +144,15 @@ func seedManagedRelayAccess(
         makeManagedRelayAccessStatus(
             creditBalance: creditBalance,
             creditExpiresAt: creditExpiresAt
+        )
+    )
+    store.entitlementStore.apply(
+        .relayRefreshed(
+            makeManagedRelaySnapshot(
+                creditBalance: creditBalance,
+                creditExpiresAt: creditExpiresAt
+            ),
+            now: Date()
         )
     )
 }

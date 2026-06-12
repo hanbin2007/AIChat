@@ -58,7 +58,7 @@ struct RelayAccountService {
             return nil
         }
 
-        guard let bearerToken = configuration.resolvedRelayBearerToken else {
+        guard let bearerToken = await storedBearerToken() else {
             return nil
         }
 
@@ -128,7 +128,7 @@ struct RelayAccountService {
             to: configuration.relayPurchasePrepareURL,
             method: "POST",
             body: payload,
-            bearerToken: configuration.resolvedRelayBearerToken
+            bearerToken: await storedBearerToken()
         )
     }
 
@@ -143,7 +143,7 @@ struct RelayAccountService {
                 to: configuration.relayPurchaseSubmitURL,
                 method: "POST",
                 body: payload,
-                bearerToken: configuration.resolvedRelayBearerToken
+                bearerToken: await storedBearerToken()
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -167,7 +167,7 @@ struct RelayAccountService {
                 to: configuration.relayPurchaseRestoreURL,
                 method: "POST",
                 body: payload,
-                bearerToken: configuration.resolvedRelayBearerToken
+                bearerToken: await storedBearerToken()
             )
             try await repository.saveStatus(response.status)
             return response.status
@@ -181,7 +181,7 @@ struct RelayAccountService {
     }
 
     func requestPairingToken() async throws -> RelayPairingTokenResponse {
-        guard let bearerToken = configuration.resolvedRelayBearerToken else {
+        guard let bearerToken = await storedBearerToken() else {
             throw RelayAPIError.missingConfiguration
         }
 
@@ -214,6 +214,10 @@ struct RelayAccountService {
             }
             throw RelayAPIError.emptyResponse
         }
+    }
+
+    private func storedBearerToken() async -> String? {
+        await repository.storedRelayKey() ?? configuration.resolvedRelayBearerToken
     }
 
     private func performJSONRequest<T: Decodable, Body: Encodable>(

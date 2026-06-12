@@ -26,6 +26,7 @@ final class EntitlementCacheTests: XCTestCase {
         var state = EntitlementState()
         state.schemaVersion = 999
         let data = try JSONEncoder().encode(state)
+        try FileManager.default.createDirectory(at: cache.cacheDirectoryURL, withIntermediateDirectories: true)
         try data.write(to: cache.fileURL)
         XCTAssertNil(cache.load())
     }

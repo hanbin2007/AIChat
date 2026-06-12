@@ -118,6 +118,10 @@ actor RelayAccessRepository {
         }
     }
 
+    func storedRelayKey() -> String? {
+        loadState()?.status?.key?.keyValue.nonEmptyTrimmed
+    }
+
     func saveStatus(_ status: RelayAccountStatusResponse) throws {
         let context = try makeContext()
         let record = try fetchRelayAccessStateRecord(in: context) ??

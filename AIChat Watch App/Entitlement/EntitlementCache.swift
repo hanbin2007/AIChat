@@ -4,12 +4,19 @@ import Foundation
 struct EntitlementCache {
     static let currentSchemaVersion = 1
     let directory: URL
-    var fileURL: URL { directory.appendingPathComponent("entitlement-state.json") }
+    var cacheDirectoryURL: URL {
+        directory.appendingPathComponent("entitlements", isDirectory: true)
+    }
+    var fileURL: URL { cacheDirectoryURL.appendingPathComponent("entitlement-state.json") }
 
     func save(_ state: EntitlementState) throws {
         var s = state
         s.schemaVersion = Self.currentSchemaVersion
         let data = try JSONEncoder().encode(s)
+        try FileManager.default.createDirectory(
+            at: cacheDirectoryURL,
+            withIntermediateDirectories: true
+        )
         try data.write(to: fileURL, options: .atomic)
     }
 
