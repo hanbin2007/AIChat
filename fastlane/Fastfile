@@ -106,6 +106,12 @@ def app_store_connect_key
 end
 
 def ensure_distribution_certificate!(api_key)
+  identities = sh("security find-identity -v -p codesigning", log: false)
+  if identities.include?("Apple Distribution:")
+    UI.message("Apple Distribution signing identity already installed; skipping certificate creation.")
+    return
+  end
+
   get_certificates(
     api_key: api_key,
     team_id: APPLE_TEAM_ID,
